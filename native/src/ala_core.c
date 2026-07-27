@@ -25,7 +25,10 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
                                            jlong set_clutch, jlong shift_up, jlong shift_down,
                                            jlong set_gear, jlong fixed_update,
                                            jlong throttle_field, jlong brake_field,
-                                           jlong clutch_field, jlong gear_field, jlong drs_toggle,
+                                           jlong actual_throttle_field, jlong actual_brake_field,
+                                           jlong clutch_field, jlong gear_field,
+                                           jlong drivetrain_fixed_update, jlong drivetrain_automatic_field,
+                                           jlong drs_toggle,
                                            jboolean enable_controls, jboolean enable_drs,
                                            jboolean disable_auto_gear) {
     (void) env;
@@ -43,8 +46,11 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
         .fixed_update_offset = (uintptr_t) fixed_update,
         .throttle_field_offset = (uintptr_t) throttle_field,
         .brake_field_offset = (uintptr_t) brake_field,
+        .actual_throttle_field_offset = (uintptr_t) actual_throttle_field,
+        .actual_brake_field_offset = (uintptr_t) actual_brake_field,
         .drivetrain_offset = 0x98,
-        .drivetrain_automatic_field_offset = 0xBC
+        .drivetrain_automatic_field_offset = drivetrain_automatic_field,
+        .drivetrain_fixed_update_offset = (uintptr_t) drivetrain_fixed_update
     };
 
     drs_hook_config_t drs_cfg = {

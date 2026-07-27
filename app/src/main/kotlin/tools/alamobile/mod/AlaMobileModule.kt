@@ -29,8 +29,10 @@ class AlaMobileModule : XposedModule() {
     }
 
     override fun onPackageReady(param: PackageReadyParam) {
-        Log.i(TAG, "Package ready: ${param.packageName}")
-        if (!param.isFirstPackage) return
+        Log.i(TAG, "Package ready: ${param.packageName}, isFirstPackage=${param.isFirstPackage}")
+        if (!param.isFirstPackage) {
+            Log.w(TAG, "Not the first package, continuing anyway")
+        }
 
         var context = getAppContext()
         Log.i(TAG, "Initial context: $context")
@@ -41,11 +43,8 @@ class AlaMobileModule : XposedModule() {
         }
 
         if (context != null && !isSupportedVersion(context)) {
-            Log.w(TAG, "Unsupported game version, skipping native hooks")
-            return
+            Log.w(TAG, "Unsupported game version, attempting hooks anyway for debugging")
         }
-
-        Log.i(TAG, "Target version supported; installing hooks")
 
         try {
             ShadowHook.init(
@@ -59,7 +58,14 @@ class AlaMobileModule : XposedModule() {
             return
         }
 
-        val settings = if (context != null) ModConfig.readFromTargetProcess(context) else null
+        val settings = if (context != null) {
+            try {
+                ModConfig.readFromTargetProcess(context)
+            } catch (e: Throwable) {
+                Log.e(TAG, "Failed to read config, using defaults", e)
+                null
+            }
+        } else null
 
         val enableControlReplacement = settings?.enableControlReplacement ?: true
         val enableAutoDrs = settings?.enableAutoDrs ?: true

@@ -9,6 +9,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import kotlin.math.max
 import tools.alamobile.mod.NativeBridge
 import tools.alamobile.mod.config.ModConfig
 
@@ -97,7 +98,8 @@ class OverlayManager(context: Context) {
         if (pedalView == null || gearView == null) {
             addGamingOverlays()
         }
-        overlaysVisible = true
+        // Make sure the underlying overlays are visible so the edit layer is
+        // meaningful, but do not change the usage-visible state.
         pedalView?.visibility = View.VISIBLE
         gearView?.visibility = View.VISIBLE
         editMode = !editMode
@@ -147,10 +149,13 @@ class OverlayManager(context: Context) {
         }
         root?.addView(pedalView, pedalParams)
 
-        addEditLayers()
+        addEditLayers(gearParams, pedalParams)
     }
 
-    private fun addEditLayers() {
+    private fun addEditLayers(
+        gearParams: FrameLayout.LayoutParams,
+        pedalParams: FrameLayout.LayoutParams
+    ) {
         val pedal = pedalView ?: return
         val gear = gearView ?: return
 
@@ -171,11 +176,11 @@ class OverlayManager(context: Context) {
         root?.addView(
             pedalEditView,
             FrameLayout.LayoutParams(
-                pedal.width,
-                pedal.height
+                pedalParams.width,
+                pedalParams.height
             ).apply {
-                leftMargin = (pedal.layoutParams as FrameLayout.LayoutParams).leftMargin
-                topMargin = (pedal.layoutParams as FrameLayout.LayoutParams).topMargin
+                leftMargin = pedalParams.leftMargin
+                topMargin = pedalParams.topMargin
             }
         )
 
@@ -194,11 +199,11 @@ class OverlayManager(context: Context) {
         root?.addView(
             gearEditView,
             FrameLayout.LayoutParams(
-                gear.width,
-                gear.height
+                gearParams.width,
+                gearParams.height
             ).apply {
-                leftMargin = (gear.layoutParams as FrameLayout.LayoutParams).leftMargin
-                topMargin = (gear.layoutParams as FrameLayout.LayoutParams).topMargin
+                leftMargin = gearParams.leftMargin
+                topMargin = gearParams.topMargin
             }
         )
     }

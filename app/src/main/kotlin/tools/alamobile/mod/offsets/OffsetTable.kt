@@ -26,15 +26,19 @@ object OffsetTable {
     // IRDSCarControllInput instance fields (relative to instance base)
     const val IRDS_CAR_CONTROLL_INPUT_THROTTLE_FIELD: Long = 0x174L // _inputTorque
     const val IRDS_CAR_CONTROLL_INPUT_BRAKE_FIELD: Long = 0x178L    // _brake
+    const val IRDS_CAR_CONTROLL_INPUT_ACTUAL_THROTTLE_FIELD: Long = 0x16CL // actualInputTorque
+    const val IRDS_CAR_CONTROLL_INPUT_ACTUAL_BRAKE_FIELD: Long = 0x170L    // actualBrake
     const val IRDS_CAR_CONTROLL_INPUT_CLUTCH_FIELD: Long = 0xD0L    // inputClutch
 
     // IRDSDrivetrain (TypeDefIndex: 337)
     const val IRDS_DRIVETRAIN_SET_GEAR: Long = 0x1A5D014L
     const val IRDS_DRIVETRAIN_SHIFT_UP: Long = 0x1A5F16CL
     const val IRDS_DRIVETRAIN_SHIFT_DOWN: Long = 0x1A5F2F0L
+    const val IRDS_DRIVETRAIN_FIXED_UPDATE: Long = 0x1A5DDD8L
 
     // IRDSDrivetrain instance fields
     const val IRDS_DRIVETRAIN_CURRENT_GEAR_FIELD: Long = 0xC0L
     const val IRDS_DRIVETRAIN_THROTTLE_FIELD: Long = 0xB4L
     const val IRDS_DRIVETRAIN_THROTTLE_INPUT_FIELD: Long = 0xB8L
+    const val IRDS_DRIVETRAIN_AUTOMATIC_FIELD: Long = 0xBCL
 }

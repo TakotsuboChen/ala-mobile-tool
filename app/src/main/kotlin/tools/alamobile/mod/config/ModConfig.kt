@@ -156,17 +156,21 @@ object ModConfig {
     /**
      * Saves a single overlay position into the existing config without
      * touching other keys. Safe to call from the target game process.
+     *
+     * If the shared directory cannot be created (e.g. missing storage
+     * permission on Android 10+), the save is silently skipped so the
+     * overlay editor does not crash the game.
      */
     fun saveOverlayPosition(context: Context, key: String, position: OverlayPosition) {
-        val file = getConfigFile(context)
-        val json = try {
-            if (file.exists()) JSONObject(file.readText()) else JSONObject()
+        try {
+            val file = getConfigFile(context)
+            file.parentFile?.mkdirs()
+            val json = if (file.exists()) JSONObject(file.readText()) else JSONObject()
+            json.put(key, position.toJson())
+            file.writeText(json.toString(2))
         } catch (_: Throwable) {
-            JSONObject()
+            // Storage may not be writable from the target game process; ignore.
         }
-        json.put(key, position.toJson())
-        getSharedConfigDir(context).mkdirs()
-        file.writeText(json.toString(2))
     }
 
     /**

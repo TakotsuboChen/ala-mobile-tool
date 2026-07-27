@@ -4,20 +4,18 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Rect
+import android.graphics.RectF
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.widget.FrameLayout
+import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 
 /**
  * Touch layer used to reposition/resize a target overlay view.
- *
- * Gestures:
- * - Drag inside the view body: move the view.
- * - Drag a corner circle: resize freely (width/height independent).
- * - Long-press without moving: reset to the default position and size.
  */
 class OverlayEditView(
     context: Context,
@@ -44,7 +42,6 @@ class OverlayEditView(
     private val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
 
     private var mode = Mode.NONE
-    private var activePointerId = MotionEvent.INVALID_POINTER_ID
     private var lastX = 0f
     private var lastY = 0f
     private var startLeft = 0
@@ -64,9 +61,6 @@ class OverlayEditView(
         }
     }
 
-    private val parent: android.view.ViewGroup?
-        get() = target.parent as? android.view.ViewGroup
-
     init {
         setBackgroundColor(Color.argb(40, 0, 0, 0))
         isClickable = true
@@ -74,18 +68,19 @@ class OverlayEditView(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        val rect = Rect().apply { target.getHitRect(this) }
+        val rect = RectF(0f, 0f, width.toFloat(), height.toFloat())
         canvas.drawRect(rect, borderPaint)
+
         val cornerSize = 24f
-        canvas.drawCircle(rect.left.toFloat(), rect.top.toFloat(), cornerSize, cornerPaint)
-        canvas.drawCircle(rect.right.toFloat(), rect.top.toFloat(), cornerSize, cornerPaint)
-        canvas.drawCircle(rect.left.toFloat(), rect.bottom.toFloat(), cornerSize, cornerPaint)
-        canvas.drawCircle(rect.right.toFloat(), rect.bottom.toFloat(), cornerSize, cornerPaint)
+        canvas.drawCircle(rect.left, rect.top, cornerSize, cornerPaint)
+        canvas.drawCircle(rect.right, rect.top, cornerSize, cornerPaint)
+        canvas.drawCircle(rect.left, rect.bottom, cornerSize, cornerPaint)
+        canvas.drawCircle(rect.right, rect.bottom, cornerSize, cornerPaint)
 
         canvas.drawText(
             "拖拽移动 · 拖角落缩放 · 长按重置",
             width / 2f,
-            rect.top - hintPaint.textSize,
+            hintPaint.textSize + 8f,
             hintPaint
         )
     }
@@ -94,19 +89,14 @@ class OverlayEditView(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 mode = detectMode(event.x, event.y)
-                activePointerId = event.getPointerId(0)
                 lastX = event.x
                 lastY = event.y
                 startTouchX = event.x
                 startTouchY = event.y
                 startWidth = target.width
                 startHeight = target.height
-                val loc = intArrayOf(0, 0)
-                target.getLocationOnScreen(loc)
-                val parentLoc = intArrayOf(0, 0)
-                (parent as? View)?.getLocationOnScreen(parentLoc)
-                startLeft = loc[0] - parentLoc[0]
-                startTop = loc[1] - parentLoc[1]
+                startLeft = (target.layoutParams as? FrameLayout.LayoutParams)?.leftMargin ?: 0
+                startTop = (target.layoutParams as? FrameLayout.LayoutParams)?.topMargin ?: 0
                 longPressHandled = false
 
                 longPressHandler.postDelayed(longPressRunnable, 500)
@@ -115,8 +105,9 @@ class OverlayEditView(
 
             MotionEvent.ACTION_MOVE -> {
                 if (mode == Mode.NONE) {
-                    if (kotlin.math.abs(event.x - startTouchX) > touchSlop ||
-                        kotlin.math.abs(event.y - startTouchY) > touchSlop) {
+                    if (abs(event.x - startTouchX) > touchSlop ||
+                        abs(event.y - startTouchY) > touchSlop
+                    ) {
                         mode = Mode.MOVE
                         longPressHandler.removeCallbacks(longPressRunnable)
                     }
@@ -138,18 +129,6 @@ class OverlayEditView(
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 longPressHandler.removeCallbacks(longPressRunnable)
-                activePointerId = MotionEvent.INVALID_POINTER_ID
-                val wasClick = mode == Mode.NONE && !longPressHandled
-                if (wasClick) {
-                    parent?.let { p ->
-                        for (i in 0 until p.childCount) {
-                            val child = p.getChildAt(i)
-                            if (child is OverlayEditView && child != this) {
-                                child.visibility = if (child.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-                            }
-                        }
-                    }
-                }
                 mode = Mode.NONE
                 return true
             }
@@ -158,14 +137,14 @@ class OverlayEditView(
     }
 
     private fun detectMode(x: Float, y: Float): Mode {
-        val rect = Rect().apply { target.getHitRect(this) }
-        val cornerRadius = 48f
+        val cornerRadius = 64f
+        val w = width.toFloat()
+        val h = height.toFloat()
 
-        // Check corners first
-        if (distance(x, y, rect.right.toFloat(), rect.bottom.toFloat()) < cornerRadius) return Mode.RESIZE_BOTTOM_RIGHT
-        if (distance(x, y, rect.left.toFloat(), rect.bottom.toFloat()) < cornerRadius) return Mode.RESIZE_BOTTOM_LEFT
-        if (distance(x, y, rect.right.toFloat(), rect.top.toFloat()) < cornerRadius) return Mode.RESIZE_TOP_RIGHT
-        if (distance(x, y, rect.left.toFloat(), rect.top.toFloat()) < cornerRadius) return Mode.RESIZE_TOP_LEFT
+        if (hypot(x - w, y - h) < cornerRadius) return Mode.RESIZE_BOTTOM_RIGHT
+        if (hypot(x, y - h) < cornerRadius) return Mode.RESIZE_BOTTOM_LEFT
+        if (hypot(x - w, y) < cornerRadius) return Mode.RESIZE_TOP_RIGHT
+        if (hypot(x, y) < cornerRadius) return Mode.RESIZE_TOP_LEFT
 
         return Mode.NONE
     }
@@ -173,32 +152,30 @@ class OverlayEditView(
     private fun handleMove(event: MotionEvent) {
         val dx = event.x - lastX
         val dy = event.y - lastY
-        val loc = intArrayOf(0, 0)
-        target.getLocationOnScreen(loc)
-        val parentLoc = intArrayOf(0, 0)
-        (parent as? View)?.getLocationOnScreen(parentLoc)
-        val left = loc[0] - parentLoc[0] + dx.toInt()
-        val top = loc[1] - parentLoc[1] + dy.toInt()
-        updateTarget(left, top, target.width, target.height)
+        val params = target.layoutParams as? FrameLayout.LayoutParams ?: return
+        params.leftMargin = max(0, params.leftMargin + dx.toInt())
+        params.topMargin = max(0, params.topMargin + dy.toInt())
+        target.layoutParams = params
+        onChanged?.invoke(params.leftMargin, params.topMargin, params.width, params.height)
     }
 
     private fun handleResizeBottomRight(event: MotionEvent) {
-        val newWidth = max(minWidth, (event.x - startLeft).toInt())
-        val newHeight = max(minHeight, (event.y - startTop).toInt())
+        val newWidth = max(minWidth, (event.x).toInt())
+        val newHeight = max(minHeight, (event.y).toInt())
         updateTarget(startLeft, startTop, newWidth, newHeight)
     }
 
     private fun handleResizeBottomLeft(event: MotionEvent) {
         val right = startLeft + startWidth
         val newWidth = max(minWidth, (right - event.x).toInt())
-        val newHeight = max(minHeight, (event.y - startTop).toInt())
+        val newHeight = max(minHeight, (event.y).toInt())
         val newLeft = right - newWidth
         updateTarget(newLeft, startTop, newWidth, newHeight)
     }
 
     private fun handleResizeTopRight(event: MotionEvent) {
         val bottom = startTop + startHeight
-        val newWidth = max(minWidth, (event.x - startLeft).toInt())
+        val newWidth = max(minWidth, (event.x).toInt())
         val newHeight = max(minHeight, (bottom - event.y).toInt())
         val newTop = bottom - newHeight
         updateTarget(startLeft, newTop, newWidth, newHeight)
@@ -216,13 +193,12 @@ class OverlayEditView(
 
     private fun updateTarget(left: Int, top: Int, width: Int, height: Int) {
         val params = target.layoutParams as? FrameLayout.LayoutParams ?: return
-        params.width = width
-        params.height = height
+        params.width = max(minWidth, width)
+        params.height = max(minHeight, height)
         params.leftMargin = max(0, left)
         params.topMargin = max(0, top)
         target.layoutParams = params
-        onChanged?.invoke(params.leftMargin, params.topMargin, width, height)
-        invalidate()
+        onChanged?.invoke(params.leftMargin, params.topMargin, params.width, params.height)
     }
 
     private fun resetPosition() {
@@ -236,11 +212,6 @@ class OverlayEditView(
         params.height = default.heightPx(context, screenHeight)
         target.layoutParams = params
         onChanged?.invoke(params.leftMargin, params.topMargin, params.width, params.height)
-        invalidate()
-    }
-
-    private fun distance(x1: Float, y1: Float, x2: Float, y2: Float): Float {
-        return kotlin.math.hypot(x1 - x2, y1 - y2)
     }
 
     private enum class Mode {

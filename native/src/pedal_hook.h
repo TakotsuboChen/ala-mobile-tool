@@ -19,6 +19,11 @@ typedef struct {
     uintptr_t throttle_field_offset;
     uintptr_t brake_field_offset;
 
+    // Additional fields that the original game may use as the authoritative
+    // input after FixedUpdate has processed the public _inputTorque/_brake.
+    uintptr_t actual_throttle_field_offset;
+    uintptr_t actual_brake_field_offset;
+
     // Gear shifting method offsets.
     uintptr_t shift_up_offset;
     uintptr_t shift_down_offset;
@@ -32,6 +37,9 @@ typedef struct {
     // Drivetrain field offsets.
     uintptr_t drivetrain_offset;
     uintptr_t drivetrain_automatic_field_offset;
+
+    // IRDSDrivetrain::FixedUpdate is hooked to keep automatic=false reliably.
+    uintptr_t drivetrain_fixed_update_offset;
 } pedal_hook_config_t;
 
 bool pedal_install_hooks(const pedal_hook_config_t *config);
