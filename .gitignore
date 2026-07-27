@@ -8,6 +8,7 @@
 build/
 */build/
 captures/
+.kotlin/
 
 # Android Studio / IntelliJ
 .idea/

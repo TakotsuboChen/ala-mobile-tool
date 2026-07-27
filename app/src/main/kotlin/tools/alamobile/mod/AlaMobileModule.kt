@@ -36,7 +36,6 @@ class AlaMobileModule : XposedModule() {
 
         log(Log.INFO, TAG, "Target version supported; installing hooks")
 
-        val context = getAppContext()
         if (context != null) {
             val overlayManager = OverlayManager(context)
             overlayManager.showOverlays()

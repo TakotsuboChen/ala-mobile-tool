@@ -15,16 +15,17 @@ import tools.alamobile.mod.NativeBridge
  */
 class OverlayManager(context: Context) {
 
-    private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    private val appContext = context.applicationContext
+    private val windowManager = appContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val overlayViews = mutableListOf<View>()
 
     fun showOverlays() {
         if (overlayViews.isNotEmpty()) return
 
-        val pedal = PedalOverlayView(windowManager.context)
+        val pedal = PedalOverlayView(appContext)
         addOverlay(pedal, Gravity.START or Gravity.CENTER_VERTICAL, 300, 600)
 
-        val gearShift = GearShiftView(windowManager.context)
+        val gearShift = GearShiftView(appContext)
         addOverlay(gearShift, Gravity.END or Gravity.CENTER_VERTICAL, 200, 400)
 
         NativeBridge.setThrottle(0f)
