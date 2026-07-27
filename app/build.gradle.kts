@@ -39,6 +39,24 @@ android {
         compose = true
     }
 
+    externalNativeBuild {
+        cmake {
+            path = file("${project.rootDir}/native/CMakeLists.txt")
+            version = "3.22.1+"
+        }
+    }
+
+    defaultConfig {
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
+        externalNativeBuild {
+            cmake {
+                arguments += listOf("-DANDROID_STL=c++_static")
+            }
+        }
+    }
+
     packaging {
         resources {
             merges += "META-INF/xposed/*"
