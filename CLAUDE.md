@@ -121,7 +121,8 @@ Two areas are explicitly designated for human contribution during implementation
 
 - M1: Module skeleton, LSPosed entry, native build, and overlay scaffolding — done.
 - M2: ByteDance ShadowHook integration and real inline hooks for throttle/brake/DRS — done.
-- M3: Configurable settings UI, SharedPreferences persistence, pedal mapping curve, and install/logcat script — done, pending real-device verification.
+- M3: Configurable MIUIX settings UI, JSON config, pedal mapping curve, and release packaging — done.
+- M4: Overlay display and pedal input verification in-game — done. Shift hooks and DRS auto logic remain pending.
 
 ## Notes for Future Changes
 
