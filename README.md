@@ -1,6 +1,6 @@
 # Ala Mobile Tool
 
-一个开源的 LSPosed 模块，用于扩展 **Ala Mobile Formula 1**（包名 `com.Vince.AlamobileFormula`）的操控与 DRS/主动空力体验。
+一个开源的 LSPosed 模块，用于扩展 **Ala Mobile**（包名 `com.Vince.AlamobileFormula`）的操控与 DRS/主动空力体验。
 
 > ⚠️ **仅供个人学习与研究使用**。本模块会修改游戏的运行时行为，在多人/在线模式下使用可能违反服务条款并导致封号。请仅在单机模式下使用。
 
@@ -10,13 +10,13 @@
 - **自动 DRS / 主动空力**：过线或在 DRS 区时自动开启 DRS/主动空力，无需手动操作。
 - **miuix 配置界面**：基于 Jetpack Compose + miuix 的现代设置页。
 
-## 支持版本
+## 已测试版本
 
-| 游戏版本 | versionCode | 架构 |
+| 版本 | versionCode | 架构 |
 |---|---|---|
-| Ala Mobile 8.0.0 | 200142 | arm64-v8a |
+| 8.0.0 | 200142 | arm64-v8a |
 
-IL2CPP 方法地址随版本变化，非 8.0.0 版本不会加载原生 hook。
+其他版本请自行测试。IL2CPP 方法地址随版本变化，非 8.0.0 版本可能无法正确加载原生 hook。
 
 ## 技术栈
 
