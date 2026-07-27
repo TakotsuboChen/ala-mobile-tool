@@ -1,55 +1,74 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-07-27T23:03:00+08:00 · Git HEAD: 105b8d0
+生成时间: 2026-07-27T23:25:00+08:00 · Git HEAD: 105b8d0 之后未提交
 恢复方式: 对 Claude 说"读一下 HANDOFF.md，按头部 Git HEAD 复核本文件"。
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待。
 
 ## 1. 当前目标
 
-调整项目文档与仓库元数据，避免使用完整游戏名称，并将版本描述改为"已测试版本"而非"支持版本"，降低法律/合规风险。
+推进 M1：生成 IL2CPP dump 并填充 `OffsetTable.kt`；补齐 overlay 层和 native hook 骨架。
 
 ## 2. 已验证状态 — 工作实际停在哪
 
-- [V] 仓库描述已改为通用表述：`gh repo edit` 后当前描述为 "LSPosed module for Ala Mobile"
-- [V] README.md 中游戏名称已简化为 "Ala Mobile"（不再使用 "Ala Mobile Formula 1"）
-- [V] CLAUDE.md 中游戏名称已简化为 "Ala Mobile"
-- [V] 当前工作树存在未提交变更：README.md、CLAUDE.md
-- [?] 版本表格仍显示为"支持版本"，用户意图改为"已测试版本"并在 README 中说明"其他版本请自行测试"，但尚未执行
+- [V] IL2CPP dump 已生成: `il2cpp-dumps/v8.0.0/dump.cs`（689k 行，24 MB）。
+- [V] `.gitignore` 已更新，排除 `il2cpp-dumps/` 和 `.tools/`。
+- [V] `OffsetTable.kt` 已根据 dump 填充关键方法/字段偏移。
+- [V] `NativeBridge.kt` 和 `ala_core.c` 的 JNI 接口已对齐新的 offset 表。
+- [V] `AlaMobileModule.kt` 已接入 `OverlayManager`，在目标版本匹配时显示 overlay。
+- [V] `PedalOverlayView.kt`、`GearShiftView.kt`、`OverlayManager.kt` 已创建。
+- [V] `pedal_hook.h/c`、`drs_hook.h/c` 已创建并带有桩实现。
+- [?] 本地 Gradle 构建仍失败，原因见下方。
 
 ### 测试/build 输出 tail（本次交接 run 的真实输出）
 
 ```
-无构建/测试命令可运行。本次仅涉及文档和 GitHub 元数据修改。
+FAILURE: Build failed with an exception.
+
+* Where:
+Build file '/home/takotsubo/projects/ala-mobile-tool/build.gradle.kts' line: 1
+
+* What went wrong:
+Plugin [id: 'com.android.application', version: '8.6.1', apply: false] was not found in any of the following sources:
+...
 ```
+
+进一步诊断：
+
+```
+curl: (35) TLS connect error: error:0A000126:SSL routines::unexpected eof while reading
+```
+
+`dl.google.com` 在本环境无法完成 TLS 握手，导致无法下载 Android Gradle Plugin。Maven Central 可正常访问。
 
 ## 3. 决策与理由
 
-- GitHub 仓库 About 保持通用描述，不写版本号 [V]——避免用户误以为只支持特定版本，也避免后续每版本更新描述。
-- README 中版本说明改为"已测试版本"并附加"其他版本请自行测试" [?]——用户已明确此意图，但文件尚未更新；这是为了不承诺对未测试版本的兼容性。
-- 去除"非 8.0.0 版本不会加载原生 hook"的绝对化表述 [?]——用户希望改为更中性的"可能无法正确加载"，避免绝对化。
+- 选择 **轮询调用** 策略实现自动 DRS [?]——`drsToggle()` 是无参切换方法，轮询实现更简单，后续可改为 hook 调用点。
+- `OffsetTable.kt` 中使用十六进制长整型字面量（如 `0x1A511F4L`）存储 method/file offset [V]——与 Il2CppDumper 的 "Offset" 字段一致，可直接传给 native hook。
+- `ActiveAeroWing` 在 dump 中是 struct 而非 MonoBehaviour，原 `ACTIVE_AERO_WING_SET_ACTIVE` 等偏移不存在；已从 offset 表和 JNI 接口中移除 [V]。
+- Overlay 使用 raw Android Canvas View [V]——避免 Compose 与 Unity SurfaceView 叠加问题。
 
 ## 4. 失败的尝试 — 不要再试
 
-- 在 GitHub About 里写 "tested on version 8.0.0" [V]——用户反馈 About 应保持泛化，版本信息应仅保留在 README 中。不要再在 About 里写版本。
+- 本地运行 `./gradlew :app:assembleDebug` [V]——因 `dl.google.com` TLS 握手失败，AGP 无法下载。在环境修复前不要再试。
+- 使用 `Il2CppDumper-net8-linux-x64.zip` [V]——该 release 不存在，正确文件名是 `Il2CppDumper-net6-v6.7.46.zip`。
 
 ## 5. 已知坑
 
-- 当前 README 的版本说明仍可能与用户最新意图不一致 [?]——需要把"支持版本"改为"已测试版本"，并添加"其他版本请自行测试"说明。
-- 本地构建不可用，CI 构建也可能因同样网络问题失败 [?]——需在有外部网络的环境中验证 GitHub Actions（继承自旧 handoff）。
-- IL2CPP 方法地址随版本变化；当前只测试 Ala Mobile 8.0.0 (versionCode 200142) [V]——`VersionGate.kt` 会校验版本，不匹配时不加载 native hook。
+- `dl.google.com` 在本环境 TLS 握手失败，Gradle 无法下载 AGP [V]——需要检查本机 TLS/代理/DNS 配置，或换用能访问 Google Maven 的机器构建。
+- 当前 native hook 仍是 stub，ShadowHook 库尚未引入 [V]——`native/CMakeLists.txt` 已支持可选预编译 `libshadowhook.so`。
+- `PedalOverlayView.updateValues()` 目前是纯占位实现，踏板映射曲线需要调试 [V]。
+- `AlaMobileModule` 中 hard-coded 开启了 control replacement 和 auto DRS [V]——后续应从 SharedPreferences 读取开关状态。
 
 ## 6. 下一步（有序）
 
-1. 按用户意图更新 README.md 版本表格：表头改为"已测试版本"，正文去掉"Ala Mobile"重复名称，版本说明改为"其他版本请自行测试"。
-2. 去除或软化"非 8.0.0 版本不会加载原生 hook"的绝对化表述。
-3. 提交 README.md 和 CLAUDE.md 的变更。
-4. 继续 M0/M1 目标：生成 IL2CPP dump 并填充 `OffsetTable.kt`。
+1. 修复 `dl.google.com` TLS 问题或换环境验证 Gradle 构建。
+2. 引入 ShadowHook（源码/submodule/预编译 so），在 `pedal_hook.c` 中实现 inline hook。
+3. 完善 `PedalOverlayView.updateValues()` 的踏板映射与死区逻辑。
+4. 在 `drs_hook.c` 轮询线程中读取 telemetry 并调用 `drsToggle()`。
+5. `ConfigActivity` 写入 SharedPreferences，`AlaMobileModule` 读取实际开关状态。
+6. 在 LSPosed 中安装并验证模块。
 
 ## 7. 留给用户的开放问题
 
-- README 中版本说明的具体措辞是否接受如下？
-  > | 已测试版本 | versionCode | 架构 |
-  > |---|---|---|
-  > | 8.0.0 | 200142 | arm64-v8a |
-  >
-  > 其他版本请自行测试。IL2CPP 方法地址随版本变化，非 8.0.0 版本可能无法正确加载原生 hook。
+- 你是否接受当前“轮询 + 主动调用 drsToggle()”的 DRS 策略？如果希望改为 hook `drsToggle()` 调用点，需要进一步分析 dump 中调用该方法的代码位置。
+- 双区踏板尺寸和位置（当前为左侧 300x600、右侧 200x400，屏幕纵向居中）是否需要调整？

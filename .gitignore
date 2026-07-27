@@ -19,8 +19,10 @@ local.properties
 externalNativeBuild/
 
 # IL2Cpp dump artifacts (optional, keep only offsets)
-il2cpp-dumps/**/*.cs
-il2cpp-dumps/**/*.json
+il2cpp-dumps/
+
+# Local tooling
+.tools/
 
 # OS
 .DS_Store

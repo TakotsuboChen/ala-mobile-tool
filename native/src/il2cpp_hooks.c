@@ -1,4 +1,6 @@
 #include "il2cpp_hooks.h"
+#include "pedal_hook.h"
+#include "drs_hook.h"
 #include <android/log.h>
 
 #define LOG_TAG "AlaMobileTool"
@@ -12,4 +14,6 @@ bool install_hooks(void) {
 
 void uninstall_hooks(void) {
     LOGI("uninstall_hooks called (stub implementation)");
+    pedal_uninstall_hooks();
+    drs_uninstall_hooks();
 }

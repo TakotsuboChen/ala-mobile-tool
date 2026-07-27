@@ -1,5 +1,7 @@
 package tools.alamobile.mod
 
+import tools.alamobile.mod.offsets.OffsetTable
+
 object NativeBridge {
 
     init {
@@ -8,11 +10,21 @@ object NativeBridge {
 
     @JvmStatic
     external fun init(
-        throttleSetter: Long,
-        brakeSetter: Long,
-        gearSetter: Long,
-        drsSetter: Long,
-        drsGetter: Long,
+        // Pedal / control replacement offsets
+        setThrottleInput: Long,
+        setBrakeInput: Long,
+        setClutchInput: Long,
+        shiftUpOffset: Long,
+        shiftDownOffset: Long,
+        setGearOffset: Long,
+        throttleField: Long,
+        brakeField: Long,
+        clutchField: Long,
+        drivetrainGearField: Long,
+
+        // DRS offsets
+        drsToggle: Long,
+
         enableControlReplacement: Boolean,
         enableAutoDRS: Boolean
     )
@@ -24,7 +36,7 @@ object NativeBridge {
     external fun setBrake(value: Float)
 
     @JvmStatic
-    external fun setGear(gear: Int)
+    external fun setClutch(value: Float)
 
     @JvmStatic
     external fun shiftUp()
@@ -33,5 +45,30 @@ object NativeBridge {
     external fun shiftDown()
 
     @JvmStatic
+    external fun setGear(gear: Int)
+
+    @JvmStatic
     external fun setDRSActive(active: Boolean)
+
+    /**
+     * Helper that passes all [OffsetTable] values to the native layer.
+     */
+    @JvmStatic
+    fun initWithOffsets(enableControlReplacement: Boolean, enableAutoDRS: Boolean) {
+        init(
+            OffsetTable.IRDS_CAR_CONTROLL_INPUT_SET_THROTTLE,
+            OffsetTable.IRDS_CAR_CONTROLL_INPUT_SET_BRAKE,
+            OffsetTable.IRDS_CAR_CONTROLL_INPUT_SET_CLUTCH,
+            OffsetTable.IRDS_CAR_CONTROLL_INPUT_SHIFT_UP,
+            OffsetTable.IRDS_CAR_CONTROLL_INPUT_SHIFT_DOWN,
+            OffsetTable.IRDS_DRIVETRAIN_SET_GEAR,
+            OffsetTable.IRDS_CAR_CONTROLL_INPUT_THROTTLE_FIELD,
+            OffsetTable.IRDS_CAR_CONTROLL_INPUT_BRAKE_FIELD,
+            OffsetTable.IRDS_CAR_CONTROLL_INPUT_CLUTCH_FIELD,
+            OffsetTable.IRDS_DRIVETRAIN_CURRENT_GEAR_FIELD,
+            OffsetTable.IRDS_CAR_CONTROLL_INPUT_DRS_TOGGLE,
+            enableControlReplacement,
+            enableAutoDRS
+        )
+    }
 }

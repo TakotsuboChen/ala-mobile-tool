@@ -28,17 +28,17 @@ fi
 
 IL2CPP_DUMPER_VERSION="v6.7.46"
 IL2CPP_DUMPER_DIR="$REPO_ROOT/.tools/Il2CppDumper-$IL2CPP_DUMPER_VERSION"
-IL2CPP_DUMPER_BIN="$IL2CPP_DUMPER_DIR/Il2CppDumper"
+IL2CPP_DUMPER_DLL="$IL2CPP_DUMPER_DIR/Il2CppDumper.dll"
 
-if [[ ! -d "$IL2CPP_DUMPER_DIR" ]]; then
+if [[ ! -f "$IL2CPP_DUMPER_DLL" ]]; then
     mkdir -p "$REPO_ROOT/.tools"
-    curl -L -o "/tmp/il2cppdumper.zip" "https://github.com/Perfare/Il2CppDumper/releases/download/$IL2CPP_DUMPER_VERSION/Il2CppDumper-net8-linux-x64.zip"
+    curl -L -o "/tmp/il2cppdumper.zip" "https://github.com/Perfare/Il2CppDumper/releases/download/$IL2CPP_DUMPER_VERSION/Il2CppDumper-net6-v6.7.46.zip"
     unzip "/tmp/il2cppdumper.zip" -d "$IL2CPP_DUMPER_DIR"
     rm "/tmp/il2cppdumper.zip"
 fi
 
 echo "Running Il2CppDumper..."
-"$IL2CPP_DUMPER_BIN" "$LIBIL2CPP" "$METADATA" "$OUTPUT_DIR"
+dotnet "$IL2CPP_DUMPER_DLL" "$LIBIL2CPP" "$METADATA" "$OUTPUT_DIR"
 
 echo "Dump complete. Output: $OUTPUT_DIR"
 echo "Next: extract offsets into app/src/main/kotlin/tools/alamobile/mod/offsets/OffsetTable.kt"

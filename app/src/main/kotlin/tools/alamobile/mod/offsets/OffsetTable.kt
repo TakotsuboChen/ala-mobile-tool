@@ -11,21 +11,27 @@ package tools.alamobile.mod.offsets
  */
 object OffsetTable {
 
-    // IRDSCarControllInput
-    const val IRDS_CAR_CONTROLL_INPUT_SET_THROTTLE: Long = 0L // TODO: fill from dump
-    const val IRDS_CAR_CONTROLL_INPUT_SET_BRAKE: Long = 0L    // TODO: fill from dump
-    const val IRDS_CAR_CONTROLL_INPUT_SET_GEAR: Long = 0L     // TODO: fill from dump
-    const val IRDS_CAR_CONTROLL_INPUT_THROTTLE_FIELD: Long = 0L // TODO: fill from dump
-    const val IRDS_CAR_CONTROLL_INPUT_BRAKE_FIELD: Long = 0L     // TODO: fill from dump
-    const val IRDS_CAR_CONTROLL_INPUT_GEAR_FIELD: Long = 0L      // TODO: fill from dump
+    // IRDSCarControllInput (TypeDefIndex: 328)
+    // Method offsets are the "Offset" values from Il2CppDumper (file offset in libil2cpp.so).
+    const val IRDS_CAR_CONTROLL_INPUT_SET_THROTTLE: Long = 0x1A511F4L
+    const val IRDS_CAR_CONTROLL_INPUT_SET_BRAKE: Long = 0x1A511D8L
+    const val IRDS_CAR_CONTROLL_INPUT_SET_CLUTCH: Long = 0x1A51294L
+    const val IRDS_CAR_CONTROLL_INPUT_SHIFT_UP: Long = 0x1A52FF0L
+    const val IRDS_CAR_CONTROLL_INPUT_SHIFT_DOWN: Long = 0x1A53044L
+    const val IRDS_CAR_CONTROLL_INPUT_DRS_TOGGLE: Long = 0x1A530ACL
 
-    // DRS / Active Aero
-    const val ACTIVE_AERO_WING_SET_ACTIVE: Long = 0L   // TODO: fill from dump
-    const val ACTIVE_AERO_WING_GET_ACTIVE: Long = 0L   // TODO: fill from dump
-    const val DOUBLE_DRS_ERA_CLUSTER_ERA_FIELD: Long = 0L // TODO: fill from dump
+    // IRDSCarControllInput instance fields
+    const val IRDS_CAR_CONTROLL_INPUT_THROTTLE_FIELD: Long = 0x174L // _inputTorque
+    const val IRDS_CAR_CONTROLL_INPUT_BRAKE_FIELD: Long = 0x178L    // _brake
+    const val IRDS_CAR_CONTROLL_INPUT_CLUTCH_FIELD: Long = 0xD0L    // inputClutch
 
-    // Drivetrain
-    const val IRDS_DRIVETRAIN_SHIFT_UP: Long = 0L   // TODO: fill from dump
-    const val IRDS_DRIVETRAIN_SHIFT_DOWN: Long = 0L // TODO: fill from dump
-    const val IRDS_DRIVETRAIN_CURRENT_GEAR_FIELD: Long = 0L // TODO: fill from dump
+    // IRDSDrivetrain (TypeDefIndex: 337)
+    const val IRDS_DRIVETRAIN_SET_GEAR: Long = 0x1A59014L
+    const val IRDS_DRIVETRAIN_SHIFT_UP: Long = 0x1A5B16CL
+    const val IRDS_DRIVETRAIN_SHIFT_DOWN: Long = 0x1A5B2F0L
+
+    // IRDSDrivetrain instance fields
+    const val IRDS_DRIVETRAIN_CURRENT_GEAR_FIELD: Long = 0xC0L
+    const val IRDS_DRIVETRAIN_THROTTLE_FIELD: Long = 0xB4L
+    const val IRDS_DRIVETRAIN_THROTTLE_INPUT_FIELD: Long = 0xB8L
 }
