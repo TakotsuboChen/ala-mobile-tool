@@ -11,19 +11,8 @@ endif()
 
 include_directories(src)
 
-# Optional: link ShadowHook if available.
-# In CI/prebuilt workflows, place libshadowhook.so in native/libs/${ANDROID_ABI}/
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/${ANDROID_ABI}/libshadowhook.so")
-    add_library(shadowhook SHARED IMPORTED)
-    set_target_properties(shadowhook PROPERTIES
-        IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/libs/${ANDROID_ABI}/libshadowhook.so"
-    )
-    set(SHADOWHOOK_FOUND ON)
-    add_definitions(-DHAS_SHADOWHOOK)
-else()
-    message(WARNING "ShadowHook not found at native/libs/${ANDROID_ABI}/libshadowhook.so; native hooks will be stubbed")
-    set(SHADOWHOOK_FOUND OFF)
-endif()
+# ShadowHook is provided via prefab (com.bytedance.android:shadowhook).
+find_package(shadowhook REQUIRED CONFIG)
 
 add_library(
     ala-core
@@ -36,8 +25,4 @@ add_library(
 
 find_library(log-lib log)
 
-target_link_libraries(ala-core ${log-lib})
-
-if(SHADOWHOOK_FOUND)
-    target_link_libraries(ala-core shadowhook)
-endif()
+target_link_libraries(ala-core ${log-lib} shadowhook::shadowhook)

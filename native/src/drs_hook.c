@@ -1,37 +1,65 @@
 #include "drs_hook.h"
-#include "il2cpp_hooks.h"
 #include <android/log.h>
+#include <dlfcn.h>
+#include <inttypes.h>
 #include <pthread.h>
-#include <unistd.h>
+#include <stdio.h>
+#include <string.h>
 
 #define LOG_TAG "AlaMobileTool"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+
+#include "shadowhook.h"
 
 static drs_hook_config_t g_config = {0};
-static pthread_t g_drs_thread;
-static volatile int g_drs_running = 0;
+
+// Set by the Java overlay when the user toggles auto DRS / DRS override.
+static volatile int g_drs_requested = 0;
+
+static void *g_drs_stub = NULL;
+static void *g_drs_orig = NULL;
+static volatile int g_hooks_installed = 0;
 
 /**
- * Placeholder for calling the original IRDSCarControllInput::drsToggle()
- * method. In a real build this would use ShadowHook to obtain the function
- * pointer at g_config.drs_toggle_offset and invoke it with the correct
- * calling convention.
+ * Locate the base address of a loaded shared library by scanning /proc/self/maps.
+ * Returns 0 if the module cannot be found.
  */
-static void call_drs_toggle(void) {
-    LOGI("call_drs_toggle stub (offset=0x%zx)", g_config.drs_toggle_offset);
-}
-
-static void *drs_poll_loop(void *arg) {
-    (void) arg;
-
-    while (g_drs_running) {
-        // TODO(human): read current car telemetry from the active
-        // IRDSCarControllInput instance and decide whether DRS should be on.
-        // For now this loop just sleeps.
-        usleep(100 * 1000);
+static uintptr_t get_module_base(const char *module_name) {
+    FILE *fp = fopen("/proc/self/maps", "r");
+    if (!fp) {
+        return 0;
     }
 
-    return NULL;
+    char line[512];
+    uintptr_t base = 0;
+    while (fgets(line, sizeof(line), fp) != NULL) {
+        if (strstr(line, module_name) == NULL) {
+            continue;
+        }
+
+        uintptr_t start = 0;
+        if (sscanf(line, "%" SCNxPTR "-", &start) == 1) {
+            base = start;
+            break;
+        }
+    }
+
+    fclose(fp);
+    return base;
+}
+
+// IRDSCarControllInput::drsToggle(void)  (instance method, no args)
+static void proxy_drs_toggle(void *this) {
+    if (g_drs_requested) {
+        typedef void (*orig_t)(void *);
+        if (g_drs_orig != NULL) {
+            ((orig_t) g_drs_orig)(this);
+        }
+    }
+    // When auto DRS is not requested, swallow the call so the game does not
+    // toggle DRS.  This is a conservative default while telemetry reading is
+    // still being reverse-engineered.
 }
 
 bool drs_install_hooks(const drs_hook_config_t *config) {
@@ -44,15 +72,52 @@ bool drs_install_hooks(const drs_hook_config_t *config) {
         return true;
     }
 
-    LOGI("Auto DRS enabled (poll strategy)");
-    g_drs_running = 1;
-    pthread_create(&g_drs_thread, NULL, drs_poll_loop, NULL);
+    if (g_hooks_installed) {
+        return true;
+    }
 
+    uintptr_t base = get_module_base("libil2cpp.so");
+    if (base == 0) {
+        LOGE("Failed to locate libil2cpp.so base address for DRS hook");
+        return false;
+    }
+    LOGI("libil2cpp.so base address for DRS hook: 0x%" PRIxPTR, base);
+
+    if (g_config.drs_toggle_offset != 0) {
+        uintptr_t target = base + g_config.drs_toggle_offset;
+        g_drs_stub = shadowhook_hook_sym_addr(
+                (void *) target,
+                (void *) proxy_drs_toggle,
+                (void **) &g_drs_orig);
+        if (g_drs_stub == NULL) {
+            int err = shadowhook_get_errno();
+            LOGE("shadowhook_hook_sym_addr(drsToggle) failed: %d (%s)",
+                 err, shadowhook_to_errmsg(err));
+        } else {
+            LOGI("Hooked drsToggle at 0x%" PRIxPTR, target);
+        }
+    }
+
+    g_hooks_installed = 1;
     return true;
 }
 
 void drs_uninstall_hooks(void) {
-    g_drs_running = 0;
-    pthread_join(g_drs_thread, NULL);
+    if (!g_hooks_installed) {
+        return;
+    }
+
+    if (g_drs_stub != NULL) {
+        shadowhook_unhook(g_drs_stub);
+        g_drs_stub = NULL;
+        g_drs_orig = NULL;
+    }
+
+    g_drs_requested = 0;
+    g_hooks_installed = 0;
     g_config.enable_auto_drs = false;
+}
+
+void drs_set_active(int active) {
+    g_drs_requested = active ? 1 : 0;
 }

@@ -60,12 +60,16 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
 
 JNIEXPORT void JNICALL
 Java_tools_alamobile_mod_NativeBridge_setThrottle(JNIEnv *env, jclass clazz, jfloat value) {
-    LOGI("setThrottle(%f)", value);
+    (void) env;
+    (void) clazz;
+    pedal_set_throttle_value((float) value);
 }
 
 JNIEXPORT void JNICALL
 Java_tools_alamobile_mod_NativeBridge_setBrake(JNIEnv *env, jclass clazz, jfloat value) {
-    LOGI("setBrake(%f)", value);
+    (void) env;
+    (void) clazz;
+    pedal_set_brake_value((float) value);
 }
 
 JNIEXPORT void JNICALL
@@ -90,5 +94,7 @@ Java_tools_alamobile_mod_NativeBridge_shiftDown(JNIEnv *env, jclass clazz) {
 
 JNIEXPORT void JNICALL
 Java_tools_alamobile_mod_NativeBridge_setDRSActive(JNIEnv *env, jclass clazz, jboolean active) {
-    LOGI("setDRSActive(%d)", active);
+    (void) env;
+    (void) clazz;
+    drs_set_active((int) active);
 }

@@ -28,6 +28,9 @@ typedef struct {
 bool pedal_install_hooks(const pedal_hook_config_t *config);
 void pedal_uninstall_hooks(void);
 
+void pedal_set_throttle_value(float value);
+void pedal_set_brake_value(float value);
+
 #ifdef __cplusplus
 }
 #endif

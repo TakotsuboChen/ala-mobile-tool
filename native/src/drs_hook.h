@@ -37,6 +37,7 @@ typedef struct {
 
 bool drs_install_hooks(const drs_hook_config_t *config);
 void drs_uninstall_hooks(void);
+void drs_set_active(int active);
 
 #ifdef __cplusplus
 }

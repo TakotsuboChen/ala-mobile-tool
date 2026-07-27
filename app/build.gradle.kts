@@ -39,6 +39,7 @@ android {
 
     buildFeatures {
         compose = true
+        prefab = true
     }
 
     ndkVersion = "26.1.10909125"
@@ -66,6 +67,9 @@ android {
             merges += "META-INF/xposed/*"
             excludes += "META-INF/*"
         }
+        jniLibs {
+            pickFirsts += "lib/arm64-v8a/libshadowhook.so"
+        }
     }
 }
 
@@ -75,4 +79,6 @@ dependencies {
 
     implementation(libs.miuix.ui)
     implementation(libs.activity.compose)
+
+    implementation(libs.shadowhook)
 }

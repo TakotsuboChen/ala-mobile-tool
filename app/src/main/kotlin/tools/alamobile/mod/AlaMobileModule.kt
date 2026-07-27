@@ -3,6 +3,7 @@ package tools.alamobile.mod
 import android.app.Application
 import android.content.Context
 import android.util.Log
+import com.bytedance.shadowhook.ShadowHook
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
@@ -35,6 +36,18 @@ class AlaMobileModule : XposedModule() {
         }
 
         log(Log.INFO, TAG, "Target version supported; installing hooks")
+
+        try {
+            ShadowHook.init(
+                ShadowHook.ConfigBuilder()
+                    .setMode(ShadowHook.Mode.SHARED)
+                    .build()
+            )
+            log(Log.INFO, TAG, "ShadowHook initialized")
+        } catch (e: Throwable) {
+            log(Log.ERROR, TAG, "Failed to initialize ShadowHook: ${e.message}")
+            return
+        }
 
         if (context != null) {
             val overlayManager = OverlayManager(context)

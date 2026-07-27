@@ -17,8 +17,8 @@ Supported game version: **Ala Mobile 8.0.0 (versionCode 200142)**. IL2CPP method
 - UI framework: Jetpack Compose with `top.yukonga.miuix.kmp:miuix-ui`.
 - Hook strategy:
   - Java layer (libxposed API 102): module entry, overlay injection, configuration reading.
-  - Native layer: ShadowHook inline hooks on `libil2cpp.so` for gameplay logic.
-- Auto DRS: prefer hooking the game's own DRS input check; fall back to telemetry polling if not found.
+  - Native layer: ByteDance ShadowHook inline hooks on `libil2cpp.so` for gameplay logic.
+- Auto DRS: prefer hooking the game's own DRS input check; currently swallows unwanted toggles while a user DRS request is active.
 - Multiplayer: do not detect Photon; show a warning and a master toggle, leave responsibility to the user.
 
 ## High-level Architecture
@@ -38,7 +38,7 @@ The module has three runtime contexts:
 
 1. **ConfigActivity** runs in the module's own process. It reads/writes settings to multi-process `SharedPreferences` and presents a miuix-themed UI.
 2. **AlaMobileModule** runs inside the target game process. It initializes the native bridge, installs the overlay, and reads configuration.
-3. **libala-core.so** also runs in the target game process. It receives method offsets from Java and installs inline hooks on the IL2CPP runtime via ShadowHook. **NOTE: `libxposed/ShadowHook` GitHub repo does not exist (404). Inline hook library choice is pending — see HANDOFF.md "留给用户的开放问题".**
+3. **libala-core.so** also runs in the target game process. It receives method offsets from Java and installs inline hooks on the IL2CPP runtime via ByteDance ShadowHook (`com.bytedance.android:shadowhook`).
 
 ## Common Commands
 

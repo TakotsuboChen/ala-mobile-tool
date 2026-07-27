@@ -6,12 +6,14 @@ miuix = "0.9.3"
 libxposed-api = "102.0.0"
 libxposed-service = "102.0.0"
 activity-compose = "1.10.1"
+shadowhook = "2.0.1"
 
 [libraries]
 libxposed-api = { group = "io.github.libxposed", name = "api", version.ref = "libxposed-api" }
 libxposed-service = { group = "io.github.libxposed", name = "service", version.ref = "libxposed-service" }
 miuix-ui = { group = "top.yukonga.miuix.kmp", name = "miuix-ui", version.ref = "miuix" }
 activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activity-compose" }
+shadowhook = { group = "com.bytedance.android", name = "shadowhook", version.ref = "shadowhook" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
