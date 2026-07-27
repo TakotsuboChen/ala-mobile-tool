@@ -42,7 +42,7 @@ The module has three runtime contexts:
 
 ## Common Commands
 
-> Note: the Gradle project skeleton is not yet created. The following commands assume the standard Android Gradle project layout once it exists.
+> Note: the Gradle project builds successfully with `./gradlew :app:assembleDebug`. Build environment: AGP 8.9.1, Kotlin 2.4.0, compileSdk 37, NDK 26.1.10909125. Maven mirrors (Aliyun) are configured in `settings.gradle.kts` to bypass Clash TUN TLS failures on `dl.google.com`.
 
 Build the module APK:
 ```bash
