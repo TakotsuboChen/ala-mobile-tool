@@ -1,0 +1,27 @@
+# APK bundle too large for GitHub
+*.apk
+*.apks
+*.aab
+
+# Gradle
+.gradle/
+build/
+*/build/
+captures/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+local.properties
+
+# CMake / native
+.cxx/
+externalNativeBuild/
+
+# IL2Cpp dump artifacts (optional, keep only offsets)
+il2cpp-dumps/**/*.cs
+il2cpp-dumps/**/*.json
+
+# OS
+.DS_Store
+Thumbs.db
