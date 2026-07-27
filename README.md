@@ -6,9 +6,10 @@
 
 ## 功能
 
-- **控件替换**：将原始刹车/油门按钮替换为双区线性踏板（上半油门、下半刹车），并提供升/降档按钮。
-- **自动 DRS / 主动空力**：过线或在 DRS 区时自动开启 DRS/主动空力，无需手动操作。
-- **miuix 配置界面**：基于 Jetpack Compose + miuix 的现代设置页。
+- **踏板覆盖**：在屏幕右侧叠加一个双区线性踏板区域，上半部分控制油门、下半部分控制刹车，并支持死区、过渡点和响应曲线调节。
+- **换挡按钮**：在屏幕左侧提供升档/降档按钮（Alpha 阶段换挡功能尚未完全生效）。
+- **自动 DRS / 主动空力**：拦截游戏 DRS 开关，未来会基于 telemetry 自动判断开启时机；当前仅作开关拦截。
+- **MIUIX 配置界面**：基于 Jetpack Compose + miuix 的现代设置页，可配置各项参数。
 
 ## 已测试版本
 
@@ -18,21 +19,52 @@
 
 其他版本请自行测试。IL2CPP 方法地址随版本变化，非 8.0.0 版本可能无法正确加载原生 hook。
 
+## 安装
+
+1. 确保手机已安装并启用 LSPosed（或兼容的 LSPosed 分支）框架。
+2. 从 [Releases](https://github.com/TakotsuboChen/ala-mobile-tool/releases) 下载最新 APK。
+3. 在 LSPosed 中勾选 **Ala Mobile** 作为作用域。
+4. 启动游戏，进入赛道后点击左上角「工具」按钮显示 overlay。
+
+> 首次启动游戏后建议先在模块设置界面中确认「踏板覆盖」等开关已开启。
+
+## 配置说明
+
+在 LSPosed 模块列表中点击 **Ala Mobile Tool** 打开设置界面：
+
+- **踏板覆盖**：是否用 overlay 踏板替代原始输入。
+- **自动 DRS**：是否接管 DRS 开关。
+- **显示悬浮窗**：是否显示踏板/换挡 overlay（进入游戏后仍可通过「工具」按钮手动开关）。
+- **死区**：踏板过渡区域附近的无效范围，数值越小响应越灵敏。
+- **过渡点**：油门与刹车区域的分界线位置。
+- **响应曲线**：支持线性、二次、指数三种映射。
+
+## 已知问题
+
+这是早期 Alpha 版本，以下问题已知并在后续版本中修复：
+
+- 换挡按钮目前不会实际生效，仅作为 UI 占位。
+- 自动 DRS 仅拦截开关，尚未实现基于赛道 telemetry 的自动判断。
+- 使用踏板覆盖时，游戏自带的自动换挡仍会触发，全油门过程中可能出现顿挫。
+- 当前 release APK 使用临时签名，正式发布前会替换为正式签名。
+
 ## 技术栈
 
 - 现代 libxposed API 102
 - Kotlin + Jetpack Compose + miuix
-- ShadowHook（libxposed 生态）+ IL2CPP inline hook
+- ByteDance ShadowHook + IL2CPP inline hook
 
 ## 构建
 
-需要 Android SDK 和 NDK。
+需要 Android SDK（API 37）和 NDK r26c。
 
 ```bash
+# 调试构建
 ./gradlew :app:assembleDebug
-```
 
-产物：`app/build/outputs/apk/debug/app-debug.apk`
+# 发布构建（需要配置签名）
+./gradlew :app:assembleRelease
+```
 
 ## 逆向工具
 
