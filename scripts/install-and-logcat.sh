@@ -49,7 +49,7 @@ TARGET_PACKAGE="com.Vince.AlamobileFormula"
 TAG="AlaMobileTool"
 
 echo "==> adb: checking for device"
-adb devices -l | grep -q "device$" || {
+adb devices -l | grep -vE '^List of devices|^$' | grep -q "device" || {
     echo "No Android device detected. Connect a device or start an emulator." >&2
     exit 1
 }

@@ -36,7 +36,7 @@ AlaMobileTool (LSPosed module APK)
 
 The module has three runtime contexts:
 
-1. **ConfigActivity** runs in the module's own process. It reads/writes settings to multi-process `SharedPreferences` and presents a miuix-themed UI.
+1. **ConfigActivity** runs in the module's own process. It reads/writes settings to a JSON file in external storage and presents a miuix-themed UI.
 2. **AlaMobileModule** runs inside the target game process. It initializes the native bridge, installs the overlay, and reads configuration.
 3. **libala-core.so** also runs in the target game process. It receives method offsets from Java and installs inline hooks on the IL2CPP runtime via ByteDance ShadowHook (`com.bytedance.android:shadowhook`).
 
@@ -94,7 +94,7 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - Keep the native bridge surface small. Java passes only resolved offsets and feature toggles to `libala-core.so`.
 - All native IL2CPP hooks are gated by `VersionGate`: refuse to install if the game version is not exactly `8.0.0 (200142)`.
 - Overlay Views use raw Android Canvas (not Compose) because Compose cannot overlay reliably on a Unity SurfaceView.
-- Multi-process `SharedPreferences` is used for configuration. The ConfigActivity writes; `AlaMobileModule` reads.
+- A JSON file in external storage is used for configuration. The ConfigActivity writes; `AlaMobileModule` reads.
 
 ## Files to Know
 

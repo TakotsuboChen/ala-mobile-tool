@@ -2,6 +2,8 @@ package tools.alamobile.mod
 
 import android.app.Application
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.bytedance.shadowhook.ShadowHook
 import io.github.libxposed.api.XposedModule
@@ -19,24 +21,31 @@ class AlaMobileModule : XposedModule() {
     }
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
-        log(Log.INFO, TAG, "Module loaded in process ${param.processName}")
+        Log.i(TAG, "Module loaded in process ${param.processName}")
     }
 
     override fun onPackageLoaded(param: PackageLoadedParam) {
-        log(Log.INFO, TAG, "Package loaded: ${param.packageName}")
+        Log.i(TAG, "Package loaded: ${param.packageName}")
     }
 
     override fun onPackageReady(param: PackageReadyParam) {
-        log(Log.INFO, TAG, "Package ready: ${param.packageName}")
+        Log.i(TAG, "Package ready: ${param.packageName}")
         if (!param.isFirstPackage) return
 
-        val context = getAppContext()
-        if (!isSupportedVersion(context)) {
-            log(Log.WARN, TAG, "Unsupported game version, skipping native hooks")
+        var context = getAppContext()
+        Log.i(TAG, "Initial context: $context")
+        if (context == null) {
+            Thread.sleep(500)
+            context = getAppContext()
+            Log.i(TAG, "Delayed context: $context")
+        }
+
+        if (context != null && !isSupportedVersion(context)) {
+            Log.w(TAG, "Unsupported game version, skipping native hooks")
             return
         }
 
-        log(Log.INFO, TAG, "Target version supported; installing hooks")
+        Log.i(TAG, "Target version supported; installing hooks")
 
         try {
             ShadowHook.init(
@@ -44,9 +53,9 @@ class AlaMobileModule : XposedModule() {
                     .setMode(ShadowHook.Mode.SHARED)
                     .build()
             )
-            log(Log.INFO, TAG, "ShadowHook initialized")
+            Log.i(TAG, "ShadowHook initialized")
         } catch (e: Throwable) {
-            log(Log.ERROR, TAG, "Failed to initialize ShadowHook: ${e.message}")
+            Log.e(TAG, "Failed to initialize ShadowHook: ${e.message}")
             return
         }
 
@@ -56,15 +65,31 @@ class AlaMobileModule : XposedModule() {
         val enableAutoDrs = settings?.enableAutoDrs ?: true
         val showOverlay = settings?.showOverlay ?: true
 
-        if (context != null && showOverlay) {
-            val overlayManager = OverlayManager(context)
-            overlayManager.showOverlays()
-        }
+        val mainHandler = Handler(Looper.getMainLooper())
+        mainHandler.postDelayed({
+            val ctx = getAppContext()
+            Log.i(TAG, "Delayed context: $ctx")
 
-        NativeBridge.initWithOffsets(
-            enableControlReplacement = enableControlReplacement,
-            enableAutoDRS = enableAutoDrs
-        )
+            if (ctx != null && showOverlay) {
+                try {
+                    val overlayManager = OverlayManager(ctx)
+                    overlayManager.showOverlays()
+                    Log.i(TAG, "Overlay shown")
+                } catch (e: Throwable) {
+                    Log.e(TAG, "Failed to show overlay: ${e.message}")
+                }
+            }
+
+            try {
+                NativeBridge.initWithOffsets(
+                    enableControlReplacement = enableControlReplacement,
+                    enableAutoDRS = enableAutoDrs
+                )
+                Log.i(TAG, "Native hooks installed")
+            } catch (e: Throwable) {
+                Log.e(TAG, "Failed to install native hooks: ${e.message}")
+            }
+        }, 15000)
     }
 
     private fun getAppContext(): Context? {

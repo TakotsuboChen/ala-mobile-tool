@@ -15,10 +15,35 @@
 
 static pedal_hook_config_t g_config = {0};
 
+typedef struct {
+    const char *name;
+    uintptr_t base;
+} find_module_ctx_t;
+
+static int find_module_callback(struct dl_phdr_info *info, size_t size, void *data) {
+    (void) size;
+    find_module_ctx_t *ctx = (find_module_ctx_t *) data;
+    if (info->dlpi_name != NULL && strstr(info->dlpi_name, ctx->name) != NULL) {
+        ctx->base = (uintptr_t) info->dlpi_addr;
+        return 1; // stop iteration
+    }
+    return 0;
+}
+
+static uintptr_t get_module_base(const char *module_name) {
+    find_module_ctx_t ctx = {.name = module_name, .base = 0};
+    dl_iterate_phdr(find_module_callback, &ctx);
+    return ctx.base;
+}
+
 // Global values written by the Java overlay / NativeBridge.  These are read
 // by the proxy functions and replace the values the game originally passed in.
 static volatile float g_throttle_value = 0.0f;
 static volatile float g_brake_value = 0.0f;
+
+// True while the user is actively holding the overlay pedal.
+static volatile int g_throttle_active = 0;
+static volatile int g_brake_active = 0;
 
 // ShadowHook handles used for unhooking.
 static void *g_throttle_stub = NULL;
@@ -31,34 +56,6 @@ static void *g_brake_orig = NULL;
 // True when the hooks are currently installed.
 static volatile int g_hooks_installed = 0;
 
-/**
- * Locate the base address of a loaded shared library by scanning /proc/self/maps.
- * Returns 0 if the module cannot be found.
- */
-static uintptr_t get_module_base(const char *module_name) {
-    FILE *fp = fopen("/proc/self/maps", "r");
-    if (!fp) {
-        return 0;
-    }
-
-    char line[512];
-    uintptr_t base = 0;
-    while (fgets(line, sizeof(line), fp) != NULL) {
-        if (strstr(line, module_name) == NULL) {
-            continue;
-        }
-
-        // Format: <start>-<end> <perms> <offset> <dev> <inode> <pathname>
-        uintptr_t start = 0;
-        if (sscanf(line, "%" SCNxPTR "-", &start) == 1) {
-            base = start;
-            break;
-        }
-    }
-
-    fclose(fp);
-    return base;
-}
 
 // -----------------------------------------------------------------------------
 // Proxy functions.  These must have the same calling convention / signature as
@@ -67,27 +64,31 @@ static uintptr_t get_module_base(const char *module_name) {
 
 // IRDSCarControllInput::setThrottle(float value)  (instance method)
 static void proxy_set_throttle(void *this, float value) {
-    (void) value;
-    float new_value = g_throttle_value;
-    if (new_value < 0.0f) new_value = 0.0f;
-    if (new_value > 1.0f) new_value = 1.0f;
-
+    LOGI("proxy_set_throttle called: value=%f active=%d", value, g_throttle_active);
     typedef void (*orig_t)(void *, float);
+    if (g_throttle_active) {
+        float new_value = g_throttle_value;
+        if (new_value < 0.0f) new_value = 0.0f;
+        if (new_value > 1.0f) new_value = 1.0f;
+        value = new_value;
+    }
     if (g_throttle_orig != NULL) {
-        ((orig_t) g_throttle_orig)(this, new_value);
+        ((orig_t) g_throttle_orig)(this, value);
     }
 }
 
 // IRDSCarControllInput::setBrake(float value)  (instance method)
 static void proxy_set_brake(void *this, float value) {
-    (void) value;
-    float new_value = g_brake_value;
-    if (new_value < 0.0f) new_value = 0.0f;
-    if (new_value > 1.0f) new_value = 1.0f;
-
+    LOGI("proxy_set_brake called: value=%f active=%d", value, g_brake_active);
     typedef void (*orig_t)(void *, float);
+    if (g_brake_active) {
+        float new_value = g_brake_value;
+        if (new_value < 0.0f) new_value = 0.0f;
+        if (new_value > 1.0f) new_value = 1.0f;
+        value = new_value;
+    }
     if (g_brake_orig != NULL) {
-        ((orig_t) g_brake_orig)(this, new_value);
+        ((orig_t) g_brake_orig)(this, value);
     }
 }
 
@@ -182,9 +183,19 @@ void pedal_uninstall_hooks(void) {
 
 // Public API used by ala_core.c / NativeBridge to update desired input values.
 void pedal_set_throttle_value(float value) {
-    g_throttle_value = value;
+    if (value <= 0.0f) {
+        g_throttle_active = 0;
+    } else {
+        g_throttle_active = 1;
+        g_throttle_value = value;
+    }
 }
 
 void pedal_set_brake_value(float value) {
-    g_brake_value = value;
+    if (value <= 0.0f) {
+        g_brake_active = 0;
+    } else {
+        g_brake_active = 1;
+        g_brake_value = value;
+    }
 }

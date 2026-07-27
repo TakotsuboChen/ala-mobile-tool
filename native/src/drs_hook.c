@@ -14,6 +14,27 @@
 
 static drs_hook_config_t g_config = {0};
 
+typedef struct {
+    const char *name;
+    uintptr_t base;
+} find_module_ctx_t;
+
+static int find_module_callback(struct dl_phdr_info *info, size_t size, void *data) {
+    (void) size;
+    find_module_ctx_t *ctx = (find_module_ctx_t *) data;
+    if (info->dlpi_name != NULL && strstr(info->dlpi_name, ctx->name) != NULL) {
+        ctx->base = (uintptr_t) info->dlpi_addr;
+        return 1; // stop iteration
+    }
+    return 0;
+}
+
+static uintptr_t get_module_base(const char *module_name) {
+    find_module_ctx_t ctx = {.name = module_name, .base = 0};
+    dl_iterate_phdr(find_module_callback, &ctx);
+    return ctx.base;
+}
+
 // Set by the Java overlay when the user toggles auto DRS / DRS override.
 static volatile int g_drs_requested = 0;
 
@@ -21,33 +42,6 @@ static void *g_drs_stub = NULL;
 static void *g_drs_orig = NULL;
 static volatile int g_hooks_installed = 0;
 
-/**
- * Locate the base address of a loaded shared library by scanning /proc/self/maps.
- * Returns 0 if the module cannot be found.
- */
-static uintptr_t get_module_base(const char *module_name) {
-    FILE *fp = fopen("/proc/self/maps", "r");
-    if (!fp) {
-        return 0;
-    }
-
-    char line[512];
-    uintptr_t base = 0;
-    while (fgets(line, sizeof(line), fp) != NULL) {
-        if (strstr(line, module_name) == NULL) {
-            continue;
-        }
-
-        uintptr_t start = 0;
-        if (sscanf(line, "%" SCNxPTR "-", &start) == 1) {
-            base = start;
-            break;
-        }
-    }
-
-    fclose(fp);
-    return base;
-}
 
 // IRDSCarControllInput::drsToggle(void)  (instance method, no args)
 static void proxy_drs_toggle(void *this) {

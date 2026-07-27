@@ -21,9 +21,16 @@ fun isSupportedVersion(context: Context?): Boolean {
             @Suppress("DEPRECATION")
             context.packageManager.getPackageInfo(TARGET_PACKAGE, 0)
         }
+        val longVersionCode = info.longVersionCode
         info.versionName == SUPPORTED_VERSION_NAME &&
-                info.longVersionCode == SUPPORTED_VERSION_CODE.toLong()
+                longVersionCode == SUPPORTED_VERSION_CODE.toLong()
     } catch (e: Throwable) {
         false
     }
+}
+
+fun isSupportedVersion(packageName: String, versionName: String?, versionCode: Long): Boolean {
+    return packageName == TARGET_PACKAGE &&
+            versionName == SUPPORTED_VERSION_NAME &&
+            versionCode == SUPPORTED_VERSION_CODE.toLong()
 }
