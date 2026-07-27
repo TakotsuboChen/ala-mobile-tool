@@ -2,6 +2,8 @@
 *.apk
 *.apks
 *.aab
+*.keystore
+*.jks
 
 # Gradle
 .gradle/

@@ -7,28 +7,31 @@ package tools.alamobile.mod.offsets
  * guessed offsets; run `tools/run-il2cpp-dumper.sh` after every game update
  * and regenerate this file.
  *
- * Method offsets are relative to the base of libil2cpp.so.
+ * Method offsets are the *RVA* values from Il2CppDumper (relative virtual
+ * addresses in libil2cpp.so). `dl_iterate_phdr` returns the ELF base address,
+ * which corresponds to RVA 0, so we must use RVA here, not the file offset.
  */
 object OffsetTable {
 
     // IRDSCarControllInput (TypeDefIndex: 328)
-    // Method offsets are the "Offset" values from Il2CppDumper (file offset in libil2cpp.so).
-    const val IRDS_CAR_CONTROLL_INPUT_SET_THROTTLE: Long = 0x1A511F4L
-    const val IRDS_CAR_CONTROLL_INPUT_SET_BRAKE: Long = 0x1A511D8L
-    const val IRDS_CAR_CONTROLL_INPUT_SET_CLUTCH: Long = 0x1A51294L
-    const val IRDS_CAR_CONTROLL_INPUT_SHIFT_UP: Long = 0x1A52FF0L
-    const val IRDS_CAR_CONTROLL_INPUT_SHIFT_DOWN: Long = 0x1A53044L
-    const val IRDS_CAR_CONTROLL_INPUT_DRS_TOGGLE: Long = 0x1A530ACL
+    // RVA values from dump.cs (e.g. "RVA: 0x1A551F4").
+    const val IRDS_CAR_CONTROLL_INPUT_SET_THROTTLE: Long = 0x1A551F4L
+    const val IRDS_CAR_CONTROLL_INPUT_SET_BRAKE: Long = 0x1A551D8L
+    const val IRDS_CAR_CONTROLL_INPUT_SET_CLUTCH: Long = 0x1A55294L
+    const val IRDS_CAR_CONTROLL_INPUT_SHIFT_UP: Long = 0x1A56FF0L
+    const val IRDS_CAR_CONTROLL_INPUT_SHIFT_DOWN: Long = 0x1A57044L
+    const val IRDS_CAR_CONTROLL_INPUT_DRS_TOGGLE: Long = 0x1A570ACL
+    const val IRDS_CAR_CONTROLL_INPUT_FIXED_UPDATE: Long = 0x1A56908L
 
-    // IRDSCarControllInput instance fields
+    // IRDSCarControllInput instance fields (relative to instance base)
     const val IRDS_CAR_CONTROLL_INPUT_THROTTLE_FIELD: Long = 0x174L // _inputTorque
     const val IRDS_CAR_CONTROLL_INPUT_BRAKE_FIELD: Long = 0x178L    // _brake
     const val IRDS_CAR_CONTROLL_INPUT_CLUTCH_FIELD: Long = 0xD0L    // inputClutch
 
     // IRDSDrivetrain (TypeDefIndex: 337)
-    const val IRDS_DRIVETRAIN_SET_GEAR: Long = 0x1A59014L
-    const val IRDS_DRIVETRAIN_SHIFT_UP: Long = 0x1A5B16CL
-    const val IRDS_DRIVETRAIN_SHIFT_DOWN: Long = 0x1A5B2F0L
+    const val IRDS_DRIVETRAIN_SET_GEAR: Long = 0x1A5D014L
+    const val IRDS_DRIVETRAIN_SHIFT_UP: Long = 0x1A5F16CL
+    const val IRDS_DRIVETRAIN_SHIFT_DOWN: Long = 0x1A5F2F0L
 
     // IRDSDrivetrain instance fields
     const val IRDS_DRIVETRAIN_CURRENT_GEAR_FIELD: Long = 0xC0L

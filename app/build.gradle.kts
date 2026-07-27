@@ -12,13 +12,23 @@ android {
         applicationId = "tools.alamobile.mod"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 100
+        versionName = "1.0.0-Alpha-1"
+    }
+
+    signingConfigs {
+        create("release") {
+            storeFile = file("${rootDir}/ala-mobile-tool.keystore")
+            storePassword = "alamobiletool"
+            keyAlias = "alamobiletool"
+            keyPassword = "alamobiletool"
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

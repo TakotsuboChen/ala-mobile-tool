@@ -23,6 +23,11 @@ typedef struct {
     uintptr_t shift_up_offset;
     uintptr_t shift_down_offset;
     uintptr_t set_gear_offset;
+
+    // FixedUpdate is called every physics tick; hooking it lets us force the
+    // desired input values into the instance fields even when the original
+    // setters are inlined.
+    uintptr_t fixed_update_offset;
 } pedal_hook_config_t;
 
 bool pedal_install_hooks(const pedal_hook_config_t *config);
@@ -30,6 +35,14 @@ void pedal_uninstall_hooks(void);
 
 void pedal_set_throttle_value(float value);
 void pedal_set_brake_value(float value);
+
+// Invoke the hooked shiftUp/shiftDown methods on the last known controller.
+// These are called from the Java overlay gear buttons.
+void pedal_shift_up(void);
+void pedal_shift_down(void);
+
+// Returns the last IRDSCarControllInput instance seen by the hooks.
+void *pedal_get_controller(void);
 
 #ifdef __cplusplus
 }

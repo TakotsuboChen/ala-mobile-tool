@@ -5,9 +5,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -17,14 +21,19 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import tools.alamobile.mod.config.ModConfig
 import tools.alamobile.mod.config.ModConfig.PedalCurve
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.Switch
+import top.yukonga.miuix.kmp.basic.TabRow
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.darkColorScheme
@@ -40,14 +49,14 @@ class ConfigActivity : ComponentActivity() {
             MiuixTheme(
                 colors = if (darkTheme) darkColorScheme() else lightColorScheme()
             ) {
-                ConfigScreen()
+                ConfigScreen(onFinish = { finish() })
             }
         }
     }
 }
 
 @Composable
-private fun ConfigScreen() {
+private fun ConfigScreen(onFinish: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val settings = remember { ModConfig.read(context) }
 
@@ -60,9 +69,34 @@ private fun ConfigScreen() {
     var transition by remember { mutableFloatStateOf(settings.pedalTransition) }
     var curve by remember { mutableStateOf(settings.pedalCurve) }
 
+    val onSave: () -> Unit = {
+        ModConfig.write(
+            context,
+            ModConfig.Settings(
+                enableControlReplacement = enableControlReplacement,
+                enableAutoDrs = enableAutoDrs,
+                showOverlay = showOverlay,
+                pedalDeadzone = deadzone,
+                pedalTransition = transition,
+                pedalCurve = curve
+            )
+        )
+        onFinish()
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        topBar = { TopAppBar(title = "Ala Mobile Tool") }
+        topBar = {
+            TopAppBar(
+                title = "Ala Mobile Tool",
+                actions = {
+                    TextButton(
+                        text = "保存",
+                        onClick = onSave
+                    )
+                }
+            )
+        }
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -73,19 +107,19 @@ private fun ConfigScreen() {
         ) {
             SmallTitle(text = "功能开关")
 
-            SwitchRow(
+            ToggleRow(
                 title = "踏板覆盖",
                 checked = enableControlReplacement,
                 onCheckedChange = { enableControlReplacement = it }
             )
 
-            SwitchRow(
+            ToggleRow(
                 title = "自动 DRS",
                 checked = enableAutoDrs,
                 onCheckedChange = { enableAutoDrs = it }
             )
 
-            SwitchRow(
+            ToggleRow(
                 title = "显示悬浮窗",
                 checked = showOverlay,
                 onCheckedChange = { showOverlay = it }
@@ -93,123 +127,93 @@ private fun ConfigScreen() {
 
             SmallTitle(
                 text = "踏板映射",
-                modifier = Modifier.padding(top = 16.dp)
+                modifier = Modifier.padding(top = 24.dp)
             )
 
-            Text(
-                text = "死区: ${String.format("%.0f%%", deadzone * 100)}",
-                modifier = Modifier.padding(top = 8.dp)
-            )
             SliderRow(
+                title = "死区",
                 value = deadzone,
                 onValueChange = { deadzone = it },
-                valueRange = 0f..0.2f
+                valueRange = 0f..0.2f,
+                displayFormat = { String.format("%.0f%%", it * 100) }
             )
 
-            Text(
-                text = "过渡点: ${String.format("%.0f%%", transition * 100)}",
-                modifier = Modifier.padding(top = 8.dp)
-            )
             SliderRow(
+                title = "过渡点",
                 value = transition,
                 onValueChange = { transition = it },
-                valueRange = 0.2f..0.8f
+                valueRange = 0.2f..0.8f,
+                displayFormat = { String.format("%.0f%%", it * 100) }
             )
 
             Text(
-                text = "曲线: ${curve.name}",
-                modifier = Modifier.padding(top = 8.dp)
+                text = "响应曲线",
+                modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
             )
-            SegmentedButtonRow(
-                items = PedalCurve.entries.map { it.name },
-                selectedIndex = PedalCurve.entries.indexOf(curve),
-                onSelected = { curve = PedalCurve.entries[it] }
+            TabRow(
+                tabs = PedalCurve.entries.map { curveName(it) },
+                selectedTabIndex = PedalCurve.entries.indexOf(curve),
+                onTabSelected = { index ->
+                    curve = PedalCurve.entries[index]
+                }
             )
 
+            Spacer(modifier = Modifier.height(24.dp))
+
             Button(
-                onClick = {
-                    ModConfig.write(
-                        context,
-                        ModConfig.Settings(
-                            enableControlReplacement = enableControlReplacement,
-                            enableAutoDrs = enableAutoDrs,
-                            showOverlay = showOverlay,
-                            pedalDeadzone = deadzone,
-                            pedalTransition = transition,
-                            pedalCurve = curve
-                        )
-                    )
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 24.dp)
+                onClick = onSave,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text("保存")
+                Text("保存并退出")
             }
         }
     }
 }
 
 @Composable
-private fun SwitchRow(
+private fun ToggleRow(
     title: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
-    // miuix-ui may or may not expose a Switch component in this version;
-    // use a simple button that toggles its state for portability.
-    Button(
-        onClick = { onCheckedChange(!checked) },
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp)
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(text = "$title: ${if (checked) "开" else "关"}")
+        Text(text = title)
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
+        )
     }
 }
 
 @Composable
 private fun SliderRow(
+    title: String,
     value: Float,
     onValueChange: (Float) -> Unit,
-    valueRange: ClosedFloatingPointRange<Float>
+    valueRange: ClosedFloatingPointRange<Float>,
+    displayFormat: (Float) -> String
 ) {
-    // Fallback numeric display; miuix-ui in this version does not expose
-    // a stable Slider in the public API, so we use +/- stepper buttons.
-    val step = (valueRange.endInclusive - valueRange.start) / 20f
-
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text(text = String.format("%.3f", value))
-        Button(
-            onClick = { onValueChange((value - step).coerceIn(valueRange)) },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("-")
-        }
-        Button(
-            onClick = { onValueChange((value + step).coerceIn(valueRange)) },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("+")
-        }
+        Text(
+            text = "$title: ${displayFormat(value)}",
+            modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+        )
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = valueRange
+        )
     }
 }
 
-@Composable
-private fun SegmentedButtonRow(
-    items: List<String>,
-    selectedIndex: Int,
-    onSelected: (Int) -> Unit
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        items.forEachIndexed { index, label ->
-            Button(
-                onClick = { onSelected(index) },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                val marker = if (index == selectedIndex) "● " else "○ "
-                Text(text = marker + label)
-            }
-        }
-    }
+private fun curveName(curve: PedalCurve): String = when (curve) {
+    PedalCurve.LINEAR -> "线性"
+    PedalCurve.QUADRATIC -> "二次"
+    PedalCurve.EXPONENTIAL -> "指数"
 }

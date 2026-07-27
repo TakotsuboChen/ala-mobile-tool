@@ -22,7 +22,8 @@ JNIEXPORT void JNICALL
 Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
                                            jlong set_throttle, jlong set_brake,
                                            jlong set_clutch, jlong shift_up, jlong shift_down,
-                                           jlong set_gear, jlong throttle_field, jlong brake_field,
+                                           jlong set_gear, jlong fixed_update,
+                                           jlong throttle_field, jlong brake_field,
                                            jlong clutch_field, jlong gear_field, jlong drs_toggle,
                                            jboolean enable_controls, jboolean enable_drs) {
     pedal_hook_config_t pedal_cfg = {
@@ -32,6 +33,7 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
         .shift_up_offset = (uintptr_t) shift_up,
         .shift_down_offset = (uintptr_t) shift_down,
         .set_gear_offset = (uintptr_t) set_gear,
+        .fixed_update_offset = (uintptr_t) fixed_update,
         .throttle_field_offset = (uintptr_t) throttle_field,
         .brake_field_offset = (uintptr_t) brake_field,
     };
@@ -84,12 +86,16 @@ Java_tools_alamobile_mod_NativeBridge_setGear(JNIEnv *env, jclass clazz, jint ge
 
 JNIEXPORT void JNICALL
 Java_tools_alamobile_mod_NativeBridge_shiftUp(JNIEnv *env, jclass clazz) {
-    LOGI("shiftUp");
+    (void) env;
+    (void) clazz;
+    pedal_shift_up();
 }
 
 JNIEXPORT void JNICALL
 Java_tools_alamobile_mod_NativeBridge_shiftDown(JNIEnv *env, jclass clazz) {
-    LOGI("shiftDown");
+    (void) env;
+    (void) clazz;
+    pedal_shift_down();
 }
 
 JNIEXPORT void JNICALL
