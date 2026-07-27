@@ -1,6 +1,6 @@
 # Ala Mobile Tool
 
-一个开源的 LSPosed 模块，用于扩展 **Ala Mobile**（包名 `com.Vince.AlamobileFormula`）的操控与 DRS/主动空力体验。
+一个开源的 LSPosed 模块，用于扩展 **Ala Mobile** 的操控与 DRS/主动空力体验。
 
 > ⚠️ **仅供个人学习与研究使用**。本模块会修改游戏的运行时行为，在多人/在线模式下使用可能违反服务条款并导致封号。请仅在单机模式下使用。
 
