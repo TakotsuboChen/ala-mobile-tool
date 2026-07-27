@@ -27,6 +27,7 @@ class PedalOverlayView(
         enableControlReplacement = true,
         enableAutoDrs = true,
         showOverlay = true,
+        disableAutoGear = false,
         pedalDeadzone = 0.05f,
         pedalTransition = 0.5f,
         pedalCurve = ModConfig.PedalCurve.LINEAR
@@ -61,7 +62,7 @@ class PedalOverlayView(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        when (event.action) {
+        when (event.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
                 updateValues(event.y)
                 return true

@@ -23,6 +23,9 @@ static volatile float g_brake_value = 0.0f;
 static volatile int g_throttle_active = 0;
 static volatile int g_brake_active = 0;
 
+// Disable automatic gear shifting on the player's car.
+static volatile int g_disable_auto_gear = 0;
+
 // Latest IRDSCarControllInput instance seen by the proxy functions.
 // We cache this so we can write input values directly into the IL2CPP
 // instance fields even when the original setter is inlined/not used.
@@ -45,16 +48,8 @@ static void *g_fixed_update_orig = NULL;
 // True when the hooks are currently installed.
 static volatile int g_hooks_installed = 0;
 
-// Background writer thread. It periodically writes the current desired input
-// values into the IL2CPP instance fields, so the car responds even if the
-// game's physics loop does not call the hooked setters.
-static pthread_t g_writer_thread;
-static volatile int g_writer_running = 0;
-
-static uintptr_t get_module_base(const char *module_name);
-
 // ---------------------------------------------------------------------------
-// Helpers for writing input values directly into IRDSCarControllInput fields.
+// Helpers for writing input values directly into IL2CPP instance fields.
 // ---------------------------------------------------------------------------
 
 static inline void write_float_field(void *instance, uintptr_t offset, float value) {
@@ -62,46 +57,28 @@ static inline void write_float_field(void *instance, uintptr_t offset, float val
     *(volatile float *) ((uintptr_t) instance + offset) = value;
 }
 
-static void apply_inputs_to_controller(void *controller) {
-    if (controller == NULL) return;
-
-    if (g_throttle_active) {
-        write_float_field(controller, g_config.throttle_field_offset, g_throttle_value);
-    } else if (g_throttle_value <= 0.0f) {
-        write_float_field(controller, g_config.throttle_field_offset, 0.0f);
-    }
-
-    if (g_brake_active) {
-        write_float_field(controller, g_config.brake_field_offset, g_brake_value);
-    } else if (g_brake_value <= 0.0f) {
-        write_float_field(controller, g_config.brake_field_offset, 0.0f);
-    }
+static inline void write_bool_field(void *instance, uintptr_t offset, bool value) {
+    if (instance == NULL || offset == 0) return;
+    *(volatile bool *) ((uintptr_t) instance + offset) = value;
 }
 
-static void *input_writer_thread(void *arg) {
-    (void) arg;
-    while (g_writer_running) {
-        void *controller = (void *) g_last_controller;
-        if (controller != NULL) {
-            apply_inputs_to_controller(controller);
-        }
-        usleep(1000 * 16); // ~60 Hz
-    }
-    return NULL;
+static inline uintptr_t read_ptr(void *instance, uintptr_t offset) {
+    if (instance == NULL || offset == 0) return 0;
+    return *(volatile uintptr_t *) ((uintptr_t) instance + offset);
 }
 
-static void start_input_writer(void) {
-    if (g_writer_running) return;
-    g_writer_running = 1;
-    pthread_create(&g_writer_thread, NULL, input_writer_thread, NULL);
-}
+// ---------------------------------------------------------------------------
+// Drivetrain helpers.
+// ---------------------------------------------------------------------------
 
-static void stop_input_writer(void) {
-    g_writer_running = 0;
-    if (g_writer_thread) {
-        pthread_join(g_writer_thread, NULL);
-        g_writer_thread = 0;
+static void disable_automatic_gear_for_controller(void *controller) {
+    if (controller == NULL || g_config.drivetrain_offset == 0 ||
+        g_config.drivetrain_automatic_field_offset == 0) {
+        return;
     }
+    uintptr_t drivetrain = read_ptr(controller, g_config.drivetrain_offset);
+    if (drivetrain == 0) return;
+    write_bool_field((void *) drivetrain, g_config.drivetrain_automatic_field_offset, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -112,17 +89,26 @@ static void stop_input_writer(void) {
 static void proxy_set_throttle(void *this, float value) {
     g_last_controller = this;
 
+    typedef void (*orig_t)(void *, float);
+
     if (g_throttle_active) {
         float new_value = g_throttle_value;
         if (new_value < 0.0f) new_value = 0.0f;
         if (new_value > 1.0f) new_value = 1.0f;
         value = new_value;
-        write_float_field(this, g_config.throttle_field_offset, value);
     }
 
-    typedef void (*orig_t)(void *, float);
     if (g_throttle_orig != NULL) {
         ((orig_t) g_throttle_orig)(this, value);
+    }
+
+    // Apply overlay inputs and disable auto gear after the original setter
+    // has processed the value, so our changes win.
+    if (g_disable_auto_gear) {
+        disable_automatic_gear_for_controller(this);
+    }
+    if (g_throttle_active) {
+        write_float_field(this, g_config.throttle_field_offset, g_throttle_value);
     }
 }
 
@@ -130,17 +116,21 @@ static void proxy_set_throttle(void *this, float value) {
 static void proxy_set_brake(void *this, float value) {
     g_last_controller = this;
 
+    typedef void (*orig_t)(void *, float);
+
     if (g_brake_active) {
         float new_value = g_brake_value;
         if (new_value < 0.0f) new_value = 0.0f;
         if (new_value > 1.0f) new_value = 1.0f;
         value = new_value;
-        write_float_field(this, g_config.brake_field_offset, value);
     }
 
-    typedef void (*orig_t)(void *, float);
     if (g_brake_orig != NULL) {
         ((orig_t) g_brake_orig)(this, value);
+    }
+
+    if (g_brake_active) {
+        write_float_field(this, g_config.brake_field_offset, g_brake_value);
     }
 }
 
@@ -178,7 +168,15 @@ static void proxy_fixed_update(void *this) {
     // Apply our inputs after the original FixedUpdate / carController() has
     // processed the regular input, so the overlay values win.
     if (car_pilot == 0) {
-        apply_inputs_to_controller(this);
+        if (g_disable_auto_gear) {
+            disable_automatic_gear_for_controller(this);
+        }
+        if (g_throttle_active) {
+            write_float_field(this, g_config.throttle_field_offset, g_throttle_value);
+        }
+        if (g_brake_active) {
+            write_float_field(this, g_config.brake_field_offset, g_brake_value);
+        }
     }
 }
 
@@ -319,7 +317,6 @@ bool pedal_install_hooks(const pedal_hook_config_t *config) {
     }
 
     g_hooks_installed = 1;
-    start_input_writer();
     return true;
 }
 
@@ -327,8 +324,6 @@ void pedal_uninstall_hooks(void) {
     if (!g_hooks_installed) {
         return;
     }
-
-    stop_input_writer();
 
     if (g_throttle_stub != NULL) {
         shadowhook_unhook(g_throttle_stub);
@@ -383,6 +378,10 @@ void pedal_shift_down(void) {
         typedef void (*orig_t)(void *);
         ((orig_t) g_shift_down_orig)(controller);
     }
+}
+
+void pedal_set_disable_auto_gear(int disable) {
+    g_disable_auto_gear = disable ? 1 : 0;
 }
 
 void pedal_set_throttle_value(float value) {

@@ -27,7 +27,8 @@ object NativeBridge {
         drsToggle: Long,
 
         enableControlReplacement: Boolean,
-        enableAutoDRS: Boolean
+        enableAutoDRS: Boolean,
+        disableAutoGear: Boolean
     )
 
     @JvmStatic
@@ -55,7 +56,11 @@ object NativeBridge {
      * Helper that passes all [OffsetTable] values to the native layer.
      */
     @JvmStatic
-    fun initWithOffsets(enableControlReplacement: Boolean, enableAutoDRS: Boolean) {
+    fun initWithOffsets(
+        enableControlReplacement: Boolean,
+        enableAutoDRS: Boolean,
+        disableAutoGear: Boolean = false
+    ) {
         init(
             OffsetTable.IRDS_CAR_CONTROLL_INPUT_SET_THROTTLE,
             OffsetTable.IRDS_CAR_CONTROLL_INPUT_SET_BRAKE,
@@ -70,7 +75,8 @@ object NativeBridge {
             OffsetTable.IRDS_DRIVETRAIN_CURRENT_GEAR_FIELD,
             OffsetTable.IRDS_CAR_CONTROLL_INPUT_DRS_TOGGLE,
             enableControlReplacement,
-            enableAutoDRS
+            enableAutoDRS,
+            disableAutoGear
         )
     }
 }

@@ -65,6 +65,7 @@ private fun ConfigScreen(onFinish: () -> Unit) {
     }
     var enableAutoDrs by remember { mutableStateOf(settings.enableAutoDrs) }
     var showOverlay by remember { mutableStateOf(settings.showOverlay) }
+    var disableAutoGear by remember { mutableStateOf(settings.disableAutoGear) }
     var deadzone by remember { mutableFloatStateOf(settings.pedalDeadzone) }
     var transition by remember { mutableFloatStateOf(settings.pedalTransition) }
     var curve by remember { mutableStateOf(settings.pedalCurve) }
@@ -76,6 +77,7 @@ private fun ConfigScreen(onFinish: () -> Unit) {
                 enableControlReplacement = enableControlReplacement,
                 enableAutoDrs = enableAutoDrs,
                 showOverlay = showOverlay,
+                disableAutoGear = disableAutoGear,
                 pedalDeadzone = deadzone,
                 pedalTransition = transition,
                 pedalCurve = curve
@@ -123,6 +125,12 @@ private fun ConfigScreen(onFinish: () -> Unit) {
                 title = "显示悬浮窗",
                 checked = showOverlay,
                 onCheckedChange = { showOverlay = it }
+            )
+
+            ToggleRow(
+                title = "关闭自动换挡",
+                checked = disableAutoGear,
+                onCheckedChange = { disableAutoGear = it }
             )
 
             SmallTitle(

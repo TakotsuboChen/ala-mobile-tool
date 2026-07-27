@@ -64,6 +64,7 @@ class AlaMobileModule : XposedModule() {
         val enableControlReplacement = settings?.enableControlReplacement ?: true
         val enableAutoDrs = settings?.enableAutoDrs ?: true
         val showOverlay = settings?.showOverlay ?: true
+        val disableAutoGear = settings?.disableAutoGear ?: false
 
         val mainHandler = Handler(Looper.getMainLooper())
         mainHandler.postDelayed({
@@ -83,7 +84,8 @@ class AlaMobileModule : XposedModule() {
             try {
                 NativeBridge.initWithOffsets(
                     enableControlReplacement = enableControlReplacement,
-                    enableAutoDRS = enableAutoDrs
+                    enableAutoDRS = enableAutoDrs,
+                    disableAutoGear = disableAutoGear
                 )
                 Log.i(TAG, "Native hooks installed")
             } catch (e: Throwable) {

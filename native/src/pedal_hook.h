@@ -28,6 +28,10 @@ typedef struct {
     // desired input values into the instance fields even when the original
     // setters are inlined.
     uintptr_t fixed_update_offset;
+
+    // Drivetrain field offsets.
+    uintptr_t drivetrain_offset;
+    uintptr_t drivetrain_automatic_field_offset;
 } pedal_hook_config_t;
 
 bool pedal_install_hooks(const pedal_hook_config_t *config);
@@ -43,6 +47,9 @@ void pedal_shift_down(void);
 
 // Returns the last IRDSCarControllInput instance seen by the hooks.
 void *pedal_get_controller(void);
+
+// Enable/disable automatic gear shifting suppression.
+void pedal_set_disable_auto_gear(int disable);
 
 #ifdef __cplusplus
 }

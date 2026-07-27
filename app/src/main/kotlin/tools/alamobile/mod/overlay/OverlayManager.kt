@@ -2,6 +2,9 @@ package tools.alamobile.mod.overlay
 
 import android.app.Activity
 import android.content.Context
+import android.graphics.Point
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -21,9 +24,14 @@ class OverlayManager(context: Context) {
     private var pedalView: PedalOverlayView? = null
     private var gearView: GearShiftView? = null
     private var toggleButton: View? = null
+    private var pedalEditView: OverlayEditView? = null
+    private var gearEditView: OverlayEditView? = null
     private val density = appContext.resources.displayMetrics.density
 
     private val settings by lazy { ModConfig.readFromTargetProcess(appContext) }
+
+    private var overlaysVisible = false
+    private var editMode = false
 
     init {
         val activity = findCurrentActivity()
@@ -38,6 +46,7 @@ class OverlayManager(context: Context) {
 
         // Toggle button is always visible; overlays are hidden until toggled on.
         addToggleButton()
+        addGamingOverlays()
 
         NativeBridge.setThrottle(0f)
         NativeBridge.setBrake(0f)
@@ -62,6 +71,10 @@ class OverlayManager(context: Context) {
         btn.setOnClickListener {
             toggleOverlays()
         }
+        btn.setOnLongClickListener {
+            toggleEditMode()
+            true
+        }
         root?.addView(btn, params)
         toggleButton = btn
     }
@@ -70,27 +83,54 @@ class OverlayManager(context: Context) {
         if (pedalView == null || gearView == null) {
             addGamingOverlays()
         }
-        val currentlyVisible = pedalView?.visibility == View.VISIBLE
-        val newVisibility = if (currentlyVisible) View.GONE else View.VISIBLE
+        overlaysVisible = !overlaysVisible
+        val newVisibility = if (overlaysVisible) View.VISIBLE else View.GONE
         pedalView?.visibility = newVisibility
         gearView?.visibility = newVisibility
+        if (!overlaysVisible) {
+            editMode = false
+            updateEditModeVisibility()
+        }
+    }
+
+    private fun toggleEditMode() {
+        if (pedalView == null || gearView == null) {
+            addGamingOverlays()
+        }
+        overlaysVisible = true
+        pedalView?.visibility = View.VISIBLE
+        gearView?.visibility = View.VISIBLE
+        editMode = !editMode
+        updateEditModeVisibility()
+    }
+
+    private fun updateEditModeVisibility() {
+        pedalEditView?.let { view ->
+            view.visibility = if (editMode) View.VISIBLE else View.GONE
+            view.bringToFront()
+        }
+        gearEditView?.let { view ->
+            view.visibility = if (editMode) View.VISIBLE else View.GONE
+            view.bringToFront()
+        }
     }
 
     private fun addGamingOverlays() {
+        val screenWidth = appContext.resources.displayMetrics.widthPixels
         val screenHeight = appContext.resources.displayMetrics.heightPixels
-        val thirdHeight = (screenHeight / 3f).toInt()
 
+        val gearPosition = settings.gearPosition
+        val pedalPosition = settings.pedalPosition
         gearView = GearShiftView(appContext).apply {
             tag = "gear_shift_overlay"
             visibility = View.GONE
         }
         val gearParams = FrameLayout.LayoutParams(
-            (100 * density).toInt(),
-            thirdHeight
+            gearPosition.widthPx(appContext, screenWidth),
+            gearPosition.heightPx(appContext, screenHeight)
         ).apply {
-            gravity = Gravity.BOTTOM or Gravity.START
-            leftMargin = (16 * density).toInt()
-            bottomMargin = (16 * density).toInt()
+            leftMargin = gearPosition.leftPx(screenWidth)
+            topMargin = gearPosition.topPx(screenHeight)
         }
         root?.addView(gearView, gearParams)
 
@@ -99,22 +139,95 @@ class OverlayManager(context: Context) {
             visibility = View.GONE
         }
         val pedalParams = FrameLayout.LayoutParams(
-            (110 * density).toInt(),
-            thirdHeight
+            pedalPosition.widthPx(appContext, screenWidth),
+            pedalPosition.heightPx(appContext, screenHeight)
         ).apply {
-            gravity = Gravity.CENTER_VERTICAL or Gravity.END
-            rightMargin = (24 * density).toInt()
+            leftMargin = pedalPosition.leftPx(screenWidth)
+            topMargin = pedalPosition.topPx(screenHeight)
         }
         root?.addView(pedalView, pedalParams)
+
+        addEditLayers()
+    }
+
+    private fun addEditLayers() {
+        val pedal = pedalView ?: return
+        val gear = gearView ?: return
+
+        val minPx = (48 * density).toInt()
+
+        pedalEditView = OverlayEditView(
+            appContext,
+            pedal,
+            minPx,
+            minPx
+        ) { left, top, width, height ->
+            saveOverlayPosition(ModConfig.KEY_PEDAL_POSITION, left, top, width, height)
+        }
+        pedalEditView?.apply {
+            tag = "pedal_overlay_edit"
+            visibility = View.GONE
+        }
+        root?.addView(
+            pedalEditView,
+            FrameLayout.LayoutParams(
+                pedal.width,
+                pedal.height
+            ).apply {
+                leftMargin = (pedal.layoutParams as FrameLayout.LayoutParams).leftMargin
+                topMargin = (pedal.layoutParams as FrameLayout.LayoutParams).topMargin
+            }
+        )
+
+        gearEditView = OverlayEditView(
+            appContext,
+            gear,
+            minPx,
+            minPx
+        ) { left, top, width, height ->
+            saveOverlayPosition(ModConfig.KEY_GEAR_POSITION, left, top, width, height)
+        }
+        gearEditView?.apply {
+            tag = "gear_shift_overlay_edit"
+            visibility = View.GONE
+        }
+        root?.addView(
+            gearEditView,
+            FrameLayout.LayoutParams(
+                gear.width,
+                gear.height
+            ).apply {
+                leftMargin = (gear.layoutParams as FrameLayout.LayoutParams).leftMargin
+                topMargin = (gear.layoutParams as FrameLayout.LayoutParams).topMargin
+            }
+        )
+    }
+
+    private fun saveOverlayPosition(key: String, left: Int, top: Int, width: Int, height: Int) {
+        val screenWidth = appContext.resources.displayMetrics.widthPixels
+        val screenHeight = appContext.resources.displayMetrics.heightPixels
+        val position = OverlayPosition.fromPixels(
+            Point(screenWidth, screenHeight),
+            left, top, width, height
+        )
+        try {
+            ModConfig.saveOverlayPosition(appContext, key, position)
+        } catch (e: Throwable) {
+            android.util.Log.e("AlaMobileTool", "Failed to save overlay position", e)
+        }
     }
 
     private fun removeExisting() {
         root?.findViewWithTag<View>("ala_tool_toggle")?.let { root.removeView(it) }
         root?.findViewWithTag<View>("pedal_overlay")?.let { root.removeView(it) }
         root?.findViewWithTag<View>("gear_shift_overlay")?.let { root.removeView(it) }
+        root?.findViewWithTag<View>("pedal_overlay_edit")?.let { root.removeView(it) }
+        root?.findViewWithTag<View>("gear_shift_overlay_edit")?.let { root.removeView(it) }
         pedalView = null
         gearView = null
         toggleButton = null
+        pedalEditView = null
+        gearEditView = null
     }
 
     private fun findCurrentActivity(): Activity? {

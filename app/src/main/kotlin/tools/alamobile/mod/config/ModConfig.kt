@@ -4,13 +4,14 @@ import android.content.Context
 import android.os.Environment
 import org.json.JSONObject
 import java.io.File
+import tools.alamobile.mod.overlay.OverlayPosition
 
 /**
  * JSON-backed configuration for Ala Mobile Tool.
  *
- * The ConfigActivity writes settings to the module's external files
- * directory so the target game process can read the same file without
- * relying on deprecated [Context.MODE_WORLD_READABLE].
+ * The ConfigActivity writes settings to a JSON file in external storage
+ * so the target game process can read the same file without relying on
+ * deprecated [Context.MODE_WORLD_READABLE].
  */
 object ModConfig {
 
@@ -21,11 +22,16 @@ object ModConfig {
     const val KEY_ENABLE_CONTROL_REPLACEMENT = "enable_control_replacement"
     const val KEY_ENABLE_AUTO_DRS = "enable_auto_drs"
     const val KEY_SHOW_OVERLAY = "show_overlay"
+    const val KEY_DISABLE_AUTO_GEAR = "disable_auto_gear"
 
     // Pedal mapping
     const val KEY_PEDAL_DEADZONE = "pedal_deadzone"
     const val KEY_PEDAL_TRANSITION = "pedal_transition"
     const val KEY_PEDAL_CURVE = "pedal_curve"
+
+    // Overlay positions
+    const val KEY_PEDAL_POSITION = "pedal_position"
+    const val KEY_GEAR_POSITION = "gear_position"
 
     enum class PedalCurve(val value: String) {
         LINEAR("linear"),
@@ -43,18 +49,20 @@ object ModConfig {
         const val ENABLE_CONTROL_REPLACEMENT = true
         const val ENABLE_AUTO_DRS = true
         const val SHOW_OVERLAY = true
+        const val DISABLE_AUTO_GEAR = false
         const val PEDAL_DEADZONE = 0.05f
         const val PEDAL_TRANSITION = 0.5f
         val PEDAL_CURVE = PedalCurve.LINEAR
+        val PEDAL_POSITION = OverlayPosition.DEFAULT_PEDAL
+        val GEAR_POSITION = OverlayPosition.DEFAULT_GEAR
     }
 
     /**
      * Returns the shared config file.
      *
-     * We store the file directly on external storage (not in an
-     * app-specific directory) so the target game process can read it on
-     * Android 10+ without relying on the deprecated
-     * [Context.MODE_WORLD_READABLE].
+     * Uses the module's own external files directory when running in the
+     * module process; otherwise falls back to a world-readable path in
+     * external storage that works in the target game process on Android 10+.
      */
     private fun getConfigFile(context: Context): File {
         val baseDir = context.getExternalFilesDir(null)
@@ -62,6 +70,15 @@ object ModConfig {
             File(baseDir, FILE_NAME)
         } else {
             File(Environment.getExternalStorageDirectory(), "AlaMobileTool/$FILE_NAME")
+        }
+    }
+
+    private fun getSharedConfigDir(context: Context): File {
+        val baseDir = context.getExternalFilesDir(null)
+        return if (baseDir != null && context.packageName == MODULE_PACKAGE) {
+            baseDir
+        } else {
+            File(Environment.getExternalStorageDirectory(), "AlaMobileTool")
         }
     }
 
@@ -90,6 +107,10 @@ object ModConfig {
                     KEY_SHOW_OVERLAY,
                     Defaults.SHOW_OVERLAY
                 ),
+                disableAutoGear = json.optBoolean(
+                    KEY_DISABLE_AUTO_GEAR,
+                    Defaults.DISABLE_AUTO_GEAR
+                ),
                 pedalDeadzone = json.optDouble(
                     KEY_PEDAL_DEADZONE,
                     Defaults.PEDAL_DEADZONE.toDouble()
@@ -100,7 +121,9 @@ object ModConfig {
                 ).toFloat(),
                 pedalCurve = PedalCurve.from(
                     json.optString(KEY_PEDAL_CURVE, Defaults.PEDAL_CURVE.value)
-                )
+                ),
+                pedalPosition = readOverlayPosition(json, KEY_PEDAL_POSITION, Defaults.PEDAL_POSITION),
+                gearPosition = readOverlayPosition(json, KEY_GEAR_POSITION, Defaults.GEAR_POSITION)
             )
         } catch (e: Throwable) {
             defaultSettings()
@@ -119,11 +142,30 @@ object ModConfig {
             put(KEY_ENABLE_CONTROL_REPLACEMENT, settings.enableControlReplacement)
             put(KEY_ENABLE_AUTO_DRS, settings.enableAutoDrs)
             put(KEY_SHOW_OVERLAY, settings.showOverlay)
+            put(KEY_DISABLE_AUTO_GEAR, settings.disableAutoGear)
             put(KEY_PEDAL_DEADZONE, settings.pedalDeadzone.toDouble())
             put(KEY_PEDAL_TRANSITION, settings.pedalTransition.toDouble())
             put(KEY_PEDAL_CURVE, settings.pedalCurve.value)
+            put(KEY_PEDAL_POSITION, settings.pedalPosition.toJson())
+            put(KEY_GEAR_POSITION, settings.gearPosition.toJson())
         }
 
+        file.writeText(json.toString(2))
+    }
+
+    /**
+     * Saves a single overlay position into the existing config without
+     * touching other keys. Safe to call from the target game process.
+     */
+    fun saveOverlayPosition(context: Context, key: String, position: OverlayPosition) {
+        val file = getConfigFile(context)
+        val json = try {
+            if (file.exists()) JSONObject(file.readText()) else JSONObject()
+        } catch (_: Throwable) {
+            JSONObject()
+        }
+        json.put(key, position.toJson())
+        getSharedConfigDir(context).mkdirs()
         file.writeText(json.toString(2))
     }
 
@@ -135,14 +177,44 @@ object ModConfig {
         return read(context)
     }
 
+    private fun readOverlayPosition(
+        json: JSONObject,
+        key: String,
+        default: OverlayPosition
+    ): OverlayPosition {
+        val obj = json.optJSONObject(key) ?: return default
+        return try {
+            OverlayPosition(
+                x = obj.optDouble("x", default.x.toDouble()).toFloat(),
+                y = obj.optDouble("y", default.y.toDouble()).toFloat(),
+                width = obj.optDouble("width", default.width.toDouble()).toFloat(),
+                height = obj.optDouble("height", default.height.toDouble()).toFloat()
+            )
+        } catch (_: Throwable) {
+            default
+        }
+    }
+
+    private fun OverlayPosition.toJson(): JSONObject {
+        return JSONObject().apply {
+            put("x", x.toDouble())
+            put("y", y.toDouble())
+            put("width", width.toDouble())
+            put("height", height.toDouble())
+        }
+    }
+
     private fun defaultSettings(): Settings {
         return Settings(
             enableControlReplacement = Defaults.ENABLE_CONTROL_REPLACEMENT,
             enableAutoDrs = Defaults.ENABLE_AUTO_DRS,
             showOverlay = Defaults.SHOW_OVERLAY,
+            disableAutoGear = Defaults.DISABLE_AUTO_GEAR,
             pedalDeadzone = Defaults.PEDAL_DEADZONE,
             pedalTransition = Defaults.PEDAL_TRANSITION,
-            pedalCurve = Defaults.PEDAL_CURVE
+            pedalCurve = Defaults.PEDAL_CURVE,
+            pedalPosition = Defaults.PEDAL_POSITION,
+            gearPosition = Defaults.GEAR_POSITION
         )
     }
 
@@ -150,8 +222,11 @@ object ModConfig {
         val enableControlReplacement: Boolean,
         val enableAutoDrs: Boolean,
         val showOverlay: Boolean,
+        val disableAutoGear: Boolean,
         val pedalDeadzone: Float,
         val pedalTransition: Float,
-        val pedalCurve: PedalCurve
+        val pedalCurve: PedalCurve,
+        val pedalPosition: OverlayPosition = OverlayPosition.DEFAULT_PEDAL,
+        val gearPosition: OverlayPosition = OverlayPosition.DEFAULT_GEAR
     )
 }

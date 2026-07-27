@@ -14,6 +14,7 @@ typedef struct {
     bool native_initialized;
     bool controls_enabled;
     bool drs_enabled;
+    bool disable_auto_gear;
 } module_state_t;
 
 static module_state_t g_state = {0};
@@ -25,7 +26,13 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
                                            jlong set_gear, jlong fixed_update,
                                            jlong throttle_field, jlong brake_field,
                                            jlong clutch_field, jlong gear_field, jlong drs_toggle,
-                                           jboolean enable_controls, jboolean enable_drs) {
+                                           jboolean enable_controls, jboolean enable_drs,
+                                           jboolean disable_auto_gear) {
+    (void) env;
+    (void) clazz;
+    (void) clutch_field;
+    (void) gear_field;
+
     pedal_hook_config_t pedal_cfg = {
         .enable_control_replacement = (bool) enable_controls,
         .set_throttle_offset = (uintptr_t) set_throttle,
@@ -36,6 +43,8 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
         .fixed_update_offset = (uintptr_t) fixed_update,
         .throttle_field_offset = (uintptr_t) throttle_field,
         .brake_field_offset = (uintptr_t) brake_field,
+        .drivetrain_offset = 0x98,
+        .drivetrain_automatic_field_offset = 0xBC
     };
 
     drs_hook_config_t drs_cfg = {
@@ -55,9 +64,13 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
 
     g_state.controls_enabled = (bool) enable_controls;
     g_state.drs_enabled = (bool) enable_drs;
+    g_state.disable_auto_gear = (bool) disable_auto_gear;
     g_state.native_initialized = true;
 
-    LOGI("Native bridge initialized: controls=%d drs=%d", enable_controls, enable_drs);
+    pedal_set_disable_auto_gear((int) g_state.disable_auto_gear);
+
+    LOGI("Native bridge initialized: controls=%d drs=%d disable_auto_gear=%d",
+         enable_controls, enable_drs, disable_auto_gear);
 }
 
 JNIEXPORT void JNICALL
