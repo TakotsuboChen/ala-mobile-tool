@@ -122,3 +122,7 @@ Two areas are explicitly designated for human contribution during implementation
 - Do not commit the APK or any IL2CPP dump larger than GitHub's file size limit. Large files are excluded via `.gitignore`.
 - miuix is a Kotlin Multiplatform library; keep Compose code in `ConfigActivity` and do not use it for runtime overlays.
 - Before adding new native hooks, regenerate the IL2CPP dump and update `offsets_sheet.csv`/`OffsetTable.kt`.
+
+## Cross-session handoff
+
+- See [HANDOFF.md](HANDOFF.md) for the latest session state, verified status, failed approaches, and next steps.
