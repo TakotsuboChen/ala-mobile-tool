@@ -8,6 +8,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
+import tools.alamobile.mod.config.ModConfig
 import tools.alamobile.mod.overlay.OverlayManager
 import tools.alamobile.mod.util.isSupportedVersion
 
@@ -49,15 +50,20 @@ class AlaMobileModule : XposedModule() {
             return
         }
 
-        if (context != null) {
+        val settings = if (context != null) ModConfig.readFromTargetProcess(context) else null
+
+        val enableControlReplacement = settings?.enableControlReplacement ?: true
+        val enableAutoDrs = settings?.enableAutoDrs ?: true
+        val showOverlay = settings?.showOverlay ?: true
+
+        if (context != null && showOverlay) {
             val overlayManager = OverlayManager(context)
             overlayManager.showOverlays()
         }
 
-        // TODO(human): read actual toggles from SharedPreferences once the settings UI writes them.
         NativeBridge.initWithOffsets(
-            enableControlReplacement = true,
-            enableAutoDRS = true
+            enableControlReplacement = enableControlReplacement,
+            enableAutoDRS = enableAutoDrs
         )
     }
 

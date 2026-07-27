@@ -114,8 +114,14 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 
 Two areas are explicitly designated for human contribution during implementation:
 
-1. `PedalOverlayView.updateValues(y: Float)` — map finger Y position to throttle `[0,1]` and brake `[0,1]`, including transition point and deadzone.
+1. `PedalOverlayView.updateValues(y: Float)` — implemented with deadzone, configurable transition point, and linear/quadratic/exponential curves. Fine-tune defaults and curve exponents based on real-device feel.
 2. `native/src/drs_hook.c` — if telemetry polling is used, read `inDRSZone`, `throttle`, `steeringAngle`, `speed` from IL2CPP instance fields and evaluate DRS eligibility.
+
+## Current Progress
+
+- M1: Module skeleton, LSPosed entry, native build, and overlay scaffolding — done.
+- M2: ByteDance ShadowHook integration and real inline hooks for throttle/brake/DRS — done.
+- M3: Configurable settings UI, SharedPreferences persistence, pedal mapping curve, and install/logcat script — done, pending real-device verification.
 
 ## Notes for Future Changes
 

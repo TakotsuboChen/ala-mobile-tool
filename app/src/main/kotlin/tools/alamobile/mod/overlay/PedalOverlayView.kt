@@ -7,21 +7,31 @@ import android.graphics.Paint
 import android.view.MotionEvent
 import android.view.View
 import tools.alamobile.mod.NativeBridge
+import tools.alamobile.mod.config.ModConfig
+import kotlin.math.pow
 
 /**
  * Dual-zone vertical pedal overlay.
  *
- * The touch area is split vertically:
- * - Top half: throttle. Finger near the top => full throttle; at the
- *   transition line => zero throttle.
- * - Bottom half: brake. Finger near the bottom => full brake; at the
- *   transition line => zero brake.
+ * The touch area is split vertically around [ModConfig.Settings.pedalTransition].
+ * - Top half: throttle. Finger at the top => full throttle; near the transition
+ *   line (inside the deadzone) => zero throttle.
+ * - Bottom half: brake. Finger at the bottom => full brake; near the transition
+ *   line (inside the deadzone) => zero brake.
  *
- * TODO(human): implement updateValues(y) to map the finger Y position to
- * throttle and brake values, including a configurable deadzone and
- * transition point.
+ * The mapping curve can be linear, quadratic, or exponential.
  */
-class PedalOverlayView(context: Context) : View(context) {
+class PedalOverlayView(
+    context: Context,
+    private val settings: ModConfig.Settings = ModConfig.Settings(
+        enableControlReplacement = true,
+        enableAutoDrs = true,
+        showOverlay = true,
+        pedalDeadzone = 0.05f,
+        pedalTransition = 0.5f,
+        pedalCurve = ModConfig.PedalCurve.LINEAR
+    )
+) : View(context) {
 
     private val throttlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(160, 0, 255, 0)
@@ -41,9 +51,9 @@ class PedalOverlayView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        val centerY = height / 2f
+        val centerY = height * settings.pedalTransition
         val throttleHeight = centerY * throttle
-        val brakeHeight = centerY * brake
+        val brakeHeight = (height - centerY) * brake
 
         canvas.drawRect(0f, centerY - throttleHeight, width.toFloat(), centerY, throttlePaint)
         canvas.drawRect(0f, centerY, width.toFloat(), centerY + brakeHeight, brakePaint)
@@ -68,23 +78,53 @@ class PedalOverlayView(context: Context) : View(context) {
     }
 
     /**
-     * Maps a finger Y coordinate to throttle/brake values.
+     * Maps a finger Y coordinate to throttle/brake values using the configured
+     * transition point, deadzone, and curve.
      */
     private fun updateValues(y: Float) {
-        // TODO(human): replace this placeholder with your mapping.
-        val centerY = height / 2f
-        when {
-            y < centerY -> {
-                throttle = 1f - (y / centerY).coerceIn(0f, 1f)
-                brake = 0f
-            }
-            else -> {
-                throttle = 0f
-                brake = ((y - centerY) / centerY).coerceIn(0f, 1f)
-            }
+        val height = this.height.toFloat()
+        if (height <= 0f) {
+            return
         }
+
+        val t = (y / height).coerceIn(0f, 1f)
+        val transition = settings.pedalTransition.coerceIn(0.1f, 0.9f)
+        val deadzone = settings.pedalDeadzone.coerceIn(0f, 0.5f)
+
+        if (t <= transition) {
+            val raw = if (transition <= 0f) 0f else 1f - (t / transition)
+            throttle = applyCurve(applyDeadzone(raw, deadzone))
+            brake = 0f
+        } else {
+            val raw = if (transition >= 1f) 0f else (t - transition) / (1f - transition)
+            throttle = 0f
+            brake = applyCurve(applyDeadzone(raw, deadzone))
+        }
+
         updateNativeValues()
         invalidate()
+    }
+
+    /**
+     * Applies the deadzone to a normalized [0,1] input value.
+     */
+    private fun applyDeadzone(value: Float, deadzone: Float): Float {
+        if (deadzone <= 0f) return value
+        if (value <= deadzone) return 0f
+        return (value - deadzone) / (1f - deadzone)
+    }
+
+    /**
+     * Applies the selected response curve to a normalized [0,1] input value.
+     */
+    private fun applyCurve(value: Float): Float {
+        val exponent = when (settings.pedalCurve) {
+            ModConfig.PedalCurve.LINEAR -> 1f
+            ModConfig.PedalCurve.QUADRATIC -> 2f
+            ModConfig.PedalCurve.EXPONENTIAL -> 2.5f
+        }
+        val result = value.coerceIn(0f, 1f).pow(exponent)
+        return result.coerceIn(0f, 1f)
     }
 
     private fun updateNativeValues() {

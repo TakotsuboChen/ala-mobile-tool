@@ -7,6 +7,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import tools.alamobile.mod.NativeBridge
+import tools.alamobile.mod.config.ModConfig
 
 /**
  * Adds pedal and gear-shift overlay views on top of the Unity activity.
@@ -19,10 +20,12 @@ class OverlayManager(context: Context) {
     private val windowManager = appContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val overlayViews = mutableListOf<View>()
 
+    private val settings by lazy { ModConfig.readFromTargetProcess(appContext) }
+
     fun showOverlays() {
         if (overlayViews.isNotEmpty()) return
 
-        val pedal = PedalOverlayView(appContext)
+        val pedal = PedalOverlayView(appContext, settings)
         addOverlay(pedal, Gravity.START or Gravity.CENTER_VERTICAL, 300, 600)
 
         val gearShift = GearShiftView(appContext)
