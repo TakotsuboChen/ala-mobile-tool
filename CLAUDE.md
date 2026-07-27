@@ -38,7 +38,7 @@ The module has three runtime contexts:
 
 1. **ConfigActivity** runs in the module's own process. It reads/writes settings to multi-process `SharedPreferences` and presents a miuix-themed UI.
 2. **AlaMobileModule** runs inside the target game process. It initializes the native bridge, installs the overlay, and reads configuration.
-3. **libala-core.so** also runs in the target game process. It receives method offsets from Java and installs inline hooks on the IL2CPP runtime via ShadowHook.
+3. **libala-core.so** also runs in the target game process. It receives method offsets from Java and installs inline hooks on the IL2CPP runtime via ShadowHook. **NOTE: `libxposed/ShadowHook` GitHub repo does not exist (404). Inline hook library choice is pending — see HANDOFF.md "留给用户的开放问题".**
 
 ## Common Commands
 
