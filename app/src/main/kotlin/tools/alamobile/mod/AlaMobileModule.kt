@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.os.Environment
 import android.util.Log
 import com.bytedance.shadowhook.ShadowHook
 import io.github.libxposed.api.XposedModule
@@ -13,6 +14,7 @@ import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
 import tools.alamobile.mod.config.ModConfig
 import tools.alamobile.mod.overlay.OverlayManager
 import tools.alamobile.mod.util.isSupportedVersion
+import java.io.File
 
 class AlaMobileModule : XposedModule() {
 
@@ -22,6 +24,17 @@ class AlaMobileModule : XposedModule() {
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         Log.i(TAG, "Module loaded in process ${param.processName}")
+        markActivated()
+    }
+
+    private fun markActivated() {
+        try {
+            val flag = File(Environment.getExternalStorageDirectory(), "AlaMobileTool/activated.flag")
+            flag.parentFile?.mkdirs()
+            flag.writeText("1")
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed to write activation flag", e)
+        }
     }
 
     override fun onPackageLoaded(param: PackageLoadedParam) {

@@ -33,6 +33,9 @@ object ModConfig {
     const val KEY_PEDAL_POSITION = "pedal_position"
     const val KEY_GEAR_POSITION = "gear_position"
 
+    // Debug/logging
+    const val KEY_LOG_ENABLED = "log_enabled"
+
     enum class PedalCurve(val value: String) {
         LINEAR("linear"),
         EXPONENTIAL("exponential"),
@@ -55,6 +58,7 @@ object ModConfig {
         val PEDAL_CURVE = PedalCurve.LINEAR
         val PEDAL_POSITION = OverlayPosition.DEFAULT_PEDAL
         val GEAR_POSITION = OverlayPosition.DEFAULT_GEAR
+        const val LOG_ENABLED = false
     }
 
     /**
@@ -123,7 +127,8 @@ object ModConfig {
                     json.optString(KEY_PEDAL_CURVE, Defaults.PEDAL_CURVE.value)
                 ),
                 pedalPosition = readOverlayPosition(json, KEY_PEDAL_POSITION, Defaults.PEDAL_POSITION),
-                gearPosition = readOverlayPosition(json, KEY_GEAR_POSITION, Defaults.GEAR_POSITION)
+                gearPosition = readOverlayPosition(json, KEY_GEAR_POSITION, Defaults.GEAR_POSITION),
+                logEnabled = json.optBoolean(KEY_LOG_ENABLED, Defaults.LOG_ENABLED)
             )
         } catch (e: Throwable) {
             defaultSettings()
@@ -148,6 +153,7 @@ object ModConfig {
             put(KEY_PEDAL_CURVE, settings.pedalCurve.value)
             put(KEY_PEDAL_POSITION, settings.pedalPosition.toJson())
             put(KEY_GEAR_POSITION, settings.gearPosition.toJson())
+            put(KEY_LOG_ENABLED, settings.logEnabled)
         }
 
         file.writeText(json.toString(2))
@@ -218,7 +224,8 @@ object ModConfig {
             pedalTransition = Defaults.PEDAL_TRANSITION,
             pedalCurve = Defaults.PEDAL_CURVE,
             pedalPosition = Defaults.PEDAL_POSITION,
-            gearPosition = Defaults.GEAR_POSITION
+            gearPosition = Defaults.GEAR_POSITION,
+            logEnabled = Defaults.LOG_ENABLED
         )
     }
 
@@ -231,6 +238,7 @@ object ModConfig {
         val pedalTransition: Float,
         val pedalCurve: PedalCurve,
         val pedalPosition: OverlayPosition = OverlayPosition.DEFAULT_PEDAL,
-        val gearPosition: OverlayPosition = OverlayPosition.DEFAULT_GEAR
+        val gearPosition: OverlayPosition = OverlayPosition.DEFAULT_GEAR,
+        val logEnabled: Boolean = Defaults.LOG_ENABLED
     )
 }

@@ -165,7 +165,8 @@ class OverlayManager(context: Context) {
             appContext,
             pedal,
             minPx,
-            minPx
+            minPx,
+            settings.pedalPosition
         ) { left, top, width, height ->
             saveOverlayPosition(ModConfig.KEY_PEDAL_POSITION, left, top, width, height)
         }
@@ -188,7 +189,8 @@ class OverlayManager(context: Context) {
             appContext,
             gear,
             minPx,
-            minPx
+            minPx,
+            settings.gearPosition
         ) { left, top, width, height ->
             saveOverlayPosition(ModConfig.KEY_GEAR_POSITION, left, top, width, height)
         }

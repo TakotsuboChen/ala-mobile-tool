@@ -50,6 +50,7 @@ android {
     buildFeatures {
         compose = true
         prefab = true
+        buildConfig = true
     }
 
     ndkVersion = "26.1.10909125"
@@ -89,6 +90,8 @@ dependencies {
 
     implementation(libs.miuix.ui)
     implementation(libs.activity.compose)
+    implementation(libs.material.icons.core)
+    implementation(libs.material3)
 
     implementation(libs.shadowhook)
 }

@@ -91,7 +91,7 @@ static void *input_writer_thread(void *arg) {
         if (controller != NULL) {
             apply_inputs_to_controller(controller);
         }
-        usleep(1000 * 16); // ~60 Hz
+        usleep(1000 * 2); // 2 ms -> ~500 Hz
     }
     return NULL;
 }
@@ -120,15 +120,12 @@ static void disable_automatic_gear(void *drivetrain) {
 static void proxy_set_throttle(void *this, float value) {
     g_last_controller = this;
 
+    // When the overlay is controlling throttle, do not let the original setter
+    // process the game's value. The background writer continuously overwrites
+    // the instance fields, which is more reliable than replacing the argument
+    // and calling the original function (that may smooth/clamp the value).
     if (g_throttle_active) {
-        float new_value = g_throttle_value;
-        if (new_value < 0.0f) new_value = 0.0f;
-        if (new_value > 1.0f) new_value = 1.0f;
-        value = new_value;
-        write_float_field(this, g_config.throttle_field_offset, value);
-        if (g_config.actual_throttle_field_offset != 0) {
-            write_float_field(this, g_config.actual_throttle_field_offset, value);
-        }
+        return;
     }
 
     typedef void (*orig_t)(void *, float);
@@ -141,14 +138,7 @@ static void proxy_set_brake(void *this, float value) {
     g_last_controller = this;
 
     if (g_brake_active) {
-        float new_value = g_brake_value;
-        if (new_value < 0.0f) new_value = 0.0f;
-        if (new_value > 1.0f) new_value = 1.0f;
-        value = new_value;
-        write_float_field(this, g_config.brake_field_offset, value);
-        if (g_config.actual_brake_field_offset != 0) {
-            write_float_field(this, g_config.actual_brake_field_offset, value);
-        }
+        return;
     }
 
     typedef void (*orig_t)(void *, float);
@@ -181,6 +171,8 @@ static void proxy_fixed_update(void *this) {
         if (drivetrain != 0) {
             g_player_drivetrain = drivetrain;
         }
+        // Ensure our inputs are present before the physics tick reads them.
+        apply_inputs_to_controller(this);
     }
 
     typedef void (*orig_t)(void *);

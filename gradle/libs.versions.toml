@@ -7,6 +7,8 @@ libxposed-api = "102.0.0"
 libxposed-service = "102.0.0"
 activity-compose = "1.10.1"
 shadowhook = "2.0.1"
+material-icons-core = "1.7.1"
+material3 = "1.3.1"
 
 [libraries]
 libxposed-api = { group = "io.github.libxposed", name = "api", version.ref = "libxposed-api" }
@@ -14,6 +16,8 @@ libxposed-service = { group = "io.github.libxposed", name = "service", version.r
 miuix-ui = { group = "top.yukonga.miuix.kmp", name = "miuix-ui", version.ref = "miuix" }
 activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activity-compose" }
 shadowhook = { group = "com.bytedance.android", name = "shadowhook", version.ref = "shadowhook" }
+material-icons-core = { group = "org.jetbrains.compose.material", name = "material-icons-core", version.ref = "material-icons-core" }
+material3 = { group = "androidx.compose.material3", name = "material3", version.ref = "material3" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

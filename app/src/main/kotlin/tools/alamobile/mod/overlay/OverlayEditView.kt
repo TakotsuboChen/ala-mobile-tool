@@ -22,6 +22,7 @@ class OverlayEditView(
     private val target: View,
     private val minWidth: Int,
     private val minHeight: Int,
+    private val defaultPosition: OverlayPosition,
     private val onChanged: ((left: Int, top: Int, width: Int, height: Int) -> Unit)?
 ) : View(context) {
 
@@ -51,6 +52,10 @@ class OverlayEditView(
     private var startTouchX = 0f
     private var startTouchY = 0f
     private var longPressHandled = false
+    private var editLeft = 0
+    private var editTop = 0
+    private var editWidth = 0
+    private var editHeight = 0
 
     private val longPressHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val longPressRunnable = Runnable {
@@ -88,15 +93,16 @@ class OverlayEditView(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                syncStateFromTarget()
                 mode = detectMode(event.x, event.y)
                 lastX = event.x
                 lastY = event.y
-                startTouchX = event.x
-                startTouchY = event.y
-                startWidth = target.width
-                startHeight = target.height
-                startLeft = (target.layoutParams as? FrameLayout.LayoutParams)?.leftMargin ?: 0
-                startTop = (target.layoutParams as? FrameLayout.LayoutParams)?.topMargin ?: 0
+                startTouchX = event.rawX
+                startTouchY = event.rawY
+                startWidth = editWidth
+                startHeight = editHeight
+                startLeft = editLeft
+                startTop = editTop
                 longPressHandled = false
 
                 longPressHandler.postDelayed(longPressRunnable, 500)
@@ -104,9 +110,9 @@ class OverlayEditView(
             }
 
             MotionEvent.ACTION_MOVE -> {
-                if (mode == Mode.NONE) {
-                    if (abs(event.x - startTouchX) > touchSlop ||
-                        abs(event.y - startTouchY) > touchSlop
+                if (mode == Mode.NONE && !longPressHandled) {
+                    if (abs(event.rawX - startTouchX) > touchSlop ||
+                        abs(event.rawY - startTouchY) > touchSlop
                     ) {
                         mode = Mode.MOVE
                         longPressHandler.removeCallbacks(longPressRunnable)
@@ -150,33 +156,32 @@ class OverlayEditView(
     }
 
     private fun handleMove(event: MotionEvent) {
-        val dx = event.x - lastX
-        val dy = event.y - lastY
-        val params = target.layoutParams as? FrameLayout.LayoutParams ?: return
-        params.leftMargin = max(0, params.leftMargin + dx.toInt())
-        params.topMargin = max(0, params.topMargin + dy.toInt())
-        target.layoutParams = params
-        onChanged?.invoke(params.leftMargin, params.topMargin, params.width, params.height)
+        val deltaX = (event.rawX - startTouchX).toInt()
+        val deltaY = (event.rawY - startTouchY).toInt()
+
+        val newLeft = max(0, startLeft + deltaX)
+        val newTop = max(0, startTop + deltaY)
+        updateTarget(newLeft, newTop, startWidth, startHeight)
     }
 
     private fun handleResizeBottomRight(event: MotionEvent) {
-        val newWidth = max(minWidth, (event.x).toInt())
-        val newHeight = max(minHeight, (event.y).toInt())
+        val newWidth = max(minWidth, startWidth + (event.rawX - startTouchX).toInt())
+        val newHeight = max(minHeight, startHeight + (event.rawY - startTouchY).toInt())
         updateTarget(startLeft, startTop, newWidth, newHeight)
     }
 
     private fun handleResizeBottomLeft(event: MotionEvent) {
         val right = startLeft + startWidth
-        val newWidth = max(minWidth, (right - event.x).toInt())
-        val newHeight = max(minHeight, (event.y).toInt())
+        val newWidth = max(minWidth, startWidth - (event.rawX - startTouchX).toInt())
+        val newHeight = max(minHeight, startHeight + (event.rawY - startTouchY).toInt())
         val newLeft = right - newWidth
         updateTarget(newLeft, startTop, newWidth, newHeight)
     }
 
     private fun handleResizeTopRight(event: MotionEvent) {
         val bottom = startTop + startHeight
-        val newWidth = max(minWidth, (event.x).toInt())
-        val newHeight = max(minHeight, (bottom - event.y).toInt())
+        val newWidth = max(minWidth, startWidth + (event.rawX - startTouchX).toInt())
+        val newHeight = max(minHeight, startHeight - (event.rawY - startTouchY).toInt())
         val newTop = bottom - newHeight
         updateTarget(startLeft, newTop, newWidth, newHeight)
     }
@@ -184,34 +189,55 @@ class OverlayEditView(
     private fun handleResizeTopLeft(event: MotionEvent) {
         val right = startLeft + startWidth
         val bottom = startTop + startHeight
-        val newWidth = max(minWidth, (right - event.x).toInt())
-        val newHeight = max(minHeight, (bottom - event.y).toInt())
+        val newWidth = max(minWidth, startWidth - (event.rawX - startTouchX).toInt())
+        val newHeight = max(minHeight, startHeight - (event.rawY - startTouchY).toInt())
         val newLeft = right - newWidth
         val newTop = bottom - newHeight
         updateTarget(newLeft, newTop, newWidth, newHeight)
     }
 
     private fun updateTarget(left: Int, top: Int, width: Int, height: Int) {
+        editLeft = max(0, left)
+        editTop = max(0, top)
+        editWidth = max(minWidth, width)
+        editHeight = max(minHeight, height)
+
         val params = target.layoutParams as? FrameLayout.LayoutParams ?: return
-        params.width = max(minWidth, width)
-        params.height = max(minHeight, height)
-        params.leftMargin = max(0, left)
-        params.topMargin = max(0, top)
+        params.width = editWidth
+        params.height = editHeight
+        params.leftMargin = editLeft
+        params.topMargin = editTop
         target.layoutParams = params
-        onChanged?.invoke(params.leftMargin, params.topMargin, params.width, params.height)
+        onChanged?.invoke(editLeft, editTop, editWidth, editHeight)
+
+        val editParams = this.layoutParams as? FrameLayout.LayoutParams ?: return
+        if (editParams.leftMargin != editLeft || editParams.topMargin != editTop ||
+            editParams.width != editWidth || editParams.height != editHeight
+        ) {
+            editParams.width = editWidth
+            editParams.height = editHeight
+            editParams.leftMargin = editLeft
+            editParams.topMargin = editTop
+            this.layoutParams = editParams
+        }
     }
 
     private fun resetPosition() {
-        val params = target.layoutParams as? FrameLayout.LayoutParams ?: return
-        val default = OverlayPosition.DEFAULT_PEDAL
         val screenWidth = context.resources.displayMetrics.widthPixels
         val screenHeight = context.resources.displayMetrics.heightPixels
-        params.leftMargin = default.leftPx(screenWidth)
-        params.topMargin = default.topPx(screenHeight)
-        params.width = default.widthPx(context, screenWidth)
-        params.height = default.heightPx(context, screenHeight)
-        target.layoutParams = params
-        onChanged?.invoke(params.leftMargin, params.topMargin, params.width, params.height)
+        val left = defaultPosition.leftPx(screenWidth)
+        val top = defaultPosition.topPx(screenHeight)
+        val width = defaultPosition.widthPx(context, screenWidth)
+        val height = defaultPosition.heightPx(context, screenHeight)
+        updateTarget(left, top, width, height)
+    }
+
+    private fun syncStateFromTarget() {
+        val params = target.layoutParams as? FrameLayout.LayoutParams ?: return
+        editLeft = max(0, params.leftMargin)
+        editTop = max(0, params.topMargin)
+        editWidth = max(minWidth, params.width)
+        editHeight = max(minHeight, params.height)
     }
 
     private enum class Mode {
