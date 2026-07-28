@@ -123,7 +123,7 @@ Two areas are explicitly designated for human contribution during implementation
 - M2: ByteDance ShadowHook integration and real inline hooks for throttle/brake/DRS — done.
 - M3: Configurable MIUIX settings UI, JSON config, pedal mapping curve, and release packaging — done.
 - M4: Overlay display and pedal input verification in-game — done. Shift hooks and DRS auto logic remain pending.
-- M5: Overlay editor sync, pedal stutter mitigation, and ConfigActivity three-tab UI refactor — in progress.
+- M5: Overlay editor sync, pedal stutter mitigation, and ConfigActivity three-tab UI refactor — done (v1.0.0-Alpha-2). Published with KernelSU-style UI, dark mode support, and demo videos.
 
 ## Notes for Future Changes
 
