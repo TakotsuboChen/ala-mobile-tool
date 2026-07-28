@@ -25,10 +25,10 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: 'platforms;android-37 build-tools;37.0.0 ndk;26.1.10909125'
+      - name: Set up Android SDK (platform 37 + NDK)
+        run: |
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --channel=3 \
+            "platforms;android-37" "build-tools;37.0.0" "ndk;26.1.10909125"
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
