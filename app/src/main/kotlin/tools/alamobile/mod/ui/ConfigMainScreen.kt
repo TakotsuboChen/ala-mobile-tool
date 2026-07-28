@@ -24,8 +24,8 @@ import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -44,7 +44,6 @@ import top.yukonga.miuix.kmp.basic.NavigationBarItem
 import top.yukonga.miuix.kmp.basic.NavigationRail
 import top.yukonga.miuix.kmp.basic.NavigationRailItem
 import top.yukonga.miuix.kmp.basic.Scaffold
-import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.rememberNavigationRailState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -58,23 +57,18 @@ fun ConfigMainScreen(
     val context = LocalContext.current
     val settings = remember { ModConfig.read(context) }
 
-    val enableControlReplacementState = remember { mutableStateOf(settings.enableControlReplacement) }
-    val enableAutoDrsState = remember { mutableStateOf(settings.enableAutoDrs) }
-    val showOverlayState = remember { mutableStateOf(settings.showOverlay) }
-    val disableAutoGearState = remember { mutableStateOf(settings.disableAutoGear) }
-    val deadzoneState = remember { mutableStateOf(settings.pedalDeadzone) }
-    val transitionState = remember { mutableStateOf(settings.pedalTransition) }
-    val curveState = remember { mutableStateOf(settings.pedalCurve) }
-    val logEnabledState = remember { mutableStateOf(settings.logEnabled) }
-
-    var enableControlReplacement by enableControlReplacementState
-    var enableAutoDrs by enableAutoDrsState
-    var showOverlay by showOverlayState
-    var disableAutoGear by disableAutoGearState
-    var deadzone by deadzoneState
-    var transition by transitionState
-    var curve by curveState
-    var logEnabled by logEnabledState
+    val uiState = remember {
+        ConfigUiState(
+            enableControlReplacement = mutableStateOf(settings.enableControlReplacement),
+            enableAutoDrs = mutableStateOf(settings.enableAutoDrs),
+            showOverlay = mutableStateOf(settings.showOverlay),
+            disableAutoGear = mutableStateOf(settings.disableAutoGear),
+            deadzone = mutableStateOf(settings.pedalDeadzone),
+            transition = mutableStateOf(settings.pedalTransition),
+            curve = mutableStateOf(settings.pedalCurve),
+            logEnabled = mutableStateOf(settings.logEnabled)
+        )
+    }
 
     val saveHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
     var saveRunnable: Runnable? = null
@@ -85,14 +79,14 @@ fun ConfigMainScreen(
             ModConfig.write(
                 context,
                 ModConfig.Settings(
-                    enableControlReplacement = enableControlReplacement,
-                    enableAutoDrs = enableAutoDrs,
-                    showOverlay = showOverlay,
-                    disableAutoGear = disableAutoGear,
-                    pedalDeadzone = deadzone,
-                    pedalTransition = transition,
-                    pedalCurve = curve,
-                    logEnabled = logEnabled
+                    enableControlReplacement = uiState.enableControlReplacement.value,
+                    enableAutoDrs = uiState.enableAutoDrs.value,
+                    showOverlay = uiState.showOverlay.value,
+                    disableAutoGear = uiState.disableAutoGear.value,
+                    pedalDeadzone = uiState.deadzone.value,
+                    pedalTransition = uiState.transition.value,
+                    pedalCurve = uiState.curve.value,
+                    logEnabled = uiState.logEnabled.value
                 )
             )
         }
@@ -100,61 +94,9 @@ fun ConfigMainScreen(
         saveHandler.postDelayed(runnable, 300)
     }
 
-    val switchSave: (() -> Unit) -> Unit = { action ->
-        action()
-        saveNow()
-    }
-
-    val uiState = remember {
-        ConfigUiState(
-            enableControlReplacement = enableControlReplacement,
-            enableAutoDrs = enableAutoDrs,
-            showOverlay = showOverlay,
-            disableAutoGear = disableAutoGear,
-            deadzone = deadzone,
-            transition = transition,
-            curve = curve,
-            logEnabled = logEnabled
-        )
-    }
-
-    DisposableEffect(
-        enableControlReplacement,
-        enableAutoDrs,
-        showOverlay,
-        disableAutoGear,
-        deadzone,
-        transition,
-        curve,
-        logEnabled
-    ) {
-        uiState.enableControlReplacement = enableControlReplacement
-        uiState.enableAutoDrs = enableAutoDrs
-        uiState.showOverlay = showOverlay
-        uiState.disableAutoGear = disableAutoGear
-        uiState.deadzone = deadzone
-        uiState.transition = transition
-        uiState.curve = curve
-        uiState.logEnabled = logEnabled
-        onDispose { }
-    }
-
-    val actions = remember {
-        ConfigActions(
-            onSetControlReplacement = { switchSave { enableControlReplacement = it } },
-            onSetAutoDrs = { switchSave { enableAutoDrs = it } },
-            onSetShowOverlay = { switchSave { showOverlay = it } },
-            onSetDisableAutoGear = { switchSave { disableAutoGear = it } },
-            onSetDeadzone = { switchSave { deadzone = it } },
-            onSetTransition = { switchSave { transition = it } },
-            onSetCurve = { switchSave { curve = it } },
-            onSetLogEnabled = { switchSave { logEnabled = it } }
-        )
-    }
-
     ConfigMainScreenContent(
         uiState = uiState,
-        actions = actions,
+        onSave = saveNow,
         onFinish = onFinish
     )
 }
@@ -162,7 +104,7 @@ fun ConfigMainScreen(
 @Composable
 private fun ConfigMainScreenContent(
     uiState: ConfigUiState,
-    actions: ConfigActions,
+    onSave: () -> Unit,
     onFinish: () -> Unit
 ) {
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { Tab.entries.size })
@@ -172,18 +114,12 @@ private fun ConfigMainScreenContent(
     CompositionLocalProvider(
         LocalMainPagerState provides pagerStateHolder
     ) {
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = "Ala Mobile Tool"
-                )
-            }
-        ) { innerPadding ->
+        Scaffold { innerPadding ->
             Box(modifier = Modifier.fillMaxSize()) {
                 val pagerContent: @Composable (bottomPadding: Dp) -> Unit = { bottomPadding ->
                     HorizontalPager(
                         state = pagerState,
-                        beyondViewportPageCount = Tab.entries.size,
+                        beyondViewportPageCount = 1,
                         userScrollEnabled = true,
                         modifier = Modifier.fillMaxSize()
                     ) { page ->
@@ -191,11 +127,11 @@ private fun ConfigMainScreenContent(
                             Tab.HOME -> OverviewPage()
                             Tab.CONFIGURE -> ConfigurePage(
                                 uiState = uiState,
-                                actions = actions
+                                onSave = onSave
                             )
                             Tab.SETTINGS -> SettingsPage(
-                                logEnabled = uiState.logEnabled,
-                                onLogEnabled = { actions.onSetLogEnabled(it) }
+                                uiState = uiState,
+                                onSave = onSave
                             )
                         }
                     }
@@ -212,7 +148,7 @@ private fun ConfigMainScreenContent(
                             modifier = Modifier.fillMaxHeight()
                         ) {
                             Tab.entries.forEachIndexed { index, tab ->
-                                this.NavigationRailItem(
+                                NavigationRailItem(
                                     selected = pagerStateHolder.selectedPage == index,
                                     onClick = { pagerStateHolder.animateToPage(index) },
                                     icon = tab.selectedIcon,
@@ -265,25 +201,14 @@ private enum class Tab(
 }
 
 class ConfigUiState(
-    var enableControlReplacement: Boolean,
-    var enableAutoDrs: Boolean,
-    var showOverlay: Boolean,
-    var disableAutoGear: Boolean,
-    var deadzone: Float,
-    var transition: Float,
-    var curve: ModConfig.PedalCurve,
-    var logEnabled: Boolean = false
-)
-
-class ConfigActions(
-    var onSetControlReplacement: (Boolean) -> Unit = {},
-    var onSetAutoDrs: (Boolean) -> Unit = {},
-    var onSetShowOverlay: (Boolean) -> Unit = {},
-    var onSetDisableAutoGear: (Boolean) -> Unit = {},
-    var onSetDeadzone: (Float) -> Unit = {},
-    var onSetTransition: (Float) -> Unit = {},
-    var onSetCurve: (ModConfig.PedalCurve) -> Unit = {},
-    var onSetLogEnabled: (Boolean) -> Unit = {}
+    val enableControlReplacement: MutableState<Boolean>,
+    val enableAutoDrs: MutableState<Boolean>,
+    val showOverlay: MutableState<Boolean>,
+    val disableAutoGear: MutableState<Boolean>,
+    val deadzone: MutableState<Float>,
+    val transition: MutableState<Float>,
+    val curve: MutableState<ModConfig.PedalCurve>,
+    val logEnabled: MutableState<Boolean>
 )
 
 class MainPagerState(

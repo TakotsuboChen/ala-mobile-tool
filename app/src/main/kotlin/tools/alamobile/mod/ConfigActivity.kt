@@ -5,6 +5,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
+import androidx.navigationevent.compose.rememberNavigationEventDispatcherOwner
 import tools.alamobile.mod.ui.ConfigMainScreen
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.darkColorScheme
@@ -20,7 +23,12 @@ class ConfigActivity : ComponentActivity() {
             MiuixTheme(
                 colors = if (darkTheme) darkColorScheme() else lightColorScheme()
             ) {
-                ConfigMainScreen(onFinish = { finish() })
+                val dispatcherOwner = rememberNavigationEventDispatcherOwner(parent = null)
+                CompositionLocalProvider(
+                    LocalNavigationEventDispatcherOwner provides dispatcherOwner
+                ) {
+                    ConfigMainScreen(onFinish = { finish() })
+                }
             }
         }
     }

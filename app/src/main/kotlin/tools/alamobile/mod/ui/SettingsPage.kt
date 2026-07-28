@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
@@ -38,8 +39,8 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
 @Composable
 fun SettingsPage(
-    logEnabled: Boolean,
-    onLogEnabled: (Boolean) -> Unit
+    uiState: ConfigUiState,
+    onSave: () -> Unit
 ) {
     val context = LocalContext.current
     val scrollBehavior = MiuixScrollBehavior()
@@ -68,14 +69,20 @@ fun SettingsPage(
                     modifier = Modifier.padding(vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    SmallTitle(text = "日志")
+                    SmallTitle(
+                        text = "日志",
+                        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                    )
                     Card(modifier = Modifier.fillMaxWidth()) {
                         SwitchRow(
                             title = "启用日志",
                             summary = "记录模块运行日志以便排查问题",
                             icon = Icons.Rounded.Warning,
-                            checked = logEnabled,
-                            onCheckedChange = onLogEnabled
+                            checked = uiState.logEnabled.value,
+                            onCheckedChange = {
+                                uiState.logEnabled.value = it
+                                onSave()
+                            }
                         )
                         ArrowRow(
                             title = "导出并分享日志",
@@ -87,7 +94,10 @@ fun SettingsPage(
                         )
                     }
 
-                    SmallTitle(text = "调试")
+                    SmallTitle(
+                        text = "调试",
+                        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                    )
                     Card(modifier = Modifier.fillMaxWidth()) {
                         ArrowRow(
                             title = "清除激活标记",

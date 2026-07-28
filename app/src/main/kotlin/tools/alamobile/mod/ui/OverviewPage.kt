@@ -8,10 +8,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+// matchParentSize not used, using fillMaxSize instead
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -21,10 +24,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.rounded.CheckCircleOutline
+import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Phone
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -45,6 +51,7 @@ import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
@@ -91,35 +98,63 @@ fun OverviewPage() {
 private fun ActivationCard() {
     val context = LocalContext.current
     val activated = remember { LsposedStatus.isActivated(context) }
+    val isDark = isSystemInDarkTheme()
+
+    // KernelSU 风格自适应颜色：深色 #1A3825，浅色 #DFFAE4
+    val cardColor = if (activated) {
+        if (isDark) Color(0xFF1A3825) else Color(0xFFDFFAE4)
+    } else {
+        MiuixTheme.colorScheme.surface
+    }
+
+    val textColor = if (activated && isDark) Color.White else MiuixTheme.colorScheme.onSurface
+    val descColor = if (activated && isDark) Color(0xCCFFFFFF) else MiuixTheme.colorScheme.onSurfaceVariantSummary
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.defaultColors(
-            color = if (activated) {
-                Color(0xFFDFFAE4)
-            } else {
-                MiuixTheme.colorScheme.surface
-            }
-        )
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(90.dp),
+        colors = CardDefaults.defaultColors(color = cardColor),
+        onClick = {},
+        showIndication = true,
+        pressFeedbackType = if (activated) PressFeedbackType.Tilt else PressFeedbackType.Sink
     ) {
-        BasicComponent(
-            title = if (activated) "已激活" else "未激活",
-            summary = if (activated) {
-                "模块已通过 LSPosed 加载"
-            } else {
-                "请前往 LSPosed Manager 启用本模块"
-            },
-            startAction = {
-                Icon(
-                    imageVector = if (activated) Icons.Default.Check else Icons.Default.Close,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .padding(end = 12.dp)
-                        .size(28.dp),
-                    tint = if (activated) Color(0xFF36D167) else Color(0xFFFF5252)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+        ) {
+            // 右下角大图标，超出边界被裁剪
+            Icon(
+                imageVector = if (activated) Icons.Rounded.CheckCircleOutline else Icons.Rounded.ErrorOutline,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(120.dp)
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 35.dp, y = 25.dp),
+                tint = if (activated) Color(0xFF36D167) else Color(0xFFFF5252)
+            )
+
+            // 左上角文本内容
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .align(Alignment.TopStart)
+            ) {
+                Text(
+                    text = if (activated) "已激活" else "未激活",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = textColor
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = if (activated) "模块已通过 LSPosed 加载" else "请前往 LSPosed Manager 启用本模块",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = descColor
                 )
             }
-        )
+        }
     }
 }
 
@@ -192,7 +227,7 @@ private fun LinksCard() {
                         tint = MiuixTheme.colorScheme.onBackground
                     )
                 },
-                onClick = { openExternalUrl(context, "https://qun.qq.com/universal-share/share?ac=1&authKey=V0nuKHg0u%2BZKVi%2FjgDReAiZSCQdbMb0yMwaOSV49gejQWRtdz%2BG4G6eQQgWyFOJB&busi_data=eyJncm91cENvZGUiOiI3NTc5NDA3MDgiLCJ0b2tlbiI6IjVzRjZTTWpLckJIRExvRTk3K0QzVzJGK2N4QURRM2RwRjJWNkw0L29wcG9wa3IyNTV6OU9YS2dhSVZGV2ZIeTFQaiIsInVpbiI6IjEyNTk5NzY1NTUyMCJ9%3D&data=x1JvsLJUAovAdpfNmLQpuTN_-yGbUrMfCJ1VSQqD-QbIzj9-ZLiRKNEHNbJXpokkPhx5cc-RG47HyWYUrPBtTA&svctype=4&tempid=h5_group_info") }
+                onClick = { openExternalUrl(context, "https://qun.qq.com/universal-share/share?ac=1&authKey=V0nuKHg0u%2BZKVi/jgDReAiZSCQdbMb0yMwaOSV49gejQWRtdz%2BG4G6eQQgWyFOJB&busi_data=eyJncm91cENvZGUiOiI3NTc5NDA3MDgiLCJ0b2tlbiI6IjVzRjZTTWpLckJIRExvRTk3K0QzVzJGK2N4QURRM2RwRjJWNkw0L29wcG9ocjI1NXo5T1hLZ2FJVkZXZkhlMVAiLCJ1aW4iOiIxMjU5OTc2NTIwIn0=&data=x1JvsLJUAovAdpfNmLQpuTN_-yGbUrMfCJ1VSQqD-QbIzj9-ZLiRKNEHNbJXpokkPhx5cc-RG47HyWYUrPBtTA&svctype=4&tempid=h5_group_info") }
             )
             BasicComponent(
                 title = "GitHub 源代码",

@@ -12,8 +12,8 @@ android {
         applicationId = "tools.alamobile.mod"
         minSdk = 26
         targetSdk = 35
-        versionCode = 100
-        versionName = "1.0.0-Alpha-1"
+        versionCode = 100120
+        versionName = "1.0.0-Alpha-2"
     }
 
     signingConfigs {
@@ -91,6 +91,7 @@ dependencies {
     implementation(libs.miuix.ui)
     implementation(libs.miuix.preference)
     implementation(libs.activity.compose)
+    implementation(libs.navigationevent.compose)
     implementation(libs.material.icons.core)
     implementation(libs.material.icons.extended)
     implementation(libs.material3)
