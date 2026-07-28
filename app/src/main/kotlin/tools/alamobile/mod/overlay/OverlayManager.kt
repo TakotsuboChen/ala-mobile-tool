@@ -49,8 +49,13 @@ class OverlayManager(context: Context) {
         addToggleButton()
         addGamingOverlays()
 
-        NativeBridge.setThrottle(0f)
-        NativeBridge.setBrake(0f)
+        // Initialize IPC file with zero values in app cache dir
+        try {
+            val ipcFile = java.io.File(appContext.cacheDir, "ala_input.dat")
+            ipcFile.writeText("0 0 0")
+        } catch (e: Exception) {
+            android.util.Log.w("AlaMobileTool", "Failed to init IPC file: ${e.message}")
+        }
     }
 
     private fun addToggleButton() {

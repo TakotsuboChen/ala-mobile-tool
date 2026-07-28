@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import tools.alamobile.mod.NativeBridge
@@ -12,6 +13,10 @@ import tools.alamobile.mod.NativeBridge
  * On-screen upshift/downshift buttons.
  */
 class GearShiftView(context: Context) : View(context) {
+
+    companion object {
+        private const val TAG = "AlaMobileTool"
+    }
 
     private val upPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(160, 0, 200, 255)
@@ -46,11 +51,37 @@ class GearShiftView(context: Context) : View(context) {
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
-                if (event.y < height / 2f) {
-                    NativeBridge.shiftUp()
-                } else {
-                    NativeBridge.shiftDown()
+                val isUp = event.y < height / 2f
+
+                // Increment the shared shift counter.
+                // Odd values = shift up, even values = shift down.
+                // Native detects the *change* in value to fire a one-shot command.
+                PedalOverlayView.sharedShiftCmd++
+                val cmd = PedalOverlayView.sharedShiftCmd
+                if (isUp && cmd % 2 != 1) {
+                    PedalOverlayView.sharedShiftCmd++
+                } else if (!isUp && cmd % 2 != 0) {
+                    PedalOverlayView.sharedShiftCmd++
                 }
+
+                Log.d(TAG, "Shift ${if (isUp) "up" else "down"}, cmd=${PedalOverlayView.sharedShiftCmd}")
+
+                // Flush to IPC file (works for ALL builds)
+                PedalOverlayView.flushToIpc()
+
+                // Also try direct JNI (fast path for original build)
+                if (NativeBridge.isAvailable) {
+                    try {
+                        if (isUp) {
+                            NativeBridge.shiftUp()
+                        } else {
+                            NativeBridge.shiftDown()
+                        }
+                    } catch (_: Throwable) {
+                        // JNI may fail in coexistence builds; file IPC is the fallback
+                    }
+                }
+
                 return true
             }
         }

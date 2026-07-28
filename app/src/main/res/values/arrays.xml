@@ -2,5 +2,6 @@
 <resources>
     <string-array name="xposed_scope">
         <item>com.Vince.AlamobileFormula</item>
+        <item>com.Takotsubo.AlamobileFormula</item>
     </string-array>
 </resources>

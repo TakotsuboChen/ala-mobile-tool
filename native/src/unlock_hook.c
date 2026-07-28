@@ -1,6 +1,7 @@
 #include "unlock_hook.h"
 #include <android/log.h>
-#include <dlfcn.h>
+#include <inttypes.h>
+#include <link.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -14,7 +15,6 @@
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 
 static unlock_hook_config_t g_config = {0};
-static void *g_il2cpp_handle = NULL;
 
 // Original function pointers
 typedef void (*awake_func_t)(void *this_ptr);
@@ -28,6 +28,30 @@ static init_billing_func_t orig_init_billing = NULL;
 static on_owned_none_func_t orig_on_owned_none = NULL;
 static on_purchase_failed_func_t orig_on_purchase_failed = NULL;
 static set_unlocked_func_t orig_set_unlocked = NULL;
+
+// Use dl_iterate_phdr to get the actual load base of libil2cpp.so.
+// dlopen() returns an opaque soinfo* handle, NOT the load base address,
+// so we must not use it for offset calculations.
+typedef struct {
+    const char *name;
+    uintptr_t base;
+} find_module_ctx_t;
+
+static int find_module_callback(struct dl_phdr_info *info, size_t size, void *data) {
+    (void) size;
+    find_module_ctx_t *ctx = (find_module_ctx_t *) data;
+    if (info->dlpi_name != NULL && strstr(info->dlpi_name, ctx->name) != NULL) {
+        ctx->base = (uintptr_t) info->dlpi_addr;
+        return 1;
+    }
+    return 0;
+}
+
+static uintptr_t get_module_base(const char *module_name) {
+    find_module_ctx_t ctx = {.name = module_name, .base = 0};
+    dl_iterate_phdr(find_module_callback, &ctx);
+    return ctx.base;
+}
 
 // Hook for BillingManager.Awake() - completely skip it and set unlock state
 static void hook_awake(void *this_ptr) {
@@ -85,18 +109,18 @@ bool unlock_install_hooks(const unlock_hook_config_t *config) {
 
     LOGI("Installing unlock hooks...");
 
-    // Load libil2cpp.so
-    g_il2cpp_handle = dlopen("libil2cpp.so", RTLD_NOW);
-    if (!g_il2cpp_handle) {
-        LOGE("Failed to dlopen libil2cpp.so: %s", dlerror());
+    // Get the actual load base of libil2cpp.so via dl_iterate_phdr.
+    // dlopen() returns an opaque handle, NOT the load base address.
+    uintptr_t base = get_module_base("libil2cpp.so");
+    if (base == 0) {
+        LOGE("Failed to locate libil2cpp.so base address");
         return false;
     }
-
-    LOGI("libil2cpp.so loaded at %p", g_il2cpp_handle);
+    LOGI("libil2cpp.so base address: 0x%" PRIxPTR, base);
 
     // Hook 1: BillingManager.Awake()
     if (g_config.billing_manager_awake_offset != 0) {
-        void *awake_addr = (void *)((uint8_t *)g_il2cpp_handle + g_config.billing_manager_awake_offset);
+        void *awake_addr = (void *)(base + g_config.billing_manager_awake_offset);
         LOGI("Hooking BillingManager.Awake() at %p", awake_addr);
 
         void *result = shadowhook_hook_sym_addr(
@@ -116,7 +140,7 @@ bool unlock_install_hooks(const unlock_hook_config_t *config) {
 
     // Hook 2: BillingManager.InitializeBilling()
     if (g_config.billing_manager_initialize_billing_offset != 0) {
-        void *init_billing_addr = (void *)((uint8_t *)g_il2cpp_handle + g_config.billing_manager_initialize_billing_offset);
+        void *init_billing_addr = (void *)(base + g_config.billing_manager_initialize_billing_offset);
         LOGI("Hooking BillingManager.InitializeBilling() at %p", init_billing_addr);
 
         void *result = shadowhook_hook_sym_addr(
@@ -134,7 +158,7 @@ bool unlock_install_hooks(const unlock_hook_config_t *config) {
 
     // Hook 3: BillingManager.OnOwnedNone()
     if (g_config.billing_manager_on_owned_none_offset != 0) {
-        void *on_owned_none_addr = (void *)((uint8_t *)g_il2cpp_handle + g_config.billing_manager_on_owned_none_offset);
+        void *on_owned_none_addr = (void *)(base + g_config.billing_manager_on_owned_none_offset);
         LOGI("Hooking BillingManager.OnOwnedNone() at %p", on_owned_none_addr);
 
         void *result = shadowhook_hook_sym_addr(
@@ -152,7 +176,7 @@ bool unlock_install_hooks(const unlock_hook_config_t *config) {
 
     // Hook 4: BillingManager.OnPurchaseFailed()
     if (g_config.billing_manager_on_purchase_failed_offset != 0) {
-        void *on_purchase_failed_addr = (void *)((uint8_t *)g_il2cpp_handle + g_config.billing_manager_on_purchase_failed_offset);
+        void *on_purchase_failed_addr = (void *)(base + g_config.billing_manager_on_purchase_failed_offset);
         LOGI("Hooking BillingManager.OnPurchaseFailed() at %p", on_purchase_failed_addr);
 
         void *result = shadowhook_hook_sym_addr(
@@ -175,11 +199,7 @@ bool unlock_install_hooks(const unlock_hook_config_t *config) {
 void unlock_uninstall_hooks(void) {
     LOGI("Uninstalling unlock hooks");
 
-    if (g_il2cpp_handle) {
-        dlclose(g_il2cpp_handle);
-        g_il2cpp_handle = NULL;
-    }
-
+    // No need to dlclose - we used dl_iterate_phdr instead of dlopen
     orig_awake = NULL;
     orig_init_billing = NULL;
     orig_on_owned_none = NULL;

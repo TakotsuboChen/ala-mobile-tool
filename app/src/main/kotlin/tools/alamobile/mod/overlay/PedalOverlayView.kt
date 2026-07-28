@@ -4,10 +4,15 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import tools.alamobile.mod.NativeBridge
 import tools.alamobile.mod.config.ModConfig
+import java.io.File
+import java.io.RandomAccessFile
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.math.pow
 
 /**
@@ -35,6 +40,64 @@ class PedalOverlayView(
     )
 ) : View(context) {
 
+    companion object {
+        private const val TAG = "AlaMobileTool"
+
+        /**
+         * Shared IPC state between PedalOverlayView and GearShiftView.
+         * Both views write to the same file, so we use shared static fields
+         * to avoid one view clobbering the other's data.
+         */
+        @Volatile
+        var sharedThrottle = 0f
+        @Volatile
+        var sharedBrake = 0f
+        /**
+         * Monotonically increasing counter for shift commands.
+         * Odd values = shift up, even values = shift down.
+         * Native detects the *change* in value to fire a one-shot command.
+         */
+        @Volatile
+        var sharedShiftCmd = 0
+
+        @Volatile
+        var ipcFile: File? = null
+
+        private var raf: RandomAccessFile? = null
+        // Reused buffer — no per-frame allocation
+        private val buffer = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN)
+
+        /**
+         * Atomically write current shared state to the IPC file as 12 bytes
+         * of binary data (float + float + int, little-endian).
+         *
+         * Uses RandomAccessFile.seek(0) + write() to overwrite in-place.
+         * Unlike File.writeText() which deletes and recreates the file
+         * (causing ENOENT races and filesystem metadata churn), this just
+         * overwrites the existing bytes — a single pwrite() syscall, no
+         * filesystem operations, no sync, no GC pressure, no heat.
+         */
+        fun flushToIpc() {
+            try {
+                val file = ipcFile ?: return
+                if (raf == null) {
+                    if (!file.exists()) file.createNewFile()
+                    raf = RandomAccessFile(file, "rw")
+                    Log.i(TAG, "IPC file opened: ${file.absolutePath}")
+                }
+                val r = raf!!
+                r.seek(0)
+                buffer.clear()
+                buffer.putFloat(sharedThrottle)
+                buffer.putFloat(sharedBrake)
+                buffer.putInt(sharedShiftCmd)
+                r.write(buffer.array(), 0, 12)
+            } catch (_: Exception) {
+                // Silently ignore — file may not be writable yet
+            }
+        }
+    }
+
     private val throttlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(160, 0, 255, 0)
     }
@@ -49,6 +112,10 @@ class PedalOverlayView(
 
     private var throttle = 0f
     private var brake = 0f
+
+    init {
+        ipcFile = File(context.cacheDir, "ala_input.dat")
+    }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
@@ -79,15 +146,9 @@ class PedalOverlayView(
         return super.onTouchEvent(event)
     }
 
-    /**
-     * Maps a finger Y coordinate to throttle/brake values using the configured
-     * transition point, deadzone, and curve.
-     */
     private fun updateValues(y: Float) {
         val height = this.height.toFloat()
-        if (height <= 0f) {
-            return
-        }
+        if (height <= 0f) return
 
         val t = (y / height).coerceIn(0f, 1f)
         val transition = settings.pedalTransition.coerceIn(0.1f, 0.9f)
@@ -107,18 +168,12 @@ class PedalOverlayView(
         invalidate()
     }
 
-    /**
-     * Applies the deadzone to a normalized [0,1] input value.
-     */
     private fun applyDeadzone(value: Float, deadzone: Float): Float {
         if (deadzone <= 0f) return value
         if (value <= deadzone) return 0f
         return (value - deadzone) / (1f - deadzone)
     }
 
-    /**
-     * Applies the selected response curve to a normalized [0,1] input value.
-     */
     private fun applyCurve(value: Float): Float {
         val exponent = when (settings.pedalCurve) {
             ModConfig.PedalCurve.LINEAR -> 1f
@@ -130,7 +185,19 @@ class PedalOverlayView(
     }
 
     private fun updateNativeValues() {
-        NativeBridge.setThrottle(throttle)
-        NativeBridge.setBrake(brake)
+        // Update shared state (preserves shiftCmd from GearShiftView)
+        sharedThrottle = throttle
+        sharedBrake = brake
+
+        // Flush to IPC file — works for ALL builds (original + coexistence)
+        flushToIpc()
+
+        // Also try direct JNI — fast path for original build
+        if (NativeBridge.isAvailable) {
+            try {
+                NativeBridge.setThrottle(throttle)
+                NativeBridge.setBrake(brake)
+            } catch (_: Throwable) {}
+        }
     }
 }

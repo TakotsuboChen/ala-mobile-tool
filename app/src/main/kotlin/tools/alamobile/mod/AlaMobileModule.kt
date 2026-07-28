@@ -111,13 +111,19 @@ class AlaMobileModule : XposedModule() {
             }
 
             try {
+                // Force-load native library in case ClassLoader isolation
+                // prevented the standard System.loadLibrary from working.
+                if (ctx != null) {
+                    NativeBridge.forceLoad(ctx)
+                }
+
                 NativeBridge.initWithOffsets(
                     enableControlReplacement = enableControlReplacement,
                     enableAutoDRS = enableAutoDrs,
                     disableAutoGear = disableAutoGear,
                     enableUnlock = enableUnlock
                 )
-                Log.i(TAG, "Native hooks installed")
+                Log.i(TAG, "Native hooks installed (isAvailable=${NativeBridge.isAvailable})")
             } catch (e: Throwable) {
                 Log.e(TAG, "Failed to install native hooks: ${e.message}")
             }
