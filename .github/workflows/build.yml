@@ -29,16 +29,17 @@ jobs:
         run: chmod +x gradlew
 
       - name: Restore release keystore (from Secret)
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        # secrets 不能直接用于 if 条件，先放到 env 再判断
+        env:
+          KS_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KS_PWD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+        if: ${{ env.KS_BASE64 != '' }}
         run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > "$GITHUB_WORKSPACE/ala-mobile-tool.keystore"
+          echo "$KS_BASE64" | base64 -d > "$GITHUB_WORKSPACE/ala-mobile-tool.keystore"
           echo "KEYSTORE_PATH=$GITHUB_WORKSPACE/ala-mobile-tool.keystore" >> "$GITHUB_ENV"
           echo "KEYSTORE_PASSWORD=$KS_PWD" >> "$GITHUB_ENV"
           echo "KEYSTORE_ALIAS=$KS_ALIAS" >> "$GITHUB_ENV"
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KS_PWD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KS_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
 
       - name: Build release APK
         run: ./gradlew :app:assembleRelease
