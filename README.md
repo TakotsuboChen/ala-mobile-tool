@@ -4,6 +4,20 @@
 
 > ⚠️ **仅供个人学习与研究使用**。本模块会修改游戏的运行时行为，在多人/在线模式下使用可能违反服务条款并导致封号。请仅在单机模式下使用。
 
+## 演示
+
+### 使用踏板覆盖
+
+单击游戏内「工具」按钮打开 Overlay，使用线性踏板进行油门和刹车控制。
+
+<video src="https://github.com/TakotsuboChen/ala-mobile-tool/raw/main/assets/videos/click-tool-button-linear-pedal.mp4" controls width="100%"></video>
+
+### 编辑 Overlay 布局
+
+长按游戏内「工具」按钮进入编辑模式，拖动调整 Overlay 位置。
+
+<video src="https://github.com/TakotsuboChen/ala-mobile-tool/raw/main/assets/videos/long-press-edit-overlay-layout.mp4" controls width="100%"></video>
+
 ## 功能
 
 ### ✅ 已实现
