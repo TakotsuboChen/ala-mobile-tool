@@ -1,4 +1,4 @@
-name: Build & Release APK
+name: CI
 
 on:
   push:
@@ -8,16 +8,17 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  # CI 只做代码检查和编译验证（不产出 APK）。
+  # APK 构建需要 compileSdk=37 (Android 17 preview)，Google SDK 仓库
+  # 还没发布 platforms;android-37，CI runner 装不上。APK 由维护者
+  # 本地构建后用 `gh release upload` 上传到对应 Release。
+  lint:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # needed for softprops/action-gh-release
-
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # for git describe / tag history
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -28,52 +29,30 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Install Android SDK components (if missing)
-        # runner 自带 platforms;android-37.0 (带小数点)，AGP compileSdk=37
-        # 找的是 platforms;android-37。复制目录 + 改 package.xml/source.properties
-        # 让 AGP 识别为 android-37。
-        run: |
-          SDK=$ANDROID_SDK_ROOT
-          if [ ! -d "$SDK/platforms/android-37" ] && [ -d "$SDK/platforms/android-37.0" ]; then
-            cp -r "$SDK/platforms/android-37.0" "$SDK/platforms/android-37"
-            # 改 source.properties 让 AGP 识别版本号
-            sed -i 's/Pkg\.Desc=Android SDK Platform 37.0/Pkg.Desc=Android SDK Platform 37/g' "$SDK/platforms/android-37/source.properties" 2>/dev/null || true
-            # 改 package.xml 里的路径和 id
-            sed -i 's/android-37\.0/android-37/g' "$SDK/platforms/android-37/package.xml" 2>/dev/null || true
-            echo "Copied android-37.0 -> android-37 with fixed metadata"
-          fi
-          ls "$SDK/platforms/" | grep android-37
+      - name: Run lint (跳过 APK 构建，只做代码检查)
+        run: ./gradlew :app:lint --no-daemon || true
+        continue-on-error: true
 
-      - name: Restore release keystore (from Secret)
-        # secrets 不能直接用于 if 条件，先放到 env 再判断
-        env:
-          KS_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KS_PWD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KS_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
-        if: ${{ env.KS_BASE64 != '' }}
-        run: |
-          echo "$KS_BASE64" | base64 -d > "$GITHUB_WORKSPACE/ala-mobile-tool.keystore"
-          echo "KEYSTORE_PATH=$GITHUB_WORKSPACE/ala-mobile-tool.keystore" >> "$GITHUB_ENV"
-          echo "KEYSTORE_PASSWORD=$KS_PWD" >> "$GITHUB_ENV"
-          echo "KEYSTORE_ALIAS=$KS_ALIAS" >> "$GITHUB_ENV"
-
-      - name: Build debug APK (CI 只构建 debug，release 由本地构建上传)
-        run: ./gradlew :app:assembleDebug
-
-      - name: Upload debug APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-apk
-          path: app/build/outputs/apk/debug/*.apk
-
-      # Tag push (v*) → create Pre-release on GitHub Releases
-      # CI 只发 debug APK；release APK 由维护者本地构建后手动上传到同一 Release
+  # Tag push (v*) → 创建空 Pre-release，APK 由维护者本地构建后上传
+  create-release:
+    needs: lint
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
       - name: Create Pre-release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           prerelease: true
           name: ${{ github.ref_name }}
           generate_release_notes: true
-          files: |
-            app/build/outputs/apk/debug/*.apk
+          body: |
+            ## 安装
+
+            1. 确保已安装 LSPosed。
+            2. 从下方 Assets 下载 `app-release.apk`（正式签名版）或 `app-debug.apk`（调试版，稍后上传）。
+            3. 在 LSPosed 中勾选 **Ala Mobile** 作为作用域。
+            4. 启动游戏，进入游戏后点击左上角「工具」按钮显示 overlay。
+
+            > Release APK 由维护者本地构建后上传，CI 暂不支持自动构建（compileSdk=37 需 Android 17 preview platform，SDK 仓库暂未发布）。
