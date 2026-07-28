@@ -89,8 +89,10 @@ dependencies {
     implementation(libs.libxposed.service)
 
     implementation(libs.miuix.ui)
+    implementation(libs.miuix.preference)
     implementation(libs.activity.compose)
     implementation(libs.material.icons.core)
+    implementation(libs.material.icons.extended)
     implementation(libs.material3)
 
     implementation(libs.shadowhook)

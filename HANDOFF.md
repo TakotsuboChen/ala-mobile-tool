@@ -1,72 +1,90 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-07-28T07:05:00+08:00 · Git HEAD: 51fee08fe0d7c3a8b0d0e0a0a0f0c0d0e0f0a0b0c
+生成时间: 2026-07-28T08:13:31+08:00 · Git HEAD: f51b2ea5b0655ce2aa9fc6d5504f7976cdcb66df
 恢复方式: 对 Claude 说"读一下 HANDOFF.md，按头部 Git HEAD 复核本文件"。
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待。
 
 ## 1. 当前目标
 
-继续修复 1.0.0-Alpha-2 的回归：踏板顿挫、自动换挡无效，并按用户要求完成 ConfigActivity 的 MIUIX UI 重构。
-完成定义：踏板持续加油/刹车稳定；自动换挡关闭后不再自动升档；ConfigActivity 三页 UI 符合 MIUIX 风格。
+完成 ConfigActivity 的 KernelSU 风格 MIUIX UI 重构：三页 HorizontalPager + BottomBar，概览页/配置页/设置页均使用 miuix 组件。
+完成定义：`./gradlew :app:assembleDebug` 构建成功，UI 符合 KernelSU 管理器风格（TopAppBar、LazyColumn、Card、SwitchPreference/SliderPreference 等）。
 
 ## 2. 已验证状态 — 工作实际停在哪
 
 - [V] 当前分支 `main`，工作区有未提交改动（`git status` 验证）。
-- [V] `./gradlew :app:assembleDebug` 构建成功（输出见下方 tail）。
-- [V] overlay 编辑层问题已修复：拖动、缩放、长按重置均正常。
-- [?] 踏板顿挫问题已尝试修复：native `pedal_hook.c` 中 setter 改为 active 时直接 return，writer 频率提升到 2ms，FixedUpdate 前后都写入。用户反馈"已经正常，且没有性能损失"。
-- [?] ConfigActivity 已重构为三页底栏导航，但用户反馈仍需继续调整 UI 细节（小标题对齐、响应曲线 MIUIX 组件、图标、激活状态检测等）。
-- [?] 自动换挡关闭（disable_auto_gear）仍待排查，未在本次会话中验证。
+- [V] `./gradlew :app:assembleDebug` 构建失败（Kotlin 编译错误，输出见下方 tail）。
+- [V] 已添加 miuix-preference 依赖（gradle/libs.versions.toml 和 app/build.gradle.kts 已修改）。
+- [V] 已创建 ui/ 包下的三个页面文件（ConfigMainScreen.kt、OverviewPage.kt、ConfigurePage.kt、SettingsPage.kt）。
+- [V] ConfigActivity.kt 已简化为调用 ConfigMainScreen。
+- [V] 尝试用 material-icons-extended 解决图标缺失问题（已添加到依赖）。
 
 ### 测试/build 输出 tail（本次交接 run 的真实输出）
 
 ```
-> Task :app:assembleDebug UP-TO-DATE
-[Incubating] Problems report is available at .../problems-report.html
+e: file:///home/takotsubo/projects/ala-mobile-tool/app/src/main/kotlin/tools/alamobile/mod/ui/ConfigMainScreen.kt:70:34 Type 'MutableState<Boolean>' has no method 'getValue(Nothing?, KMutableProperty0<*>)', so it cannot serve as a delegate.
+e: file:///home/takotsubo/projects/ala-mobile-tool/app/src/main/kotlin/tools/alamobile/mod/ui/ConfigMainScreen.kt:215:38 Unresolved reference 'NavigationRailItem'.
+e: file:///home/takotsubo/projects/ala-mobile-tool/app/src/main/kotlin/tools/alamobile/mod/ui/ConfigMainScreen.kt:293:22 Type 'MutableState<Int>' has no method 'getValue(MainPagerState, KMutableProperty1<*, *>)', so it cannot serve as a delegate.
+e: file:///home/takotsubo/projects/ala-mobile-tool/app/src/main/kotlin/tools/alamobile/mod/ui/ConfigurePage.kt:156:5 Unresolved reference 'Row'.
+e: file:///home/takotsubo/projects/ala-mobile-tool/app/src/main/kotlin/tools/alamobile/mod/ui/ConfigurePage.kt:174:50 Unresolved reference 'sp'.
+e: file:///home/takotsubo/projects/ala-mobile-tool/app/src/main/kotlin/tools/alamobile/mod/ui/OverviewPage.kt:93:21 Unresolved reference 'remember'.
 
-BUILD SUCCESSFUL in 1s
-39 actionable tasks: 2 executed, 37 up-to-date
+> Task :app:compileDebugKotlin FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileDebugKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.btapi.BuildToolsApiCompilationWork
+   > Compilation error. See log for more details.
+
+* Try:
+> Run with --stacktrace option to get more stack output.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org
+
+BUILD FAILED in 4s
+22 actionable tasks: 8 executed, 14 up-to-date
 ```
 
 ## 3. 决策与理由
 
-- overlay 编辑层直接同步目标 view 和编辑层 LayoutParams [?]——避免编辑层与目标控件解耦、闪烁、突然放大。
-- 用 `event.rawX/rawY` 计算移动/缩放 delta [?]——避免视图坐标跳变导致尺寸突变。
-- setter active 时直接 return，由 writer 线程负责字段写入 [?]——减少 setter 和 writer 竞争导致的高频顿挫。
-- writer 频率从 16ms 提升到 2ms [?]——扩大输入覆盖窗口。
-- 配置即时保存 + 300ms debounce [?]——用户要求去掉保存按钮，调整即保存。
+- 使用 miuix-preference 组件（SwitchPreference、SliderPreference、OverlayDropdownPreference）[V]——用户要求仿造 KernelSU 管理器风格，这些组件是 KernelSU 使用的。否决方案：继续用原生 Switch/Slider，因为不符合 KernelSU 风格。
+- 添加 material-icons-extended 依赖 [V]——material-icons-core 不包含 Rounded.Animation、Rounded.Gesture 等图标。否决方案：只用 core 中的图标，因为选择太少。
+- 用 `this.NavigationRailItem` 调用扩展函数 [?]——解决 NavigationRailItem 在 ColumnScope 中无法直接调用的问题。
 
 ## 4. 失败的尝试 — 不要再试
 
-- 用 `translationX/Y` 移动编辑层而目标 view 不动 [?]——导致编辑层与目标控件完全解耦、位置错乱。
-- 在 `setThrottleInput` 中拦截并返回不调用原函数 [?]——Alpha-1 曾导致踏板完全无响应；本次改为 active 时直接 return，依赖 writer 写入，初步验证正常。
-- 只在 `FixedUpdate` 后写入字段、跳过相同值 [?]——输入被游戏每帧覆盖，出现"机关枪"顿挫和快速归零。
-- 用 `/storage/emulated/0/AlaMobileTool/ala_tool_config.json` 保存 overlay 位置且无权限保护 [?]——在目标游戏进程写入时崩溃，已加 try-catch。
-- 用 miuix `MiuixIcons.Basic.*` 内置图标 [V]——编译失败，`MiuixIcons` 在 0.9.3 中不存在或不可访问，改用 material icons。
+- 用 `var x by remember { mutableStateOf(...) }` 声明属性 [V]——导致 "Property delegate must have a 'getValue' method" 错误。原因：Compose 的 `getValue`/`setValue` 扩展函数需要正确导入 `androidx.compose.runtime.getValue` 和 `setValue`。不要再试，改用显式 `.value` 访问或确保导入。
+- 用 miuix `SliderPreference(minValue=..., maxValue=..., valueFormatter=...)` [V]——编译失败，参数名不对（miuix 0.9.3 的 SliderPreference 签名是 `SliderPreference-N3THUTQ(float, Function1<Float, Unit>, ...)`，没有 minValue/maxValue/valueFormatter 参数）。不要再试，改用原生 Slider 或查看 miuix 源码确认正确参数。
+- 用 `MiuixIcons.Basic.*` 内置图标 [V]——编译失败，`MiuixIcons` 在 0.9.3 中不存在或不可访问。不要再试，改用 material icons。
+- 用 `by mutableIntStateOf(...)` 声明 selectedPage [V]——导致 delegate 错误，原因同上。不要再试，改用 `var selectedPage = mutableStateOf(...).value` 或显式导入。
 
 ## 5. 已知坑
 
-- 当前 release APK 使用临时签名 [V]——正式发布前需替换为正式 keystore。
-- `ModConfig.saveOverlayPosition` 在目标进程写入外部存储可能失败 [?]——已加 try-catch 忽略失败，但位置不会持久化。
-- 自动换挡字段写入可能因 IL2CPP MonoBehaviour 引用布局而无效 [?]——需要进一步确认 `drivetrain` 指针和 `automatic` 字段的实际布局。
-- 新添加的 material3 和 material-icons-core 依赖可能增加 APK 体积 [?]——当前 debug 构建无影响。
-- LSPosed 激活状态检测不可靠 [?]——当前通过 flag 文件 + 检查 LSPosed Manager 包名实现，无法 100% 确认模块是否已启用。
+- miuix 0.9.3 的 preference API 签名与文档/KernelSU 代码不符 [V]——javap 显示 SliderPreference 没有 minValue/maxValue/valueFormatter 参数，可能版本差异或 KernelSU 用了自定义封装。
+- Compose property delegate 需要显式导入 `getValue`/`setValue` [V]——否则会出现 "no method 'getValue'" 错误。
+- material-icons-core 只包含基础图标 [V]——Rounded.Animation、Rounded.Gesture 等在 extended 包中。
+- NavigationRailItem 是 ColumnScope 的扩展函数 [?]——不能在 NavigationRail 的 lambda 中直接调用，需要用 `this.NavigationRailItem` 或确保在正确 scope 中。
+- WindowInsets.displayCutout 在某些 API 级别不可用 [V]——已移除相关代码。
 
 ## 6. 下一步（有序）
 
-1. 继续按用户反馈精修 ConfigActivity UI：
-   - 确保只有概览页显示"Ala Mobile Tool"大标题。
-   - 激活状态卡片用 MIUIX 风格（绿色/红色图标）。
-   - 链接卡片加图标，第二行小字淡色。
-   - 配置页小标题和卡片左对齐，字调大。
-   - 响应曲线改用 MIUIX 组件（非 material3 DropdownMenu）。
-   - 设置页"日志"小标题和卡片对齐。
-2. 测试踏板顿挫修复在真实游戏中的长期稳定性。
-3. 排查自动换挡失效原因：确认 `IRDSCarControllInput` 中 `drivetrain` 字段偏移（0x98）和 `IRDSDrivetrain.automatic` 字段偏移（0xBC）是否仍正确，或改用 hook `IRDSDrivetrain.FixedUpdate` 写入。
-4. 验证 release 构建并准备 1.0.0-Alpha-2。
+1. 修复 ConfigMainScreen.kt 中的 property delegate 错误：
+   - 添加 `import androidx.compose.runtime.getValue` 和 `import androidx.compose.runtime.setValue`。
+   - 将 `var x by remember { mutableStateOf(...) }` 改为显式 `.value` 访问，或确保导入后能编译。
+2. 修复 ConfigurePage.kt 中的 Row/sp 缺失导入：
+   - 添加 `import androidx.compose.foundation.layout.Row`。
+   - 添加 `import androidx.compose.ui.unit.sp`。
+3. 修复 OverviewPage.kt 中的 remember 缺失导入：
+   - 添加 `import androidx.compose.runtime.remember`。
+4. 修复 NavigationRailItem 调用问题：
+   - 确认是否在正确 scope 中，或用 `this.NavigationRailItem`。
+5. 重新运行 `./gradlew :app:assembleDebug` 验证构建成功。
+6. 测试 UI 在真实设备上的显示效果，按用户反馈调整细节。
 
 ## 7. 留给用户的开放问题
 
-- UI 当前版本是否符合预期？还有哪些细节需要继续调整？
-- 踏板顿挫修复后，长时间游戏是否仍然稳定？
-- 关闭自动换挡后，车辆是否会在某个转速自动升档？需要具体的档位/速度观察。
+- miuix 0.9.3 的 SliderPreference 是否真的不支持 minValue/maxValue/valueFormatter？需要查看官方文档或源码。
+- 是否继续用 miuix preference 组件，还是改用原生 Switch/Slider + 自定义样式？
+- UI 重构完成后，是否需要继续调整其他页面（如 overlay 编辑层）？
