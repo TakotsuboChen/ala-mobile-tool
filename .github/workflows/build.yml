@@ -29,12 +29,14 @@ jobs:
         run: chmod +x gradlew
 
       - name: Install Android SDK components (if missing)
-        # runner 自带 SDK，但 platform 37 可能缺失；用 sdkmanager 补装
-        # 用 `|| true` 容错：包已存在或不在仓库都不阻塞
+        # runner 自带的 cmdline-tools 可能是旧版，仓库索引里没有 platform 37
+        # 先更新 cmdline-tools 到最新稳定版，再装 platform 37 + build-tools 37 + NDK
         run: |
-          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --list_installed 2>/dev/null | grep -q "platforms;android-37" || \
-            $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-37" || \
-            echo "platform 37 not available in repo, relying on runner preinstall"
+          SDK=$ANDROID_SDK_ROOT
+          yes | $SDK/cmdline-tools/latest/bin/sdkmanager --sdk_root=$SDK --update || true
+          yes | $SDK/cmdline-tools/latest/bin/sdkmanager --sdk_root=$SDK \
+            "platforms;android-37" "build-tools;37.0.0" "ndk;26.1.10909125" || true
+          $SDK/cmdline-tools/latest/bin/sdkmanager --sdk_root=$SDK --list_installed
 
       - name: Restore release keystore (from Secret)
         # secrets 不能直接用于 if 条件，先放到 env 再判断
