@@ -29,14 +29,15 @@ jobs:
         run: chmod +x gradlew
 
       - name: Install Android SDK components (if missing)
-        # runner 自带的 cmdline-tools 可能是旧版，仓库索引里没有 platform 37
-        # 先更新 cmdline-tools 到最新稳定版，再装 platform 37 + build-tools 37 + NDK
+        # runner 自带 platforms;android-37.0 (带小数点)，但 AGP compileSdk=37
+        # 找的是 platforms;android-37 (不带小数点)。建符号链接兼容。
         run: |
           SDK=$ANDROID_SDK_ROOT
-          yes | $SDK/cmdline-tools/latest/bin/sdkmanager --sdk_root=$SDK --update || true
-          yes | $SDK/cmdline-tools/latest/bin/sdkmanager --sdk_root=$SDK \
-            "platforms;android-37" "build-tools;37.0.0" "ndk;26.1.10909125" || true
-          $SDK/cmdline-tools/latest/bin/sdkmanager --sdk_root=$SDK --list_installed
+          if [ ! -d "$SDK/platforms/android-37" ]; then
+            ln -s "$SDK/platforms/android-37.0" "$SDK/platforms/android-37"
+            echo "Symlinked android-37.0 -> android-37"
+          fi
+          ls -la "$SDK/platforms/" | grep android-37
 
       - name: Restore release keystore (from Secret)
         # secrets 不能直接用于 if 条件，先放到 env 再判断
