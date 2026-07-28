@@ -25,13 +25,16 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Set up Android SDK (platform 37 + NDK)
-        run: |
-          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --channel=3 \
-            "platforms;android-37" "build-tools;37.0.0" "ndk;26.1.10909125"
-
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
+
+      - name: Install Android SDK components (if missing)
+        # runner 自带 SDK，但 platform 37 可能缺失；用 sdkmanager 补装
+        # 用 `|| true` 容错：包已存在或不在仓库都不阻塞
+        run: |
+          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --list_installed 2>/dev/null | grep -q "platforms;android-37" || \
+            $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-37" || \
+            echo "platform 37 not available in repo, relying on runner preinstall"
 
       - name: Restore release keystore (from Secret)
         # secrets 不能直接用于 if 条件，先放到 env 再判断
