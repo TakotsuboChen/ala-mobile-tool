@@ -10,13 +10,13 @@
 
 单击游戏内「工具」按钮打开 Overlay，使用线性踏板进行油门和刹车控制。
 
-<video src="https://github.com/TakotsuboChen/ala-mobile-tool/raw/main/assets/videos/click-tool-button-linear-pedal.mp4" controls width="100%"></video>
+![使用踏板覆盖](assets/videos/click-tool-button-linear-pedal.gif)
 
 ### 编辑 Overlay 布局
 
 长按游戏内「工具」按钮进入编辑模式，拖动调整 Overlay 位置。
 
-<video src="https://github.com/TakotsuboChen/ala-mobile-tool/raw/main/assets/videos/long-press-edit-overlay-layout.mp4" controls width="100%"></video>
+![编辑 Overlay 布局](assets/videos/long-press-edit-overlay-layout.gif)
 
 ## 功能
 
