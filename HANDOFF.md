@@ -48,7 +48,10 @@ BUILD SUCCESSFUL in 1m 17s
 - **方案 2：在 IPC 文件路径上优化写法** [V]——`File.writeText()`/`RandomAccessFile.seek+write`/mmap/全局目录 全试过，全失败。`seek+write` 非原子，`pread` 读半截数据。不要再试。
 - **方案 3：用 `getLocationOnScreen()` 重建相对坐标** [V]——它报告的是 view 实际位置，pairip 壳 relayout 时同样漂移。只有配置值稳定。不要再试。
 - **方案 4：怀疑 JNI 参数错位** [?]——曾因 grep 误过滤 `Hooked ... at 0x...` 行（含 "at "）误判 hook 没装。实际全装上了。不要再试这个 grep。
-- **方案 5：native 层 `pthread_once` 守卫** [V]——`forceLoad` 让两个 .so 副本独立，static 变量不共享，native 守卫无效。必须 Java 层守卫。不要再试。
+- **方案 6：CI 装 `platforms;android-37`** [V]——`sdkmanager "platforms;android-37"` 报 `Failed to find package`，仓库未发布。`--channel=3` 也不行。不要再试。
+- **方案 7：复制 `android-37.0` → `android-37` + sed 改 id** [V]——AGP 报 `Observed package id in inconsistent location` + AAR metadata 60 issues。`android-37.0` 的 `source.properties` 里 `AndroidVersion.ApiLevel=36`（是 API 36 扩展，不是真 37），改目录名骗不过 AGP。不要再试。
+- **方案 8：符号链接 `android-37.0` → `android-37`** [V]——同样 `inconsistent location` 警告 + 找不到 platform。不要再试。
+- **方案 9：`android.suppressUnsupportedCompileSdk=37`** [V]——只抑制 AGP 的 maxSdk 警告，不抑制 miuix AAR metadata 的硬要求。不解决。不要再试。
 
 ## 5. 已知坑
 
@@ -58,14 +61,15 @@ BUILD SUCCESSFUL in 1m 17s
 - **module.prop versionCode 必须同步** [V]——LSPosed 用 module.prop 识别模块更新，build.gradle 版本号变了必须同步 module.prop。
 - **`MotionEvent.getY()` vs `getRawY()`** [V]——getY 相对 view 左上角，getRawY 屏幕绝对坐标。pairip 壳干扰前者，后者稳定。
 - **游戏刹车辅助** [V]——弯道自动刹车，表现为"突突突顿挫"，和模块无关。用户需在游戏设置里关掉。
+- **CI 无法构建 APK (compileSdk=37)** [V]——Google SDK 仓库未发布真正的 `platforms;android-37`（Android 17 preview）。runner 自带的 `android-37.0`/`android-37.1` 实际是 API 36 扩展，`source.properties` 里 `AndroidVersion.ApiLevel=36`，复制改 id 后 AGP 检测到不一致，AAR metadata 检查 60 issues 全失败。`android.suppressUnsupportedCompileSdk=37` 只抑制 AGP 的 maxSdk 警告，不抑制 miuix 的硬要求。**当前方案：CI 只做 lint，APK 本地构建后用 `gh release upload` 手动上传。**
+- **GitHub Actions `if` 里不能直接引用 `secrets`** [V]——`if: ${{ secrets.X != '' }}` 会导致 workflow 结构错误 0s 失败。必须先 `env: KS: ${{ secrets.X }}` 再 `if: ${{ env.KS != '' }}`。
 
 ## 6. 下一步（有序）
 
-1. `git add -A && git commit -m "feat: v1.0.0-Beta-1 共存版稳定性大修 + CI 自动构建"` 然后 `git push`。
-2. `git tag v1.0.0-Beta-1 && git push origin v1.0.0-Beta-1`——触发 GitHub Action 自动构建并发布 Pre-release。
-3. （可选）在 GitHub 仓库 Settings → Secrets 添加 `KEYSTORE_BASE64`（`base64 -w0 ala-mobile-tool.keystore`）/`KEYSTORE_PASSWORD=alamobiletool`/`KEYSTORE_ALIAS=alamobiletool`，让 CI 用 release 签名。没配也能跑（fallback debug 签名）。
-4. 验证 GitHub Action 构建成功，Pre-release 出现在 Releases 页，APK 可下载安装。
-5. 在共存版和原版上各跑一次冒烟测试，确认 overlay 显示、踏板响应、换挡、billing 解锁都正常。
+1. ~~已完成~~ v1.0.0-Beta-1 Pre-release 已发布（[GitHub Release](https://github.com/TakotsuboChen/ala-mobile-tool/releases/tag/v1.0.0-Beta-1)），release APK 已上传。
+2. 在共存版和原版上各跑一次冒烟测试，确认 overlay 显示、踏板响应、换挡、billing 解锁都正常。
+3. 后续版本若要 CI 自动构建 APK，需等 Google SDK 仓库发布真正的 `platforms;android-37`（Android 17 正式版），或升级 AGP 到 8.10+ 并降级 miuix 到不要求 37 的版本。
+4. （可选）在 GitHub 仓库 Settings → Secrets 添加 `KEYSTORE_BASE64`/`KEYSTORE_PASSWORD`/`KEYSTORE_ALIAS`，以便未来 CI 能用 release 签名。
 
 ## 7. 留给用户的开放问题
 
