@@ -53,23 +53,11 @@ class GearShiftView(context: Context) : View(context) {
             MotionEvent.ACTION_DOWN -> {
                 val isUp = event.y < height / 2f
 
-                // Increment the shared shift counter.
-                // Odd values = shift up, even values = shift down.
-                // Native detects the *change* in value to fire a one-shot command.
-                PedalOverlayView.sharedShiftCmd++
-                val cmd = PedalOverlayView.sharedShiftCmd
-                if (isUp && cmd % 2 != 1) {
-                    PedalOverlayView.sharedShiftCmd++
-                } else if (!isUp && cmd % 2 != 0) {
-                    PedalOverlayView.sharedShiftCmd++
-                }
+                Log.d(TAG, "Shift ${if (isUp) "up" else "down"}")
 
-                Log.d(TAG, "Shift ${if (isUp) "up" else "down"}, cmd=${PedalOverlayView.sharedShiftCmd}")
-
-                // Flush to IPC file (works for ALL builds)
-                PedalOverlayView.flushToIpc()
-
-                // Also try direct JNI (fast path for original build)
+                // Direct JNI path. The legacy file-based IPC shift counter
+                // has been removed; NativeBridge.isAvailable is reliably
+                // true in both original and coexistence builds.
                 if (NativeBridge.isAvailable) {
                     try {
                         if (isUp) {
@@ -77,8 +65,8 @@ class GearShiftView(context: Context) : View(context) {
                         } else {
                             NativeBridge.shiftDown()
                         }
-                    } catch (_: Throwable) {
-                        // JNI may fail in coexistence builds; file IPC is the fallback
+                    } catch (e: Throwable) {
+                        Log.w(TAG, "JNI shift failed", e)
                     }
                 }
 

@@ -9,10 +9,6 @@ import android.view.MotionEvent
 import android.view.View
 import tools.alamobile.mod.NativeBridge
 import tools.alamobile.mod.config.ModConfig
-import java.io.File
-import java.io.RandomAccessFile
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import kotlin.math.pow
 
 /**
@@ -42,60 +38,6 @@ class PedalOverlayView(
 
     companion object {
         private const val TAG = "AlaMobileTool"
-
-        /**
-         * Shared IPC state between PedalOverlayView and GearShiftView.
-         * Both views write to the same file, so we use shared static fields
-         * to avoid one view clobbering the other's data.
-         */
-        @Volatile
-        var sharedThrottle = 0f
-        @Volatile
-        var sharedBrake = 0f
-        /**
-         * Monotonically increasing counter for shift commands.
-         * Odd values = shift up, even values = shift down.
-         * Native detects the *change* in value to fire a one-shot command.
-         */
-        @Volatile
-        var sharedShiftCmd = 0
-
-        @Volatile
-        var ipcFile: File? = null
-
-        private var raf: RandomAccessFile? = null
-        // Reused buffer — no per-frame allocation
-        private val buffer = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN)
-
-        /**
-         * Atomically write current shared state to the IPC file as 12 bytes
-         * of binary data (float + float + int, little-endian).
-         *
-         * Uses RandomAccessFile.seek(0) + write() to overwrite in-place.
-         * Unlike File.writeText() which deletes and recreates the file
-         * (causing ENOENT races and filesystem metadata churn), this just
-         * overwrites the existing bytes — a single pwrite() syscall, no
-         * filesystem operations, no sync, no GC pressure, no heat.
-         */
-        fun flushToIpc() {
-            try {
-                val file = ipcFile ?: return
-                if (raf == null) {
-                    if (!file.exists()) file.createNewFile()
-                    raf = RandomAccessFile(file, "rw")
-                    Log.i(TAG, "IPC file opened: ${file.absolutePath}")
-                }
-                val r = raf!!
-                r.seek(0)
-                buffer.clear()
-                buffer.putFloat(sharedThrottle)
-                buffer.putFloat(sharedBrake)
-                buffer.putInt(sharedShiftCmd)
-                r.write(buffer.array(), 0, 12)
-            } catch (_: Exception) {
-                // Silently ignore — file may not be writable yet
-            }
-        }
     }
 
     private val throttlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -113,10 +55,6 @@ class PedalOverlayView(
     private var throttle = 0f
     private var brake = 0f
 
-    init {
-        ipcFile = File(context.cacheDir, "ala_input.dat")
-    }
-
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
@@ -132,7 +70,18 @@ class PedalOverlayView(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
-                updateValues(event.y)
+                // 用 rawY - 配置的 view top 重建相对坐标。
+                // 不能用 event.getY()（相对 view 左上角）：共存版被 pairip 壳
+                // 反复 relayout，view 实际位置漂移，相对坐标跟着跳，归一化后
+                // throttle/brake 值抖动。rawY 是屏幕绝对坐标，不受 view 位置影响；
+                // 配置值 (topPx/heightPx) 是用户配置的、不依赖运行时 layout，也稳定。
+                // 原版上 view 布局稳定，配置值 == 实际值，行为不变；
+                // 共存版上用配置值绕开漂移，行为与原版一致。
+                val screenHeight = resources.displayMetrics.heightPixels
+                val viewTop = settings.pedalPosition.topPx(screenHeight)
+                val viewHeight = settings.pedalPosition.heightPx(context, screenHeight).toFloat()
+                val relativeY = event.rawY - viewTop
+                updateValues(relativeY, viewHeight)
                 return true
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -146,11 +95,10 @@ class PedalOverlayView(
         return super.onTouchEvent(event)
     }
 
-    private fun updateValues(y: Float) {
-        val height = this.height.toFloat()
-        if (height <= 0f) return
+    private fun updateValues(y: Float, viewHeight: Float) {
+        if (viewHeight <= 0f) return
 
-        val t = (y / height).coerceIn(0f, 1f)
+        val t = (y / viewHeight).coerceIn(0f, 1f)
         val transition = settings.pedalTransition.coerceIn(0.1f, 0.9f)
         val deadzone = settings.pedalDeadzone.coerceIn(0f, 0.5f)
 
@@ -185,19 +133,18 @@ class PedalOverlayView(
     }
 
     private fun updateNativeValues() {
-        // Update shared state (preserves shiftCmd from GearShiftView)
-        sharedThrottle = throttle
-        sharedBrake = brake
-
-        // Flush to IPC file — works for ALL builds (original + coexistence)
-        flushToIpc()
-
-        // Also try direct JNI — fast path for original build
+        // Direct JNI path. With the dual-ClassLoader guard in
+        // AlaMobileModule, NativeBridge.isAvailable is reliably true in both
+        // original and coexistence builds, so the legacy file-based IPC
+        // fallback (which raced with seek+write and caused pedal stutter)
+        // has been removed.
         if (NativeBridge.isAvailable) {
             try {
                 NativeBridge.setThrottle(throttle)
                 NativeBridge.setBrake(brake)
-            } catch (_: Throwable) {}
+            } catch (e: Throwable) {
+                Log.w(TAG, "JNI setThrottle/setBrake failed", e)
+            }
         }
     }
 }

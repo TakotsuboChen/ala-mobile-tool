@@ -21,6 +21,33 @@ class AlaMobileModule : XposedModule() {
 
     companion object {
         const val TAG = "AlaMobileTool"
+
+        /**
+         * 进程级"native hooks 已装"标记的 property key。
+         *
+         * LSPosed 在重打包/共存版游戏上会用双 ClassLoader
+         * (LspModuleClassLoader + VectorModuleClassLoader) 各注入一次模块。
+         * 第二个 ClassLoader 的 inline hook 全部失败 (ShadowHook
+         * "Not initialized")，但 PedalOverlayView 仍调到第二个空壳副本
+         * 的 JNI；同时第二个副本会启动第二个 writer 线程，与第一个
+         * 抢同一个 IPC 文件、写同一个 IL2CPP 字段，引发踏板抖动。
+         *
+         * System.setProperty 进程级共享 (java.lang.System 由
+         * bootstrap ClassLoader 加载)，第二个 ClassLoader 能读到第一个
+         * 设的标记，跳过重复装 hook，从而消除第二个 writer 线程。
+         *
+         * 关键：标记只在 native 真正装好之后再立，不能在 onModuleLoaded
+         * 里立——那会拦掉同一个 ClassLoader 自己后续的 onPackageReady，
+         * 导致整个模块初始化逻辑全被跳过 (上一版的回归)。
+         */
+        private const val NATIVE_INSTALLED_FLAG = "tools.alamobile.mod.native_installed"
+
+        private fun isNativeInstalled(): Boolean =
+            System.getProperty(NATIVE_INSTALLED_FLAG) == "true"
+
+        private fun markNativeInstalled() {
+            System.setProperty(NATIVE_INSTALLED_FLAG, "true")
+        }
     }
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
@@ -97,6 +124,15 @@ class AlaMobileModule : XposedModule() {
 
         val mainHandler = Handler(Looper.getMainLooper())
         mainHandler.postDelayed({
+            // 双 ClassLoader 守卫：LSPosed 在共存版上注入两次模块，第一个
+            // ClassLoader 装好 hook + overlay 后会 markNativeInstalled()。
+            // 第二个 ClassLoader 跑到这里时直接跳过，避免：
+            // 1) 重复装 overlay（两个 PedalOverlayView 同时写 IPC 文件）
+            // 2) 第二个 .so 副本装 hook 失败但启动第二个 writer 线程
+            if (isNativeInstalled()) {
+                Log.i(TAG, "Native already installed by another ClassLoader, skipping overlay+hooks")
+                return@postDelayed
+            }
             val ctx = getAppContext()
             Log.i(TAG, "Delayed context: $ctx")
 
@@ -123,6 +159,9 @@ class AlaMobileModule : XposedModule() {
                     disableAutoGear = disableAutoGear,
                     enableUnlock = enableUnlock
                 )
+                // native 真正装好之后才立标记 —— 在此之前不拦，确保
+                // 第一个 ClassLoader 自己的 onPackageReady 流程不被自己拦掉
+                markNativeInstalled()
                 Log.i(TAG, "Native hooks installed (isAvailable=${NativeBridge.isAvailable})")
             } catch (e: Throwable) {
                 Log.e(TAG, "Failed to install native hooks: ${e.message}")

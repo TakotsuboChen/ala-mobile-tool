@@ -6,9 +6,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
 
 #define LOG_TAG "AlaMobileTool"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -87,106 +84,26 @@ static void apply_inputs_to_controller(void *controller) {
     }
 }
 
-// Read the package name from /proc/self/cmdline and construct the IPC file path.
-// Returns a pointer to a static buffer, or NULL on failure.
-static char *get_ipc_file_path(void) {
-    static char ipc_path[512] = {0};
-    static int initialized = 0;
+// (Legacy IPC file path helper removed: the file-based IPC fallback was
+//  removed in favor of the JNI direct path, which is reliably available in
+//  both original and coexistence builds thanks to the dual-ClassLoader
+//  guard in AlaMobileModule.)
 
-    if (initialized) {
-        return ipc_path;
-    }
-
-    FILE *cmdline_fp = fopen("/proc/self/cmdline", "r");
-    if (cmdline_fp == NULL) {
-        LOGE("Failed to open /proc/self/cmdline");
-        return NULL;
-    }
-
-    char package_name[256] = {0};
-    if (fscanf(cmdline_fp, "%255s", package_name) != 1) {
-        LOGE("Failed to read package name from /proc/self/cmdline");
-        fclose(cmdline_fp);
-        return NULL;
-    }
-    fclose(cmdline_fp);
-
-    snprintf(ipc_path, sizeof(ipc_path), "/data/data/%s/cache/ala_input.dat", package_name);
-    LOGI("IPC file path: %s", ipc_path);
-
-    initialized = 1;
-    return ipc_path;
-}
-
-// IPC file format (12 bytes, written by Java via RandomAccessFile):
-//   offset 0: float throttle (little-endian)
-//   offset 4: float brake    (little-endian)
-//   offset 8: int   shift_counter (monotonic; odd=up, even=down)
+// Background writer thread. It periodically writes the current desired input
+// values (set by JNI: pedal_set_throttle_value / pedal_set_brake_value) into
+// the IL2CPP instance fields, so the car responds even if the game's physics
+// loop does not call the hooked setters.
+//
+// NOTE: this thread NO LONGER reads from an IPC file. The previous file-based
+// IPC path raced with RandomAccessFile.seek+write (non-atomic) and with the
+// JNI direct path, causing throttle/brake values to flicker between new and
+// stale values — the "pedal stutter" bug. With the dual-ClassLoader guard
+// in AlaMobileModule, JNI is reliably available in both original and
+// coexistence builds, so the file IPC fallback is no longer needed.
 static void *input_writer_thread(void *arg) {
     (void) arg;
 
-    const char *ipc_file = get_ipc_file_path();
-    if (ipc_file == NULL) {
-        LOGE("Cannot determine IPC file path, writer thread exiting");
-        return NULL;
-    }
-
-    // Open once, keep the fd open. This avoids per-loop fopen/fclose overhead.
-    int fd = -1;
-    int last_shift_counter = 0;
-    // Reused read buffer — no per-loop allocation
-    uint8_t buf[12] = {0};
-
     while (g_writer_running) {
-        // Lazy open: wait for Java to create the file
-        if (fd < 0) {
-            fd = open(ipc_file, O_RDONLY);
-            if (fd < 0) {
-                usleep(10000); // 10ms — file not created yet
-                continue;
-            }
-            LOGI("IPC file opened (fd=%d)", fd);
-        }
-
-        // pread: single syscall, atomic read, no seek needed
-        ssize_t n = pread(fd, buf, 12, 0);
-        if (n == 12) {
-            float throttle, brake;
-            int shift_counter;
-            memcpy(&throttle, buf, 4);
-            memcpy(&brake, buf + 4, 4);
-            memcpy(&shift_counter, buf + 8, 4);
-
-            // Update pedal state
-            g_throttle_active = (throttle > 0.0f) ? 1 : 0;
-            g_throttle_value = throttle;
-            g_brake_active = (brake > 0.0f) ? 1 : 0;
-            g_brake_value = brake;
-
-            // Handle shift commands (one-shot on counter change)
-            if (shift_counter != last_shift_counter && shift_counter != 0) {
-                void *controller = (void *) g_last_controller;
-                if (controller != NULL) {
-                    if ((shift_counter % 2) == 1 && g_shift_up_orig != NULL) {
-                        typedef void (*orig_t)(void *);
-                        ((orig_t) g_shift_up_orig)(controller);
-                        LOGI("Shift up via IPC (counter=%d)", shift_counter);
-                    } else if ((shift_counter % 2) == 0 && g_shift_down_orig != NULL) {
-                        typedef void (*orig_t)(void *);
-                        ((orig_t) g_shift_down_orig)(controller);
-                        LOGI("Shift down via IPC (counter=%d)", shift_counter);
-                    }
-                }
-                last_shift_counter = shift_counter;
-            }
-        } else if (n == 0) {
-            // File was truncated (Java seek(0) before write) — retry next loop
-        } else if (n < 0) {
-            // Read error — close and retry
-            close(fd);
-            fd = -1;
-        }
-
         // Apply inputs to controller
         void *controller = (void *) g_last_controller;
         if (controller != NULL) {
@@ -195,9 +112,6 @@ static void *input_writer_thread(void *arg) {
         usleep(1000 * 2); // 2 ms -> ~500 Hz
     }
 
-    if (fd >= 0) {
-        close(fd);
-    }
     return NULL;
 }
 

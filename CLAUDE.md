@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Cross-session handoff
+
+- Before you start anything, see [HANDOFF.md](HANDOFF.md) for the latest session state, verified status, failed approaches, and next steps.
+
 ## Project Overview
 
 `ala-mobile-tool` is an free, open-source LSPosed module for the Unity IL2CPP mobile F1 racing game **Ala Mobile** (package `com.Vince.AlamobileFormula`). It targets the modern **libxposed API 102** and uses native inline hooks to extend the game's input controls and DRS/aero behavior.
@@ -104,9 +108,9 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - `app/src/main/kotlin/tools/alamobile/mod/overlay/PedalOverlayView.kt` — dual-zone pedal.
 - `app/src/main/kotlin/tools/alamobile/mod/util/VersionGate.kt` — version gating.
 - `native/src/ala_core.c` — native entry points and ShadowHook init.
-- `native/src/il2cpp_hooks.c` — IL2CPP hook trampolines.
-- `native/src/pedal_hook.c` — throttle/brake/gear hook logic.
+- `native/src/pedal_hook.c` — throttle/brake/gear hook logic + input writer thread.
 - `native/src/drs_hook.c` — auto DRS / active aero hook logic.
+- `native/src/unlock_hook.c` — billing/unlock IL2CPP hook logic.
 - `app/src/main/resources/META-INF/xposed/module.prop` — libxposed module metadata.
 - `app/src/main/resources/META-INF/xposed/scope.list` — target package list.
 
@@ -124,13 +128,10 @@ Two areas are explicitly designated for human contribution during implementation
 - M3: Configurable MIUIX settings UI, JSON config, pedal mapping curve, and release packaging — done.
 - M4: Overlay display and pedal input verification in-game — done. Shift hooks and DRS auto logic remain pending.
 - M5: Overlay editor sync, pedal stutter mitigation, and ConfigActivity three-tab UI refactor — done (v1.0.0-Alpha-2). Published with KernelSU-style UI, dark mode support, and demo videos.
+- M6: Coexistence build stability overhaul (v1.0.0-Beta-1, 100210) — done. Fixed dual-ClassLoader injection (System.setProperty guard), abolished non-atomic file IPC in favor of JNI direct path, and switched overlay touch mapping to rawY + configured position to survive pairip relayout drift. CI auto-builds + tag-triggered Pre-release via `.github/workflows/build.yml`.
 
 ## Notes for Future Changes
 
 - Do not commit the APK or any IL2CPP dump larger than GitHub's file size limit. Large files are excluded via `.gitignore`.
 - miuix is a Kotlin Multiplatform library; keep Compose code in `ConfigActivity` and do not use it for runtime overlays.
 - Before adding new native hooks, regenerate the IL2CPP dump and update `offsets_sheet.csv`/`OffsetTable.kt`.
-
-## Cross-session handoff
-
-- See [HANDOFF.md](HANDOFF.md) for the latest session state, verified status, failed approaches, and next steps.
