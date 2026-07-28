@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.DisplaySettings
+import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Straighten
@@ -113,6 +114,16 @@ fun ConfigurePage(
                             checked = false,
                             enabled = false,
                             onCheckedChange = {}
+                        )
+                        SwitchRow(
+                            title = "解锁付费内容",
+                            summary = "Hook BillingManager 强制解锁 DLC 和 IAP",
+                            icon = Icons.Rounded.LockOpen,
+                            checked = uiState.enableUnlock.value,
+                            onCheckedChange = {
+                                uiState.enableUnlock.value = it
+                                onSave()
+                            }
                         )
                     }
 

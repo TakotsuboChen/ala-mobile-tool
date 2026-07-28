@@ -5,6 +5,7 @@
 
 #include "pedal_hook.h"
 #include "drs_hook.h"
+#include "unlock_hook.h"
 
 #define LOG_TAG "AlaMobileTool"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -29,8 +30,17 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
                                            jlong clutch_field, jlong gear_field,
                                            jlong drivetrain_fixed_update, jlong drivetrain_automatic_field,
                                            jlong drs_toggle,
+                                           jlong billing_manager_awake,
+                                           jlong billing_manager_initialize_billing,
+                                           jlong billing_manager_on_owned_none,
+                                           jlong billing_manager_on_purchase_failed,
+                                           jlong billing_manager_set_unlocked,
+                                           jlong billing_manager_is_unlocked_field,
+                                           jlong billing_manager_has_store_connection_field,
+                                           jlong billing_manager_has_completed_ownership_check_field,
                                            jboolean enable_controls, jboolean enable_drs,
-                                           jboolean disable_auto_gear) {
+                                           jboolean disable_auto_gear,
+                                           jboolean enable_unlock) {
     (void) env;
     (void) clazz;
     (void) clutch_field;
@@ -66,6 +76,22 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
 
     if (!drs_install_hooks(&drs_cfg)) {
         LOGE("Failed to install DRS hooks");
+    }
+
+    unlock_hook_config_t unlock_cfg = {
+        .enable_unlock = (bool) enable_unlock,
+        .billing_manager_awake_offset = (uintptr_t) billing_manager_awake,
+        .billing_manager_initialize_billing_offset = (uintptr_t) billing_manager_initialize_billing,
+        .billing_manager_on_owned_none_offset = (uintptr_t) billing_manager_on_owned_none,
+        .billing_manager_on_purchase_failed_offset = (uintptr_t) billing_manager_on_purchase_failed,
+        .billing_manager_set_unlocked_offset = (uintptr_t) billing_manager_set_unlocked,
+        .billing_manager_is_unlocked_field_offset = (uintptr_t) billing_manager_is_unlocked_field,
+        .billing_manager_has_store_connection_field_offset = (uintptr_t) billing_manager_has_store_connection_field,
+        .billing_manager_has_completed_ownership_check_field_offset = (uintptr_t) billing_manager_has_completed_ownership_check_field,
+    };
+
+    if (!unlock_install_hooks(&unlock_cfg)) {
+        LOGE("Failed to install unlock hooks");
     }
 
     g_state.controls_enabled = (bool) enable_controls;

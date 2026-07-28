@@ -23,6 +23,7 @@ object ModConfig {
     const val KEY_ENABLE_AUTO_DRS = "enable_auto_drs"
     const val KEY_SHOW_OVERLAY = "show_overlay"
     const val KEY_DISABLE_AUTO_GEAR = "disable_auto_gear"
+    const val KEY_ENABLE_UNLOCK = "enable_unlock"
 
     // Pedal mapping
     const val KEY_PEDAL_DEADZONE = "pedal_deadzone"
@@ -53,6 +54,7 @@ object ModConfig {
         const val ENABLE_AUTO_DRS = true
         const val SHOW_OVERLAY = true
         const val DISABLE_AUTO_GEAR = false
+        const val ENABLE_UNLOCK = false
         const val PEDAL_DEADZONE = 0.05f
         const val PEDAL_TRANSITION = 0.5f
         val PEDAL_CURVE = PedalCurve.LINEAR
@@ -115,6 +117,10 @@ object ModConfig {
                     KEY_DISABLE_AUTO_GEAR,
                     Defaults.DISABLE_AUTO_GEAR
                 ),
+                enableUnlock = json.optBoolean(
+                    KEY_ENABLE_UNLOCK,
+                    Defaults.ENABLE_UNLOCK
+                ),
                 pedalDeadzone = json.optDouble(
                     KEY_PEDAL_DEADZONE,
                     Defaults.PEDAL_DEADZONE.toDouble()
@@ -148,6 +154,7 @@ object ModConfig {
             put(KEY_ENABLE_AUTO_DRS, settings.enableAutoDrs)
             put(KEY_SHOW_OVERLAY, settings.showOverlay)
             put(KEY_DISABLE_AUTO_GEAR, settings.disableAutoGear)
+            put(KEY_ENABLE_UNLOCK, settings.enableUnlock)
             put(KEY_PEDAL_DEADZONE, settings.pedalDeadzone.toDouble())
             put(KEY_PEDAL_TRANSITION, settings.pedalTransition.toDouble())
             put(KEY_PEDAL_CURVE, settings.pedalCurve.value)
@@ -220,6 +227,7 @@ object ModConfig {
             enableAutoDrs = Defaults.ENABLE_AUTO_DRS,
             showOverlay = Defaults.SHOW_OVERLAY,
             disableAutoGear = Defaults.DISABLE_AUTO_GEAR,
+            enableUnlock = Defaults.ENABLE_UNLOCK,
             pedalDeadzone = Defaults.PEDAL_DEADZONE,
             pedalTransition = Defaults.PEDAL_TRANSITION,
             pedalCurve = Defaults.PEDAL_CURVE,
@@ -234,6 +242,7 @@ object ModConfig {
         val enableAutoDrs: Boolean,
         val showOverlay: Boolean,
         val disableAutoGear: Boolean,
+        val enableUnlock: Boolean,
         val pedalDeadzone: Float,
         val pedalTransition: Float,
         val pedalCurve: PedalCurve,

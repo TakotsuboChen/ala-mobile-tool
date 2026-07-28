@@ -12,6 +12,7 @@ import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
 import tools.alamobile.mod.config.ModConfig
+import tools.alamobile.mod.hook.BillingHook
 import tools.alamobile.mod.overlay.OverlayManager
 import tools.alamobile.mod.util.isSupportedVersion
 import java.io.File
@@ -39,6 +40,14 @@ class AlaMobileModule : XposedModule() {
 
     override fun onPackageLoaded(param: PackageLoadedParam) {
         Log.i(TAG, "Package loaded: ${param.packageName}")
+
+        // Install Java hooks for billing bypass
+        try {
+            BillingHook.install(this, param)
+            Log.i(TAG, "Java hooks installed successfully")
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to install Java hooks: ${e.message}")
+        }
     }
 
     override fun onPackageReady(param: PackageReadyParam) {
@@ -84,6 +93,7 @@ class AlaMobileModule : XposedModule() {
         val enableAutoDrs = settings?.enableAutoDrs ?: true
         val showOverlay = settings?.showOverlay ?: true
         val disableAutoGear = settings?.disableAutoGear ?: false
+        val enableUnlock = settings?.enableUnlock ?: false
 
         val mainHandler = Handler(Looper.getMainLooper())
         mainHandler.postDelayed({
@@ -104,7 +114,8 @@ class AlaMobileModule : XposedModule() {
                 NativeBridge.initWithOffsets(
                     enableControlReplacement = enableControlReplacement,
                     enableAutoDRS = enableAutoDrs,
-                    disableAutoGear = disableAutoGear
+                    disableAutoGear = disableAutoGear,
+                    enableUnlock = enableUnlock
                 )
                 Log.i(TAG, "Native hooks installed")
             } catch (e: Throwable) {

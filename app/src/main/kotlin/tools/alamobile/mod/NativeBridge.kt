@@ -30,9 +30,20 @@ object NativeBridge {
         // DRS offsets
         drsToggle: Long,
 
+        // Unlock offsets
+        billingManagerAwake: Long,
+        billingManagerInitializeBilling: Long,
+        billingManagerOnOwnedNone: Long,
+        billingManagerOnPurchaseFailed: Long,
+        billingManagerSetUnlocked: Long,
+        billingManagerIsUnlockedField: Long,
+        billingManagerHasStoreConnectionField: Long,
+        billingManagerHasCompletedOwnershipCheckField: Long,
+
         enableControlReplacement: Boolean,
         enableAutoDRS: Boolean,
-        disableAutoGear: Boolean
+        disableAutoGear: Boolean,
+        enableUnlock: Boolean
     )
 
     @JvmStatic
@@ -63,7 +74,8 @@ object NativeBridge {
     fun initWithOffsets(
         enableControlReplacement: Boolean,
         enableAutoDRS: Boolean,
-        disableAutoGear: Boolean = false
+        disableAutoGear: Boolean = false,
+        enableUnlock: Boolean = false
     ) {
         init(
             OffsetTable.IRDS_CAR_CONTROLL_INPUT_SET_THROTTLE,
@@ -82,9 +94,18 @@ object NativeBridge {
             OffsetTable.IRDS_DRIVETRAIN_FIXED_UPDATE,
             OffsetTable.IRDS_DRIVETRAIN_AUTOMATIC_FIELD,
             OffsetTable.IRDS_CAR_CONTROLL_INPUT_DRS_TOGGLE,
+            OffsetTable.BILLING_MANAGER_AWAKE,
+            OffsetTable.BILLING_MANAGER_INITIALIZE_BILLING,
+            OffsetTable.BILLING_MANAGER_ON_OWNED_NONE,
+            OffsetTable.BILLING_MANAGER_ON_PURCHASE_FAILED,
+            OffsetTable.BILLING_MANAGER_SET_UNLOCKED,
+            OffsetTable.BILLING_MANAGER_IS_UNLOCKED_FIELD,
+            OffsetTable.BILLING_MANAGER_HAS_STORE_CONNECTION_FIELD,
+            OffsetTable.BILLING_MANAGER_HAS_COMPLETED_OWNERSHIP_CHECK_FIELD,
             enableControlReplacement,
             enableAutoDRS,
-            disableAutoGear
+            disableAutoGear,
+            enableUnlock
         )
     }
 }

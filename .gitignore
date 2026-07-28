@@ -5,6 +5,12 @@
 *.keystore
 *.jks
 
+# Packing / repacking work
+/tmp/ala-apk-work/
+apktool_new.jar
+mod_key.jks
+AlaMobile_8.0.0_Takotsubo*
+
 # Gradle
 .gradle/
 build/

@@ -28,6 +28,7 @@ class PedalOverlayView(
         enableAutoDrs = true,
         showOverlay = true,
         disableAutoGear = false,
+        enableUnlock = false,
         pedalDeadzone = 0.05f,
         pedalTransition = 0.5f,
         pedalCurve = ModConfig.PedalCurve.LINEAR
