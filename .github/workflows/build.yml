@@ -30,15 +30,17 @@ jobs:
 
       - name: Install Android SDK components (if missing)
         # runner 自带 platforms;android-37.0 (带小数点)，AGP compileSdk=37
-        # 找的是 platforms;android-37。复制目录 + 改 package.xml id 兼容。
+        # 找的是 platforms;android-37。复制目录 + 改 package.xml/source.properties
+        # 让 AGP 识别为 android-37。
         run: |
           SDK=$ANDROID_SDK_ROOT
           if [ ! -d "$SDK/platforms/android-37" ] && [ -d "$SDK/platforms/android-37.0" ]; then
             cp -r "$SDK/platforms/android-37.0" "$SDK/platforms/android-37"
-            # 改 package.xml 里的 id 让 AGP 识别
-            sed -i 's/android-37.0/android-37/g' "$SDK/platforms/android-37/package.xml" 2>/dev/null || true
-            sed -i 's/android-37.0/android-37/g' "$SDK/platforms/android-37/source.properties" 2>/dev/null || true
-            echo "Copied android-37.0 -> android-37 with fixed package.xml"
+            # 改 source.properties 让 AGP 识别版本号
+            sed -i 's/Pkg\.Desc=Android SDK Platform 37.0/Pkg.Desc=Android SDK Platform 37/g' "$SDK/platforms/android-37/source.properties" 2>/dev/null || true
+            # 改 package.xml 里的路径和 id
+            sed -i 's/android-37\.0/android-37/g' "$SDK/platforms/android-37/package.xml" 2>/dev/null || true
+            echo "Copied android-37.0 -> android-37 with fixed metadata"
           fi
           ls "$SDK/platforms/" | grep android-37
 
@@ -55,17 +57,8 @@ jobs:
           echo "KEYSTORE_PASSWORD=$KS_PWD" >> "$GITHUB_ENV"
           echo "KEYSTORE_ALIAS=$KS_ALIAS" >> "$GITHUB_ENV"
 
-      - name: Build release APK
-        run: ./gradlew :app:assembleRelease
-
-      - name: Build debug APK (for CI verification)
+      - name: Build debug APK (CI 只构建 debug，release 由本地构建上传)
         run: ./gradlew :app:assembleDebug
-
-      - name: Upload release APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-apk
-          path: app/build/outputs/apk/release/*.apk
 
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
@@ -74,6 +67,7 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
 
       # Tag push (v*) → create Pre-release on GitHub Releases
+      # CI 只发 debug APK；release APK 由维护者本地构建后手动上传到同一 Release
       - name: Create Pre-release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
@@ -82,5 +76,4 @@ jobs:
           name: ${{ github.ref_name }}
           generate_release_notes: true
           files: |
-            app/build/outputs/apk/release/*.apk
             app/build/outputs/apk/debug/*.apk
