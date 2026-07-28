@@ -19,11 +19,13 @@ android {
     signingConfigs {
         create("release") {
             // 优先用环境变量（CI 上由 GitHub Secret KEYSTORE_BASE64 解码生成）
-            val storeFilePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/ala-mobile-tool.keystore"
+            // 用 ifEmpty 处理空字符串（CI 上 secret 未配时 env 是空串不是 null）
+            val storeFilePath = System.getenv("KEYSTORE_PATH")?.ifEmpty { null }
+                ?: "${rootDir}/ala-mobile-tool.keystore"
             storeFile = file(storeFilePath)
-            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "alamobiletool"
-            keyAlias = System.getenv("KEYSTORE_ALIAS") ?: "alamobiletool"
-            keyPassword = System.getenv("KEYSTORE_PASSWORD") ?: "alamobiletool"
+            storePassword = System.getenv("KEYSTORE_PASSWORD")?.ifEmpty { null } ?: "alamobiletool"
+            keyAlias = System.getenv("KEYSTORE_ALIAS")?.ifEmpty { null } ?: "alamobiletool"
+            keyPassword = System.getenv("KEYSTORE_PASSWORD")?.ifEmpty { null } ?: "alamobiletool"
         }
     }
 
