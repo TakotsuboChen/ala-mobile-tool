@@ -78,7 +78,9 @@ class OverlayManager(context: Context) {
     }
 
     private fun toggleOverlays() {
-        if (pedalView == null || gearView == null) {
+        // 只用 pedalView 判空触发 addGamingOverlays —— 手动换挡关时 gearView
+        // 永远 null 是正常态，不应触发重复 add。
+        if (pedalView == null) {
             addGamingOverlays()
         }
         overlaysVisible = !overlaysVisible
@@ -92,7 +94,7 @@ class OverlayManager(context: Context) {
     }
 
     private fun toggleEditMode() {
-        if (pedalView == null || gearView == null) {
+        if (pedalView == null) {
             addGamingOverlays()
         }
         // Make sure the underlying overlays are visible so the edit layer is
@@ -120,18 +122,23 @@ class OverlayManager(context: Context) {
 
         val gearPosition = settings.gearPosition
         val pedalPosition = settings.pedalPosition
-        gearView = GearShiftView(appContext).apply {
-            tag = "gear_shift_overlay"
-            visibility = View.GONE
+
+        // 手动换挡关时不创建换挡控件；gearView 保持 null。
+        if (settings.enableManualShift) {
+            gearView = GearShiftView(appContext).apply {
+                tag = "gear_shift_overlay"
+                visibility = View.GONE
+            }
+            val gearParams = FrameLayout.LayoutParams(
+                gearPosition.widthPx(appContext, screenWidth),
+                gearPosition.heightPx(appContext, screenHeight)
+            ).apply {
+                leftMargin = gearPosition.leftPx(screenWidth)
+                topMargin = gearPosition.topPx(screenHeight)
+            }
+            root?.addView(gearView, gearParams)
+            addGearEditLayer(gearParams)
         }
-        val gearParams = FrameLayout.LayoutParams(
-            gearPosition.widthPx(appContext, screenWidth),
-            gearPosition.heightPx(appContext, screenHeight)
-        ).apply {
-            leftMargin = gearPosition.leftPx(screenWidth)
-            topMargin = gearPosition.topPx(screenHeight)
-        }
-        root?.addView(gearView, gearParams)
 
         pedalView = PedalOverlayView(appContext, settings).apply {
             tag = "pedal_overlay"
@@ -146,16 +153,11 @@ class OverlayManager(context: Context) {
         }
         root?.addView(pedalView, pedalParams)
 
-        addEditLayers(gearParams, pedalParams)
+        addPedalEditLayer(pedalParams)
     }
 
-    private fun addEditLayers(
-        gearParams: FrameLayout.LayoutParams,
-        pedalParams: FrameLayout.LayoutParams
-    ) {
+    private fun addPedalEditLayer(pedalParams: FrameLayout.LayoutParams) {
         val pedal = pedalView ?: return
-        val gear = gearView ?: return
-
         val minPx = (48 * density).toInt()
 
         pedalEditView = OverlayEditView(
@@ -181,6 +183,11 @@ class OverlayManager(context: Context) {
                 topMargin = pedalParams.topMargin
             }
         )
+    }
+
+    private fun addGearEditLayer(gearParams: FrameLayout.LayoutParams) {
+        val gear = gearView ?: return
+        val minPx = (48 * density).toInt()
 
         gearEditView = OverlayEditView(
             appContext,

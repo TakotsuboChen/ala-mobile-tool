@@ -119,7 +119,10 @@ class AlaMobileModule : XposedModule() {
         val enableControlReplacement = settings?.enableControlReplacement ?: true
         val enableAutoDrs = settings?.enableAutoDrs ?: true
         val showOverlay = settings?.showOverlay ?: true
-        val disableAutoGear = settings?.disableAutoGear ?: false
+        // 手动换挡开 ⇒ 关闭游戏自动换挡（disableAutoGear 由 enableManualShift 派生）。
+        // 当前 enableManualShift 默认 false，所以 disableAutoGear=false，游戏自动换挡保持原样。
+        val enableManualShift = settings?.enableManualShift ?: false
+        val disableAutoGear = enableManualShift
         val enableUnlock = settings?.enableUnlock ?: false
 
         val mainHandler = Handler(Looper.getMainLooper())

@@ -80,23 +80,33 @@ fun ConfigurePage(
                     )
                     Card(modifier = Modifier.fillMaxWidth()) {
                         SwitchRow(
-                            title = "踏板覆盖",
-                            summary = "用悬浮窗踏板替代游戏默认输入",
-                            icon = Icons.Rounded.Menu,
-                            checked = uiState.enableControlReplacement.value,
+                            title = "自动 DRS（开发中）",
+                            summary = "在 DRS 区域自动开启 DRS",
+                            icon = Icons.Rounded.Traffic,
+                            checked = uiState.enableAutoDrs.value,
+                            enabled = false,
                             onCheckedChange = {
-                                uiState.enableControlReplacement.value = it
+                                uiState.enableAutoDrs.value = it
                                 onSave()
                             }
                         )
                         SwitchRow(
-                            title = "自动 DRS（开发中）",
-                            summary = "在 DRS 区域自动开启 DRS",
-                            icon = Icons.Rounded.Traffic,
-                            checked = false,
-                            enabled = false,
-                            onCheckedChange = {}
+                            title = "解锁付费内容",
+                            summary = "Hook BillingManager 强制解锁 DLC 和 IAP",
+                            icon = Icons.Rounded.LockOpen,
+                            checked = uiState.enableUnlock.value,
+                            onCheckedChange = {
+                                uiState.enableUnlock.value = it
+                                onSave()
+                            }
                         )
+                    }
+
+                    SmallTitle(
+                        text = "Overlay 控件",
+                        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                    Card(modifier = Modifier.fillMaxWidth()) {
                         SwitchRow(
                             title = "显示悬浮窗",
                             summary = "在游戏中显示踏板和换挡悬浮窗",
@@ -108,20 +118,23 @@ fun ConfigurePage(
                             }
                         )
                         SwitchRow(
-                            title = "关闭自动换挡（开发中）",
-                            summary = "禁用车载自动换挡逻辑",
-                            icon = Icons.Rounded.Bolt,
-                            checked = false,
-                            enabled = false,
-                            onCheckedChange = {}
+                            title = "线性踏板",
+                            summary = "用悬浮窗踏板替代游戏默认输入",
+                            icon = Icons.Rounded.Menu,
+                            checked = uiState.enableControlReplacement.value,
+                            onCheckedChange = {
+                                uiState.enableControlReplacement.value = it
+                                onSave()
+                            }
                         )
                         SwitchRow(
-                            title = "解锁付费内容",
-                            summary = "Hook BillingManager 强制解锁 DLC 和 IAP",
-                            icon = Icons.Rounded.LockOpen,
-                            checked = uiState.enableUnlock.value,
+                            title = "手动换挡（开发中）",
+                            summary = "启用换挡悬浮窗并关闭游戏自动换挡",
+                            icon = Icons.Rounded.Bolt,
+                            checked = uiState.enableManualShift.value,
+                            enabled = false,
                             onCheckedChange = {
-                                uiState.enableUnlock.value = it
+                                uiState.enableManualShift.value = it
                                 onSave()
                             }
                         )

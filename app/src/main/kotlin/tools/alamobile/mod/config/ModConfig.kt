@@ -23,6 +23,7 @@ object ModConfig {
     const val KEY_ENABLE_AUTO_DRS = "enable_auto_drs"
     const val KEY_SHOW_OVERLAY = "show_overlay"
     const val KEY_DISABLE_AUTO_GEAR = "disable_auto_gear"
+    const val KEY_ENABLE_MANUAL_SHIFT = "enable_manual_shift"
     const val KEY_ENABLE_UNLOCK = "enable_unlock"
 
     // Pedal mapping
@@ -54,6 +55,7 @@ object ModConfig {
         const val ENABLE_AUTO_DRS = true
         const val SHOW_OVERLAY = true
         const val DISABLE_AUTO_GEAR = false
+        const val ENABLE_MANUAL_SHIFT = false
         const val ENABLE_UNLOCK = false
         const val PEDAL_DEADZONE = 0.05f
         const val PEDAL_TRANSITION = 0.5f
@@ -117,6 +119,10 @@ object ModConfig {
                     KEY_DISABLE_AUTO_GEAR,
                     Defaults.DISABLE_AUTO_GEAR
                 ),
+                enableManualShift = json.optBoolean(
+                    KEY_ENABLE_MANUAL_SHIFT,
+                    Defaults.ENABLE_MANUAL_SHIFT
+                ),
                 enableUnlock = json.optBoolean(
                     KEY_ENABLE_UNLOCK,
                     Defaults.ENABLE_UNLOCK
@@ -154,6 +160,7 @@ object ModConfig {
             put(KEY_ENABLE_AUTO_DRS, settings.enableAutoDrs)
             put(KEY_SHOW_OVERLAY, settings.showOverlay)
             put(KEY_DISABLE_AUTO_GEAR, settings.disableAutoGear)
+            put(KEY_ENABLE_MANUAL_SHIFT, settings.enableManualShift)
             put(KEY_ENABLE_UNLOCK, settings.enableUnlock)
             put(KEY_PEDAL_DEADZONE, settings.pedalDeadzone.toDouble())
             put(KEY_PEDAL_TRANSITION, settings.pedalTransition.toDouble())
@@ -227,6 +234,7 @@ object ModConfig {
             enableAutoDrs = Defaults.ENABLE_AUTO_DRS,
             showOverlay = Defaults.SHOW_OVERLAY,
             disableAutoGear = Defaults.DISABLE_AUTO_GEAR,
+            enableManualShift = Defaults.ENABLE_MANUAL_SHIFT,
             enableUnlock = Defaults.ENABLE_UNLOCK,
             pedalDeadzone = Defaults.PEDAL_DEADZONE,
             pedalTransition = Defaults.PEDAL_TRANSITION,
@@ -242,6 +250,7 @@ object ModConfig {
         val enableAutoDrs: Boolean,
         val showOverlay: Boolean,
         val disableAutoGear: Boolean,
+        val enableManualShift: Boolean,
         val enableUnlock: Boolean,
         val pedalDeadzone: Float,
         val pedalTransition: Float,
