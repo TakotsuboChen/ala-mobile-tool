@@ -20,9 +20,18 @@ data class OverlayPosition(
     val height: Float
 ) {
     companion object {
-        val DEFAULT_PEDAL = OverlayPosition(0.75f, 0.35f, 0.18f, 0.55f)
-        val DEFAULT_GEAR = OverlayPosition(0.04f, 0.60f, 0.22f, 0.30f)
-        val DEFAULT_BRAKE = OverlayPosition(0.55f, 0.35f, 0.18f, 0.55f)
+        // 用户坐标系：屏幕左下角为原点，y 向上，百分比。
+        // 四角顺序：(left,bottom),(right,bottom),(left,top),(right,top)
+        //   单踏板/油门 (80,55),(95,55),(80,5),(95,5)   → left=.80 right=.95 bottom=.05 top=.55
+        //   双踏板刹车   (5,55),(20,55),(5,5),(20,5)    → left=.05 right=.20 bottom=.05 top=.55
+        //   换挡（与刹车同坐标）
+        // 内部存储保持 Android 原生语义（左上原点 y 向下），转换：
+        //   top_android = 1 - top_user  = 1 - .55 = .45
+        //   height      = top_user - bottom_user = .55 - .05 = .50
+        //   width       = right_user - left_user
+        val DEFAULT_PEDAL = OverlayPosition(0.80f, 0.45f, 0.15f, 0.50f)
+        val DEFAULT_GEAR = OverlayPosition(0.05f, 0.45f, 0.15f, 0.50f)
+        val DEFAULT_BRAKE = OverlayPosition(0.05f, 0.45f, 0.15f, 0.50f)
 
         private const val MIN_DIMENSION_DP = 48f
 

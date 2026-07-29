@@ -231,9 +231,10 @@ object ModConfig {
             put(KEY_PEDAL_TRANSITION, settings.pedalTransition.toDouble())
             put(KEY_THROTTLE_CURVE, settings.throttleCurve.value)
             put(KEY_BRAKE_CURVE, settings.brakeCurve.value)
-            put(KEY_PEDAL_POSITION, settings.pedalPosition.toJson())
-            put(KEY_GEAR_POSITION, settings.gearPosition.toJson())
-            put(KEY_BRAKE_POSITION, settings.brakePosition.toJson())
+            // 不写 position 三字段：position 由游戏进程持有（拖拽时
+            // saveOverlayPosition 写游戏 externalFilesDir），ConfigActivity
+            // 不管 position。广播 JSON 不含 position，ConfigReceiver 收到
+            // 后合并——保留游戏进程已有的 position，只更新这里的非 position 字段。
             put(KEY_LOG_ENABLED, settings.logEnabled)
         }.toString(2)
 

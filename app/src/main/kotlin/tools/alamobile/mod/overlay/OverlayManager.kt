@@ -20,8 +20,29 @@ import tools.alamobile.mod.config.ModConfig
  */
 class OverlayManager(context: Context) {
 
+    companion object {
+        // 配置变更回调入口：ConfigReceiver 写完 JSON 后调此方法，
+        // post 到主线程触发 OverlayManager 重建 overlay。共存版双 ClassLoader
+        // 下，第二个 ClassLoader 不构造 OverlayManager（isNativeInstalled 守卫
+        // 跳过），其 instance 为 null，notifyConfigChanged 是 no-op——只有
+        // 第一个 ClassLoader 的 instance 非空，重建生效，不会重复。
+        @Volatile
+        private var instance: OverlayManager? = null
+
+        fun notifyConfigChanged() {
+            instance?.let { mgr ->
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    mgr.rebuildFromConfigChange()
+                }
+            }
+        }
+    }
+
     private val appContext = context.applicationContext
-    private val root: ViewGroup?
+    // root 是 var：Activity 可能被销毁重建（旋转/内存回收），旧 decorView 失效。
+    // rebuildFromConfigChange 在广播到达时触发（不在 Activity 生命周期同步点），
+    // 必须重新获取 root，否则 addView/removeView 作用在旧 view 上无效。
+    private var root: ViewGroup? = null
     private var pedalView: PedalOverlayView? = null
     private var brakeView: PedalOverlayView? = null
     private var gearView: GearShiftView? = null
@@ -40,8 +61,43 @@ class OverlayManager(context: Context) {
     private var editMode = false
 
     init {
+        refreshRoot()
+        instance = this
+    }
+
+    /**
+     * 重新获取当前 Activity 的 content view 作为 root 容器。
+     * Activity 可能被销毁重建（旋转/内存回收），旧 decorView 失效，
+     * addView/removeView 作用在旧 view 上无效。rebuildFromConfigChange
+     * 在广播到达时触发（不在 Activity 生命周期同步点），必须先刷新 root。
+     */
+    private fun refreshRoot() {
         val activity = findCurrentActivity()
         root = activity?.window?.decorView?.findViewById(android.R.id.content)
+    }
+
+    /**
+     * 配置变更后重建 overlay（由 ConfigReceiver 通过 notifyConfigChanged 触发）。
+     *
+     * PedalOverlayView 构造时拷贝 ModConfig.Settings 快照（data class 值语义），
+     * 光重读 JSON 不够——必须重建 view 才能让新配置流进去。此方法重读配置、
+     * 移除游戏控件、重建，并保持当前可见性和编辑模式状态不变（配置变了但
+     * 用户没操作，可见性应保持）。
+     */
+    private fun rebuildFromConfigChange() {
+        // Activity 可能已重建，旧 root 失效——先刷新。
+        refreshRoot()
+        if (root == null) return
+        settings = ModConfig.readFromTargetProcess(appContext)
+        removeGamingOverlays()
+        addGamingOverlays()
+        // addGamingOverlays 创建时 visibility=GONE，按当前 overlaysVisible 重设。
+        val newVisibility = if (overlaysVisible) View.VISIBLE else View.GONE
+        pedalView?.visibility = newVisibility
+        brakeView?.visibility = newVisibility
+        gearView?.visibility = newVisibility
+        // 重建后 editView 是新实例，若在编辑模式要重新设 VISIBLE。
+        if (editMode) updateEditModeVisibility()
     }
 
     fun showOverlays() {
@@ -145,7 +201,11 @@ class OverlayManager(context: Context) {
         val brakePosition = settings.brakePosition
 
         // 手动换挡关时不创建换挡控件；gearView 保持 null。
-        if (settings.enableManualShift) {
+        // DUAL 模式下也不创建——刹车和换挡默认坐标相同（左下角），
+        // 同时开会重叠导致触摸冲突。用户明确要求两者不能同时开，
+        // 当前换挡开关 UI 禁用，这里加运行时守卫防 JSON 手动编辑或
+        // 未来 UI bug 导致两者同时 true。
+        if (settings.enableManualShift && settings.pedalMode != ModConfig.PedalMode.DUAL) {
             gearView = GearShiftView(appContext).apply {
                 tag = "gear_shift_overlay"
                 visibility = View.GONE
@@ -327,12 +387,14 @@ class OverlayManager(context: Context) {
     private fun removeGamingOverlays() {
         // 只移除游戏控件，保留 toggle 按钮——toggle 操作时按钮本身要留着
         // 供用户再次点击，只需重建踏板/换挡 view 反映最新配置。
-        root?.findViewWithTag<View>("pedal_overlay")?.let { root.removeView(it) }
-        root?.findViewWithTag<View>("brake_overlay")?.let { root.removeView(it) }
-        root?.findViewWithTag<View>("gear_shift_overlay")?.let { root.removeView(it) }
-        root?.findViewWithTag<View>("pedal_overlay_edit")?.let { root.removeView(it) }
-        root?.findViewWithTag<View>("brake_overlay_edit")?.let { root.removeView(it) }
-        root?.findViewWithTag<View>("gear_shift_overlay_edit")?.let { root.removeView(it) }
+        // 用局部 val 快照 root，避免 var 的 smart cast 限制。
+        val parent = root ?: return
+        parent.findViewWithTag<View>("pedal_overlay")?.let { parent.removeView(it) }
+        parent.findViewWithTag<View>("brake_overlay")?.let { parent.removeView(it) }
+        parent.findViewWithTag<View>("gear_shift_overlay")?.let { parent.removeView(it) }
+        parent.findViewWithTag<View>("pedal_overlay_edit")?.let { parent.removeView(it) }
+        parent.findViewWithTag<View>("brake_overlay_edit")?.let { parent.removeView(it) }
+        parent.findViewWithTag<View>("gear_shift_overlay_edit")?.let { parent.removeView(it) }
         pedalView = null
         brakeView = null
         gearView = null
@@ -342,13 +404,14 @@ class OverlayManager(context: Context) {
     }
 
     private fun removeExisting() {
-        root?.findViewWithTag<View>("ala_tool_toggle")?.let { root.removeView(it) }
-        root?.findViewWithTag<View>("pedal_overlay")?.let { root.removeView(it) }
-        root?.findViewWithTag<View>("brake_overlay")?.let { root.removeView(it) }
-        root?.findViewWithTag<View>("gear_shift_overlay")?.let { root.removeView(it) }
-        root?.findViewWithTag<View>("pedal_overlay_edit")?.let { root.removeView(it) }
-        root?.findViewWithTag<View>("brake_overlay_edit")?.let { root.removeView(it) }
-        root?.findViewWithTag<View>("gear_shift_overlay_edit")?.let { root.removeView(it) }
+        val parent = root ?: return
+        parent.findViewWithTag<View>("ala_tool_toggle")?.let { parent.removeView(it) }
+        parent.findViewWithTag<View>("pedal_overlay")?.let { parent.removeView(it) }
+        parent.findViewWithTag<View>("brake_overlay")?.let { parent.removeView(it) }
+        parent.findViewWithTag<View>("gear_shift_overlay")?.let { parent.removeView(it) }
+        parent.findViewWithTag<View>("pedal_overlay_edit")?.let { parent.removeView(it) }
+        parent.findViewWithTag<View>("brake_overlay_edit")?.let { parent.removeView(it) }
+        parent.findViewWithTag<View>("gear_shift_overlay_edit")?.let { parent.removeView(it) }
         pedalView = null
         brakeView = null
         gearView = null
