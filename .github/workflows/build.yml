@@ -33,12 +33,6 @@ jobs:
             cat "$d/source.properties" 2>/dev/null || echo "no source.properties"
           done
 
-      - name: Try install platforms;android-37
-        run: |
-          # sdkmanager 仓库未发布 platforms;android-37，预期失败。
-          # runner 预装 android-37.0（真 API 37），下一步 symlink 兜底。
-          (echo y | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-37") 2>&1 || echo "stable channel failed (expected)"
-
       - name: "Fallback: clone android-37.0 to android-37 if 37 missing"
         run: |
           if [ ! -d /usr/local/lib/android/sdk/platforms/android-37 ]; then
@@ -52,6 +46,8 @@ jobs:
               cp -r "$src" "$dst"
               # 改 source.properties 的 Pkg.Path
               sed -i 's|Pkg.Path=platforms;android-37\.0|Pkg.Path=platforms;android-37|' "$dst/source.properties"
+              # 改 ApiLevel=37.0 → 37（AGP 按整数比较，37.0 != 37 会导致 60 AAR metadata issues）
+              sed -i 's|AndroidVersion.ApiLevel=37\.0|AndroidVersion.ApiLevel=37|' "$dst/source.properties"
               # 改 package.xml 的 localPackage path 属性
               sed -i 's|path="platforms;android-37\.0"|path="platforms;android-37"|' "$dst/package.xml"
               echo "Cloned $src → $dst and fixed path identifiers"
