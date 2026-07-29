@@ -48,8 +48,9 @@ jobs:
               sed -i 's|Pkg.Path=platforms;android-37\.0|Pkg.Path=platforms;android-37|' "$dst/source.properties"
               # 改 ApiLevel=37.0 → 37（AGP 按整数比较，37.0 != 37 会导致 60 AAR metadata issues）
               sed -i 's|AndroidVersion.ApiLevel=37\.0|AndroidVersion.ApiLevel=37|' "$dst/source.properties"
-              # 改 package.xml 的 localPackage path 属性
-              sed -i 's|path="platforms;android-37\.0"|path="platforms;android-37"|' "$dst/package.xml"
+              # 改 package.xml 的 localPackage path 属性 + api-level 标签
+              sed -i 's|path="platforms;android-37\.0"|path="platforms;android-37"|g' "$dst/package.xml"
+              sed -i 's|<api-level>37\.0</api-level>|<api-level>37</api-level>|g' "$dst/package.xml"
               echo "Cloned $src → $dst and fixed path identifiers"
             else
               echo "ERROR: $src not found, cannot proceed"
@@ -58,8 +59,8 @@ jobs:
           fi
           echo "=== android-37 source.properties ==="
           cat /usr/local/lib/android/sdk/platforms/android-37/source.properties 2>/dev/null || echo "still missing"
-          echo "=== android-37 package.xml path ==="
-          grep -o 'path="platforms;android-37[^"]*"' /usr/local/lib/android/sdk/platforms/android-37/package.xml 2>/dev/null || echo "no package.xml"
+          echo "=== android-37 package.xml (full) ==="
+          cat /usr/local/lib/android/sdk/platforms/android-37/package.xml 2>/dev/null || echo "no package.xml"
 
       - name: Install NDK 26.1.10909125
         run: |
