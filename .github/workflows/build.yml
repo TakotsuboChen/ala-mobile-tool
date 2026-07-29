@@ -76,6 +76,25 @@ jobs:
       - name: Build release APK
         run: ./gradlew :app:assembleRelease --no-daemon
 
+      # APK 重命名遵循项目命名规则：
+      #   Release（tag push）: Ala Mobile Tool v1.0.0 Beta 1.apk
+      #   CI 构建（push/PR）:  Ala Mobile Tool v1.0.0 Beta 1 CI.apk（versionCode 与最新 Release 一致）
+      # versionName 从 build.gradle.kts 单一事实源提取，避免双源维护。
+      - name: Rename APK to project naming convention
+        run: |
+          set -eu
+          ver=$(grep -oE 'versionName = "[^"]+"' app/build.gradle.kts | head -1 | sed -e 's/versionName = "//' -e 's/"$//')
+          if [ -z "$ver" ]; then echo "ERROR: versionName not found in build.gradle.kts"; exit 1; fi
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            apk_name="Ala Mobile Tool v${ver}.apk"
+          else
+            apk_name="Ala Mobile Tool v${ver} CI.apk"
+          fi
+          src="app/build/outputs/apk/release/app-release.apk"
+          dst="app/build/outputs/apk/release/${apk_name}"
+          mv "$src" "$dst"
+          echo "Renamed $src → $dst"
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v7
         with:
@@ -94,6 +113,6 @@ jobs:
             ## 安装
 
             1. 确保已安装 LSPosed。
-            2. 从下方 Assets 下载 `app-release.apk`。
+            2. 从下方 Assets 下载 `Ala Mobile Tool v*.apk`。
             3. 在 LSPosed 中勾选 **Ala Mobile** 作为作用域。
             4. 启动游戏，进入游戏后点击左上角「工具」按钮显示 overlay。

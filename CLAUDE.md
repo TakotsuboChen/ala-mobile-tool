@@ -73,6 +73,41 @@ Clean build outputs:
 ./gradlew clean
 ```
 
+## Version Naming Convention
+
+The project uses a 6-digit `versionCode` encoding the semantic version, release stage, stage sequence, and a reserved digit. All version-bearing files (`app/build.gradle.kts`, `module.prop`) must stay in sync, and CI renames the built APK to match.
+
+### versionCode encoding (6 digits: `A B C 阶段 D 0`)
+
+| Digit | Meaning |
+|---|---|
+| `A.B.C` | Semantic version (major.minor.patch) |
+| 阶段 | Release stage: `1`=Alpha, `2`=Beta, `3`=Stable |
+| `D` | Stage sequence number (Alpha/Beta only); `0` for Stable |
+| last `0` | Reserved (currently always `0`) |
+
+### Examples
+
+| Release | versionName | versionCode | APK filename |
+|---|---|---|---|
+| Alpha 3 of 1.5.9 | `1.5.9 Alpha 3` | `159130` | `Ala Mobile Tool v1.5.9 Alpha 3.apk` |
+| Beta 1 of 1.0.0 | `1.0.0 Beta 1` | `100210` | `Ala Mobile Tool v1.0.0 Beta 1.apk` |
+| Stable 1.5.9 | `1.5.9` | `159300` | `Ala Mobile Tool v1.5.9.apk` |
+
+### Rules
+
+- **versionName style**: space-separated, no `v` prefix — `1.0.0 Beta 1`, `1.5.9 Alpha 3`, `1.5.9` (stable has no stage label).
+- **Stable releases**: stage digit = `3`, `D = 0`, and the stage label is omitted from versionName and filename. Never `310`.
+- **APK filename**: `Ala Mobile Tool v<versionName>.apk` (note the `v` prefix is added only in the filename, not in versionName).
+- **CI build APK** (non-tag push): `Ala Mobile Tool v<versionName> CI.apk` — `versionCode` stays identical to the latest Release; the ` CI` suffix is the only distinguisher.
+- **Single source of truth**: `versionName` lives in `app/build.gradle.kts`; CI extracts it from there to derive the APK filename. `module.prop` `version` must mirror it. `versionCode` must be consistent with the stage/sequence per the table above.
+
+### Release Stage Policy
+
+- **Stable releases** publish as GitHub **Release** (`prerelease=false`).
+- **Alpha/Beta releases** publish as GitHub **Pre-release** (`prerelease=true`).
+- The CI workflow's `Upload to Release` step currently hardcodes `prerelease: true` — correct for Alpha/Beta, but must be flipped to `false` (or auto-derived from `versionName`) when publishing a Stable release.
+
 ## IL2CPP Reverse Engineering
 
 Reverse-engineering artifacts are generated from the local APK and should not be committed to GitHub.
