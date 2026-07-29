@@ -49,7 +49,7 @@ BUILD SUCCESSFUL in 1m 17s
 - **方案 3：用 `getLocationOnScreen()` 重建相对坐标** [V]——它报告的是 view 实际位置，pairip 壳 relayout 时同样漂移。只有配置值稳定。不要再试。
 - **方案 4：怀疑 JNI 参数错位** [?]——曾因 grep 误过滤 `Hooked ... at 0x...` 行（含 "at "）误判 hook 没装。实际全装上了。不要再试这个 grep。
 - **方案 6：CI 装 `platforms;android-37`** [V]——`sdkmanager "platforms;android-37"` 报 `Failed to find package`，仓库未发布。`--channel=3` 也不行。不要再试。
-- **方案 7：复制 `android-37.0` → `android-37` + sed 改 id** [V]——AGP 报 `Observed package id in inconsistent location` + AAR metadata 60 issues。`android-37.0` 的 `source.properties` 里 `AndroidVersion.ApiLevel=36`（是 API 36 扩展，不是真 37），改目录名骗不过 AGP。不要再试。
+- **方案 7：复制 `android-37.0` → `android-37` + sed 改 id** [V-最终成功]——关键在 sed 要改 4 处：source.properties 的 `Pkg.Path` + `ApiLevel=37.0→37`（整数），package.xml 的 `path` + `<api-level>37.0→37</api-level>`。之前失败是因为只改了部分，且当时误以为 `ApiLevel=36`（实际是 37.0）。symlink 不行（报 inconsistent location）。
 - **方案 8：符号链接 `android-37.0` → `android-37`** [V]——同样 `inconsistent location` 警告 + 找不到 platform。不要再试。
 - **方案 9：`android.suppressUnsupportedCompileSdk=37`** [V]——只抑制 AGP 的 maxSdk 警告，不抑制 miuix AAR metadata 的硬要求。不解决。不要再试。
 
@@ -61,15 +61,17 @@ BUILD SUCCESSFUL in 1m 17s
 - **module.prop versionCode 必须同步** [V]——LSPosed 用 module.prop 识别模块更新，build.gradle 版本号变了必须同步 module.prop。
 - **`MotionEvent.getY()` vs `getRawY()`** [V]——getY 相对 view 左上角，getRawY 屏幕绝对坐标。pairip 壳干扰前者，后者稳定。
 - **游戏刹车辅助** [V]——弯道自动刹车，表现为"突突突顿挫"，和模块无关。用户需在游戏设置里关掉。
-- **CI 无法构建 APK (compileSdk=37)** [V]——Google SDK 仓库未发布真正的 `platforms;android-37`（Android 17 preview）。runner 自带的 `android-37.0`/`android-37.1` 实际是 API 36 扩展，`source.properties` 里 `AndroidVersion.ApiLevel=36`，复制改 id 后 AGP 检测到不一致，AAR metadata 检查 60 issues 全失败。`android.suppressUnsupportedCompileSdk=37` 只抑制 AGP 的 maxSdk 警告，不抑制 miuix 的硬要求。**当前方案：CI 只做 lint，APK 本地构建后用 `gh release upload` 手动上传。**
+- **CI 无法构建 APK (compileSdk=37)** [V-已解决]——原以为 Google SDK 仓库未发布 `platforms;android-37`，实际是 GitHub runner 预装了 `android-37.0`（ApiLevel=37，真 API 37 platform，Platform 17）。**解法**：复制 `android-37.0` → `android-37`，并 sed 改 `source.properties` 的 `Pkg.Path` + `ApiLevel=37.0→37`（AGP 按整数比较，37.0≠37），以及 `package.xml` 的 `path` + `<api-level>` 标签。symlink 不行（报 inconsistent location）。**另：Aliyun 镜像在 CI 上偶发 502，`settings.gradle.kts` 已用 `System.getenv("CI") == null` 条件化，CI 直连 Google Maven。**
+- **lint 假绿** [V-已解决]——旧 CI 用 `|| true` + `continue-on-error: true` 双重吞错，lint 红了也显示绿。已去掉，用 lint baseline 锁存量 3 个 NewApi（BillingHook.defaultClassLoader / VersionGate.longVersionCode）。
 - **GitHub Actions `if` 里不能直接引用 `secrets`** [V]——`if: ${{ secrets.X != '' }}` 会导致 workflow 结构错误 0s 失败。必须先 `env: KS: ${{ secrets.X }}` 再 `if: ${{ env.KS != '' }}`。
 
 ## 6. 下一步（有序）
 
 1. ~~已完成~~ v1.0.0-Beta-1 Pre-release 已发布（[GitHub Release](https://github.com/TakotsuboChen/ala-mobile-tool/releases/tag/v1.0.0-Beta-1)），release APK 已上传。
-2. 在共存版和原版上各跑一次冒烟测试，确认 overlay 显示、踏板响应、换挡、billing 解锁都正常。
-3. 后续版本若要 CI 自动构建 APK，需等 Google SDK 仓库发布真正的 `platforms;android-37`（Android 17 正式版），或升级 AGP 到 8.10+ 并降级 miuix 到不要求 37 的版本。
-4. （可选）在 GitHub 仓库 Settings → Secrets 添加 `KEYSTORE_BASE64`/`KEYSTORE_PASSWORD`/`KEYSTORE_ALIAS`，以便未来 CI 能用 release 签名。
+2. ~~已解决~~ CI 现在真能构建 APK（lint + assembleRelease），tag push 时自动上传到 Release。不再需要本地构建上传。
+3. 在共存版和原版上各跑一次冒烟测试，确认 overlay 显示、踏板响应、换挡、billing 解锁都正常。
+4. （可选）在 GitHub 仓库 Settings → Secrets 添加 `KEYSTORE_BASE64`/`KEYSTORE_PASSWORD`/`KEYSTORE_ALIAS`，以便未来 CI 能用 release 签名（当前 CI 产出 debug 签名 APK，可安装但升级需卸载重装）。
+5. （可选）修 lint baseline 锁住的 3 个 NewApi（BillingHook.defaultClassLoader / VersionGate.longVersionCode），让 baseline 清零。
 
 ## 7. 留给用户的开放问题
 

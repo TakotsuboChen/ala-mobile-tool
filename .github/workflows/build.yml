@@ -22,45 +22,26 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Probe preinstalled Android platforms
-        run: |
-          echo "=== Platforms dir ==="
-          ls -la /usr/local/lib/android/sdk/platforms/ 2>/dev/null || echo "no platforms dir"
-          echo "=== Each platform source.properties ==="
-          for d in /usr/local/lib/android/sdk/platforms/android-*; do
-            [ -d "$d" ] || continue
-            echo "--- $d ---"
-            cat "$d/source.properties" 2>/dev/null || echo "no source.properties"
-          done
-
-      - name: "Fallback: clone android-37.0 to android-37 if 37 missing"
+      # Google SDK 仓库未发布 platforms;android-37，但 GitHub runner 预装了
+      # android-37.0（ApiLevel=37，真 API 37 platform，Platform 17）。AGP 要求
+      # 目录名 android-37 + package.xml/source.properties 路径标识一致，所以
+      # 复制 android-37.0 → android-37 并改路径标识（symlink 会报 inconsistent location）。
+      - name: Ensure platforms;android-37 is available
         run: |
           if [ ! -d /usr/local/lib/android/sdk/platforms/android-37 ]; then
-            echo "android-37 not present, cloning from android-37.0"
-            # runner 预装 android-37.0（ApiLevel=37，真 API 37 platform，Platform 17）
-            # AGP 要求目录名 android-37 + package.xml/source.properties 路径标识一致
-            # symlink 会因 Pkg.Path 不匹配报 inconsistent location，必须复制 + 改路径标识
             src=/usr/local/lib/android/sdk/platforms/android-37.0
             dst=/usr/local/lib/android/sdk/platforms/android-37
-            if [ -d "$src" ]; then
-              cp -r "$src" "$dst"
-              # 改 source.properties 的 Pkg.Path
-              sed -i 's|Pkg.Path=platforms;android-37\.0|Pkg.Path=platforms;android-37|' "$dst/source.properties"
-              # 改 ApiLevel=37.0 → 37（AGP 按整数比较，37.0 != 37 会导致 60 AAR metadata issues）
-              sed -i 's|AndroidVersion.ApiLevel=37\.0|AndroidVersion.ApiLevel=37|' "$dst/source.properties"
-              # 改 package.xml 的 localPackage path 属性 + api-level 标签
-              sed -i 's|path="platforms;android-37\.0"|path="platforms;android-37"|g' "$dst/package.xml"
-              sed -i 's|<api-level>37\.0</api-level>|<api-level>37</api-level>|g' "$dst/package.xml"
-              echo "Cloned $src → $dst and fixed path identifiers"
-            else
+            if [ ! -d "$src" ]; then
               echo "ERROR: $src not found, cannot proceed"
               exit 1
             fi
+            cp -r "$src" "$dst"
+            sed -i 's|Pkg.Path=platforms;android-37\.0|Pkg.Path=platforms;android-37|' "$dst/source.properties"
+            sed -i 's|AndroidVersion.ApiLevel=37\.0|AndroidVersion.ApiLevel=37|' "$dst/source.properties"
+            sed -i 's|path="platforms;android-37\.0"|path="platforms;android-37"|g' "$dst/package.xml"
+            sed -i 's|<api-level>37\.0</api-level>|<api-level>37</api-level>|g' "$dst/package.xml"
+            echo "Cloned $src → $dst and fixed path identifiers"
           fi
-          echo "=== android-37 source.properties ==="
-          cat /usr/local/lib/android/sdk/platforms/android-37/source.properties 2>/dev/null || echo "still missing"
-          echo "=== android-37 package.xml (full) ==="
-          cat /usr/local/lib/android/sdk/platforms/android-37/package.xml 2>/dev/null || echo "no package.xml"
 
       - name: Install NDK 26.1.10909125
         run: |
