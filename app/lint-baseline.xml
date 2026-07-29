@@ -1,0 +1,363 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 8.9.1" type="baseline" client="gradle" dependencies="false" name="AGP (8.9.1)" variant="all" version="8.9.1">
+
+    <issue
+        id="ScopedStorage"
+        message="WRITE_EXTERNAL_STORAGE is deprecated (and is not granted) when targeting Android 13+. If you need to write to shared storage, use the `MediaStore.createWriteRequest` intent."
+        errorLine1="    &lt;uses-permission android:name=&quot;android.permission.WRITE_EXTERNAL_STORAGE&quot; />"
+        errorLine2="                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="4"
+            column="36"/>
+    </issue>
+
+    <issue
+        id="ScopedStorage"
+        message="READ_EXTERNAL_STORAGE is deprecated (and is not granted) when targeting Android 13+. If you need to query or interact with MediaStore or media files on the shared storage, you should instead use one or more new storage permissions: `READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO` or `READ_MEDIA_AUDIO`."
+        errorLine1="    &lt;uses-permission android:name=&quot;android.permission.READ_EXTERNAL_STORAGE&quot; />"
+        errorLine2="                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="5"
+            column="36"/>
+    </issue>
+
+    <issue
+        id="DiscouragedPrivateApi"
+        message="Reflective access to mActivities, which is not part of the public SDK and therefore likely to change in future Android releases"
+        errorLine1="            val activitiesField = activityThreadClass.getDeclaredField(&quot;mActivities&quot;)"
+        errorLine2="                                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/tools/alamobile/mod/overlay/OverlayManager.kt"
+            line="241"
+            column="35"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 29 (current min is 26): `getDefaultClassLoader`"
+        errorLine1="            val classLoader = packageLoadedParam.defaultClassLoader"
+        errorLine2="                                                 ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/tools/alamobile/mod/hook/BillingHook.kt"
+            line="21"
+            column="50"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Field requires API level 29 (current min is 26): `getDefaultClassLoader`"
+        errorLine1="            val classLoader = packageLoadedParam.defaultClassLoader"
+        errorLine2="                                                 ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/tools/alamobile/mod/hook/BillingHook.kt"
+            line="21"
+            column="50"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 28 (current min is 26): `android.content.pm.PackageInfo#getLongVersionCode`"
+        errorLine1="            val longVersionCode = info.longVersionCode"
+        errorLine2="                                       ~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/tools/alamobile/mod/util/VersionGate.kt"
+            line="33"
+            column="40"/>
+    </issue>
+
+    <issue
+        id="OldTargetApi"
+        message="Not targeting the latest versions of Android; compatibility modes apply. Consider testing and updating this version. Consult the `android.os.Build.VERSION_CODES` javadoc for details."
+        errorLine1="        targetSdk = 35"
+        errorLine2="        ~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="14"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="PrivateApi"
+        message="Accessing internal APIs via reflection is not supported and may not work on all devices or in the future"
+        errorLine1="            val activityThreadClass = Class.forName(&quot;android.app.ActivityThread&quot;)"
+        errorLine2="                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/tools/alamobile/mod/AlaMobileModule.kt"
+            line="174"
+            column="39"/>
+    </issue>
+
+    <issue
+        id="PrivateApi"
+        message="Accessing internal APIs via reflection is not supported and may not work on all devices or in the future"
+        errorLine1="            val activityThreadClass = Class.forName(&quot;android.app.ActivityThread&quot;)"
+        errorLine2="                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/tools/alamobile/mod/overlay/OverlayManager.kt"
+            line="239"
+            column="39"/>
+    </issue>
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of com.android.application than 8.9.1 is available: 9.3.1. (There is also a newer version of 8.9.𝑥 available, if upgrading to 9.3.1 is difficult: 8.9.3)"
+        errorLine1="agp = &quot;8.9.1&quot;"
+        errorLine2="      ~~~~~~~">
+        <location
+            file="$HOME/projects/ala-mobile-tool/gradle/libs.versions.toml"
+            line="2"
+            column="7"/>
+    </issue>
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of com.android.application than 8.9.1 is available: 9.3.1. (There is also a newer version of 8.9.𝑥 available, if upgrading to 9.3.1 is difficult: 8.9.3)"
+        errorLine1="agp = &quot;8.9.1&quot;"
+        errorLine2="      ~~~~~~~">
+        <location
+            file="$HOME/projects/ala-mobile-tool/gradle/libs.versions.toml"
+            line="2"
+            column="7"/>
+    </issue>
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of com.android.application than 8.9.1 is available: 9.3.1. (There is also a newer version of 8.9.𝑥 available, if upgrading to 9.3.1 is difficult: 8.9.3)"
+        errorLine1="agp = &quot;8.9.1&quot;"
+        errorLine2="      ~~~~~~~">
+        <location
+            file="$HOME/projects/ala-mobile-tool/gradle/libs.versions.toml"
+            line="2"
+            column="7"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.activity:activity-compose than 1.10.1 is available: 1.13.0"
+        errorLine1="activity-compose = &quot;1.10.1&quot;"
+        errorLine2="                   ~~~~~~~~">
+        <location
+            file="$HOME/projects/ala-mobile-tool/gradle/libs.versions.toml"
+            line="8"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.activity:activity-compose than 1.10.1 is available: 1.13.0"
+        errorLine1="activity-compose = &quot;1.10.1&quot;"
+        errorLine2="                   ~~~~~~~~">
+        <location
+            file="$HOME/projects/ala-mobile-tool/gradle/libs.versions.toml"
+            line="8"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.activity:activity-compose than 1.10.1 is available: 1.13.0"
+        errorLine1="activity-compose = &quot;1.10.1&quot;"
+        errorLine2="                   ~~~~~~~~">
+        <location
+            file="$HOME/projects/ala-mobile-tool/gradle/libs.versions.toml"
+            line="8"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.compose.material3:material3 than 1.3.1 is available: 1.4.0"
+        errorLine1="material3 = &quot;1.3.1&quot;"
+        errorLine2="            ~~~~~~~">
+        <location
+            file="$HOME/projects/ala-mobile-tool/gradle/libs.versions.toml"
+            line="12"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.compose.material3:material3 than 1.3.1 is available: 1.4.0"
+        errorLine1="material3 = &quot;1.3.1&quot;"
+        errorLine2="            ~~~~~~~">
+        <location
+            file="$HOME/projects/ala-mobile-tool/gradle/libs.versions.toml"
+            line="12"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.compose.material3:material3 than 1.3.1 is available: 1.4.0"
+        errorLine1="material3 = &quot;1.3.1&quot;"
+        errorLine2="            ~~~~~~~">
+        <location
+            file="$HOME/projects/ala-mobile-tool/gradle/libs.versions.toml"
+            line="12"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ChromeOsAbiSupport"
+        message="Missing x86_64 ABI support for ChromeOS"
+        errorLine1="            abiFilters += listOf(&quot;arm64-v8a&quot;)"
+        errorLine2="                          ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="78"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="UnsafeDynamicallyLoadedCode"
+        message="Dynamically loading code using `load` is risky, please use `loadLibrary` instead when possible"
+        errorLine1="            System.load(tempLib.absolutePath)"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/tools/alamobile/mod/NativeBridge.kt"
+            line="70"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="DrawAllocation"
+        message="Avoid object allocations during draw/layout operations (preallocate and reuse instead)"
+        errorLine1="        val rect = RectF(0f, 0f, width.toFloat(), height.toFloat())"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/tools/alamobile/mod/overlay/OverlayEditView.kt"
+            line="76"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="This folder configuration (`v26`) is unnecessary; `minSdkVersion` is 26. Merge all the resources in this folder into `mipmap-anydpi`.">
+        <location
+            file="src/main/res/mipmap-anydpi-v26"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableFloatStateOf` instead of `mutableStateOf`"
+        errorLine1="            deadzone = mutableStateOf(settings.pedalDeadzone),"
+        errorLine2="                       ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/tools/alamobile/mod/ui/ConfigMainScreen.kt"
+            line="67"
+            column="24"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableFloatStateOf` instead of `mutableStateOf`"
+        errorLine1="            transition = mutableStateOf(settings.pedalTransition),"
+        errorLine2="                         ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/tools/alamobile/mod/ui/ConfigMainScreen.kt"
+            line="68"
+            column="26"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var selectedPage by mutableStateOf(pagerState.currentPage)"
+        errorLine2="                        ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/tools/alamobile/mod/ui/ConfigMainScreen.kt"
+            line="221"
+            column="25"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.style.Theme_AlaMobileTool` appears to be unused"
+        errorLine1="    &lt;style name=&quot;Theme.AlaMobileTool&quot; parent=&quot;android:Theme.Material.NoActionBar&quot;>"
+        errorLine2="           ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/themes.xml"
+            line="3"
+            column="12"/>
+    </issue>
+
+    <issue
+        id="MonochromeLauncherIcon"
+        message="The application adaptive icon is missing a monochrome tag"
+        errorLine1="&lt;adaptive-icon xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;>"
+        errorLine2="^">
+        <location
+            file="src/main/res/mipmap-anydpi-v26/ic_launcher.xml"
+            line="2"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="ViewConstructor"
+        message="Custom view `OverlayEditView` is missing constructor used by tools: `(Context)` or `(Context,AttributeSet)` or `(Context,AttributeSet,int)`"
+        errorLine1="class OverlayEditView("
+        errorLine2="      ~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/tools/alamobile/mod/overlay/OverlayEditView.kt"
+            line="20"
+            column="7"/>
+    </issue>
+
+    <issue
+        id="ViewConstructor"
+        message="Custom view `PedalOverlayView` is missing constructor used by tools: `(Context)` or `(Context,AttributeSet)` or `(Context,AttributeSet,int)`"
+        errorLine1="class PedalOverlayView("
+        errorLine2="      ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/tools/alamobile/mod/overlay/PedalOverlayView.kt"
+            line="25"
+            column="7"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))"
+        errorLine2="                                                         ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/tools/alamobile/mod/util/UrlUtils.kt"
+            line="11"
+            column="58"/>
+    </issue>
+
+    <issue
+        id="ClickableViewAccessibility"
+        message="Custom view `GearShiftView` overrides `onTouchEvent` but not `performClick`"
+        errorLine1="    override fun onTouchEvent(event: MotionEvent): Boolean {"
+        errorLine2="                 ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/tools/alamobile/mod/overlay/GearShiftView.kt"
+            line="51"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="ClickableViewAccessibility"
+        message="Custom view `OverlayEditView` overrides `onTouchEvent` but not `performClick`"
+        errorLine1="    override fun onTouchEvent(event: MotionEvent): Boolean {"
+        errorLine2="                 ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/tools/alamobile/mod/overlay/OverlayEditView.kt"
+            line="93"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="ClickableViewAccessibility"
+        message="Custom view `PedalOverlayView` overrides `onTouchEvent` but not `performClick`"
+        errorLine1="    override fun onTouchEvent(event: MotionEvent): Boolean {"
+        errorLine2="                 ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/tools/alamobile/mod/overlay/PedalOverlayView.kt"
+            line="70"
+            column="18"/>
+    </issue>
+
+</issues>

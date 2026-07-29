@@ -8,51 +8,52 @@ on:
     branches: [main]
 
 jobs:
-  # CI 只做代码检查和编译验证（不产出 APK）。
-  # APK 构建需要 compileSdk=37 (Android 17 preview)，Google SDK 仓库
-  # 还没发布 platforms;android-37，CI runner 装不上。APK 由维护者
-  # 本地构建后用 `gh release upload` 上传到对应 Release。
-  lint:
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '21'
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platforms;android-37 build-tools;37.0.0 ndk;26.1.10909125'
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Run lint (跳过 APK 构建，只做代码检查)
-        run: ./gradlew :app:lint --no-daemon || true
-        continue-on-error: true
+      - name: Run lint
+        run: ./gradlew :app:lint --no-daemon
 
-  # Tag push (v*) → 创建空 Pre-release，APK 由维护者本地构建后上传
-  create-release:
-    needs: lint
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Create Pre-release
-        uses: softprops/action-gh-release@v2
+      - name: Build release APK
+        run: ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: app/build/outputs/apk/release/*.apk
+
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
         with:
           prerelease: true
           name: ${{ github.ref_name }}
           generate_release_notes: true
+          files: app/build/outputs/apk/release/*.apk
           body: |
             ## 安装
 
             1. 确保已安装 LSPosed。
-            2. 从下方 Assets 下载 `app-release.apk`（正式签名版）或 `app-debug.apk`（调试版，稍后上传）。
+            2. 从下方 Assets 下载 `app-release.apk`。
             3. 在 LSPosed 中勾选 **Ala Mobile** 作为作用域。
             4. 启动游戏，进入游戏后点击左上角「工具」按钮显示 overlay。
-
-            > Release APK 由维护者本地构建后上传，CI 暂不支持自动构建（compileSdk=37 需 Android 17 preview platform，SDK 仓库暂未发布）。

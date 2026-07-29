@@ -93,6 +93,14 @@ android {
             pickFirsts += "lib/arm64-v8a/libshadowhook.so"
         }
     }
+
+    // lint baseline：把存量问题锁在基线里，CI 只报新引入的错误。
+    // 3 个 NewApi（BillingHook.defaultClassLoader / VersionGate.longVersionCode）
+    // 影响范围窄（仅 Android 8.0-8.1），后续单独修。
+    lint {
+        baseline = file("lint-baseline.xml")
+        abortOnError = true
+    }
 }
 
 dependencies {
