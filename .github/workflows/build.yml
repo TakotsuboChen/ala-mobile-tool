@@ -43,7 +43,7 @@ jobs:
           echo "=== try preview channel --channel=3 ==="
           (echo y | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --channel=3 "platforms;android-37") 2>&1 || echo "preview failed"
 
-      - name: Fallback: symlink android-37.0 → android-37 if 37 missing
+      - name: "Fallback: symlink android-37.0 to android-37 if 37 missing"
         run: |
           if [ ! -d /usr/local/lib/android/sdk/platforms/android-37 ]; then
             echo "android-37 not present, trying fallback"
