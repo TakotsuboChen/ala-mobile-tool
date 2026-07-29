@@ -129,6 +129,7 @@ Two areas are explicitly designated for human contribution during implementation
 - M4: Overlay display and pedal input verification in-game — done. Shift hooks and DRS auto logic remain pending.
 - M5: Overlay editor sync, pedal stutter mitigation, and ConfigActivity three-tab UI refactor — done (v1.0.0-Alpha-2). Published with KernelSU-style UI, dark mode support, and demo videos.
 - M6: Coexistence build stability overhaul (v1.0.0-Beta-1, 100210) — done. Fixed dual-ClassLoader injection (System.setProperty guard), abolished non-atomic file IPC in favor of JNI direct path, and switched overlay touch mapping to rawY + configured position to survive pairip relayout drift. CI auto-builds + tag-triggered Pre-release via `.github/workflows/build.yml`.
+- M7: CI/CD repair — done. CI now truly builds APK (lint + assembleRelease) and uploads to Release on tag push. Fixed lint false-green (`|| true` + `continue-on-error` swallowed 3 NewApi errors, replaced with lint baseline), upgraded actions to v7/v5/v3/v7 (Node 20 deprecation removed), cloned runner's `android-37.0`→`android-37` with 4 path-identifier sed fixes (AGP integer ApiLevel comparison), and conditionalized Aliyun mirror via `System.getenv("CI")` to bypass 502 Bad Gateway.
 
 ## Notes for Future Changes
 
