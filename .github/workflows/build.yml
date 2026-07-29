@@ -80,7 +80,11 @@ jobs:
       #   Release（tag push）: Ala Mobile Tool v1.0.0 Beta 1.apk
       #   CI 构建（push/PR）:  Ala Mobile Tool v1.0.0 Beta 1 CI.apk（versionCode 与最新 Release 一致）
       # versionName 从 build.gradle.kts 单一事实源提取，避免双源维护。
+      # artifact 用 actions/upload-artifact@v7 的 archive:false（2026-02 平台新特性），
+      # 跳过强制 zip 打包，浏览器直接下载原始命名 apk。
+      # 硬限制：archive:false 只支持单文件、无 glob、忽略 name 参数（显示名=原始文件名）。
       - name: Rename APK to project naming convention
+        id: rename_apk
         run: |
           set -eu
           ver=$(grep -oE 'versionName = "[^"]+"' app/build.gradle.kts | head -1 | sed -e 's/versionName = "//' -e 's/"$//')
@@ -94,12 +98,14 @@ jobs:
           dst="app/build/outputs/apk/release/${apk_name}"
           mv "$src" "$dst"
           echo "Renamed $src → $dst"
+          echo "apk_path=${dst}" >> "$GITHUB_OUTPUT"
+          echo "apk_name=${apk_name}" >> "$GITHUB_OUTPUT"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v7
         with:
-          name: app-release-apk
-          path: app/build/outputs/apk/release/*.apk
+          path: ${{ steps.rename_apk.outputs.apk_path }}
+          archive: false
 
       - name: Upload to Release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -108,7 +114,7 @@ jobs:
           prerelease: true
           name: ${{ github.ref_name }}
           generate_release_notes: true
-          files: app/build/outputs/apk/release/*.apk
+          files: ${{ steps.rename_apk.outputs.apk_path }}
           body: |
             ## 安装
 
