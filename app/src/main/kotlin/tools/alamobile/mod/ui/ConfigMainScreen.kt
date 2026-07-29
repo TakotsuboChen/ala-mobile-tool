@@ -59,7 +59,7 @@ fun ConfigMainScreen(
 
     val uiState = remember {
         ConfigUiState(
-            enableControlReplacement = mutableStateOf(settings.enableControlReplacement),
+            pedalMode = mutableStateOf(settings.pedalMode),
             enableAutoDrs = mutableStateOf(settings.enableAutoDrs),
             showOverlay = mutableStateOf(settings.showOverlay),
             disableAutoGear = mutableStateOf(settings.disableAutoGear),
@@ -67,7 +67,8 @@ fun ConfigMainScreen(
             enableUnlock = mutableStateOf(settings.enableUnlock),
             deadzone = mutableStateOf(settings.pedalDeadzone),
             transition = mutableStateOf(settings.pedalTransition),
-            curve = mutableStateOf(settings.pedalCurve),
+            throttleCurve = mutableStateOf(settings.throttleCurve),
+            brakeCurve = mutableStateOf(settings.brakeCurve),
             logEnabled = mutableStateOf(settings.logEnabled)
         )
     }
@@ -81,7 +82,7 @@ fun ConfigMainScreen(
             ModConfig.write(
                 context,
                 ModConfig.Settings(
-                    enableControlReplacement = uiState.enableControlReplacement.value,
+                    pedalMode = uiState.pedalMode.value,
                     enableAutoDrs = uiState.enableAutoDrs.value,
                     showOverlay = uiState.showOverlay.value,
                     disableAutoGear = uiState.disableAutoGear.value,
@@ -89,7 +90,8 @@ fun ConfigMainScreen(
                     enableUnlock = uiState.enableUnlock.value,
                     pedalDeadzone = uiState.deadzone.value,
                     pedalTransition = uiState.transition.value,
-                    pedalCurve = uiState.curve.value,
+                    throttleCurve = uiState.throttleCurve.value,
+                    brakeCurve = uiState.brakeCurve.value,
                     logEnabled = uiState.logEnabled.value
                 )
             )
@@ -128,14 +130,16 @@ private fun ConfigMainScreenContent(
                         modifier = Modifier.fillMaxSize()
                     ) { page ->
                         when (Tab.entries[page]) {
-                            Tab.HOME -> OverviewPage()
+                            Tab.HOME -> OverviewPage(bottomBarHeight = bottomPadding)
                             Tab.CONFIGURE -> ConfigurePage(
                                 uiState = uiState,
-                                onSave = onSave
+                                onSave = onSave,
+                                bottomBarHeight = bottomPadding
                             )
                             Tab.SETTINGS -> SettingsPage(
                                 uiState = uiState,
-                                onSave = onSave
+                                onSave = onSave,
+                                bottomBarHeight = bottomPadding
                             )
                         }
                     }
@@ -205,7 +209,7 @@ private enum class Tab(
 }
 
 class ConfigUiState(
-    val enableControlReplacement: MutableState<Boolean>,
+    val pedalMode: MutableState<ModConfig.PedalMode>,
     val enableAutoDrs: MutableState<Boolean>,
     val showOverlay: MutableState<Boolean>,
     val disableAutoGear: MutableState<Boolean>,
@@ -213,7 +217,8 @@ class ConfigUiState(
     val enableUnlock: MutableState<Boolean>,
     val deadzone: MutableState<Float>,
     val transition: MutableState<Float>,
-    val curve: MutableState<ModConfig.PedalCurve>,
+    val throttleCurve: MutableState<ModConfig.PedalCurve>,
+    val brakeCurve: MutableState<ModConfig.PedalCurve>,
     val logEnabled: MutableState<Boolean>
 )
 

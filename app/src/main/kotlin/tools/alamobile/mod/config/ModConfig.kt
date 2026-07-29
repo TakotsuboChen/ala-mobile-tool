@@ -19,7 +19,6 @@ object ModConfig {
     private const val MODULE_PACKAGE = "tools.alamobile.mod"
 
     // Feature toggles
-    const val KEY_ENABLE_CONTROL_REPLACEMENT = "enable_control_replacement"
     const val KEY_ENABLE_AUTO_DRS = "enable_auto_drs"
     const val KEY_SHOW_OVERLAY = "show_overlay"
     const val KEY_DISABLE_AUTO_GEAR = "disable_auto_gear"
@@ -27,41 +26,83 @@ object ModConfig {
     const val KEY_ENABLE_UNLOCK = "enable_unlock"
 
     // Pedal mapping
+    const val KEY_PEDAL_MODE = "pedal_mode"
     const val KEY_PEDAL_DEADZONE = "pedal_deadzone"
     const val KEY_PEDAL_TRANSITION = "pedal_transition"
-    const val KEY_PEDAL_CURVE = "pedal_curve"
+    const val KEY_THROTTLE_CURVE = "throttle_curve"
+    const val KEY_BRAKE_CURVE = "brake_curve"
+
+    // Legacy keys (kept only for one-way migration on read)
+    const val KEY_LEGACY_ENABLE_CONTROL_REPLACEMENT = "enable_control_replacement"
+    const val KEY_LEGACY_PEDAL_CURVE = "pedal_curve"
 
     // Overlay positions
     const val KEY_PEDAL_POSITION = "pedal_position"
     const val KEY_GEAR_POSITION = "gear_position"
+    const val KEY_BRAKE_POSITION = "brake_position"
 
     // Debug/logging
     const val KEY_LOG_ENABLED = "log_enabled"
 
+    /**
+     * Pedal overlay topology.
+     * - OFF: no pedal overlay (game default input untouched).
+     * - SINGLE: one vertical view split into throttle (top) + brake (bottom)
+     *   around [Settings.pedalTransition]; deadzone + transition apply.
+     * - DUAL: two independent full-travel views, one for throttle, one for
+     *   brake. No transition line and no deadzone — each finger maps directly
+     *   0..1 across its own view.
+     */
+    enum class PedalMode(val value: String) {
+        OFF("off"),
+        SINGLE("single"),
+        DUAL("dual");
+
+        companion object {
+            fun from(value: String?): PedalMode {
+                return entries.find { it.value == value } ?: SINGLE
+            }
+        }
+    }
+
+    /**
+     * Response curve applied on top of the raw 0..1 pedal travel.
+     *
+     * The "exponential" curve here is an ease-out approximation tuned so that
+     * ~30% physical travel yields ~60% in-game output (fast initial rise,
+     * soft tail) — the realistic throttle/brake feel players expect. The
+     * exponent is < 1, deliberately the opposite direction of the old
+     * quadratic curve (which was "slow start, fast end" and felt dead).
+     */
     enum class PedalCurve(val value: String) {
         LINEAR("linear"),
-        EXPONENTIAL("exponential"),
-        QUADRATIC("quadratic");
+        EXPONENTIAL("exponential");
 
         companion object {
             fun from(value: String?): PedalCurve {
+                // Legacy configs may carry "quadratic"; map it to exponential
+                // so old users keep a non-linear feel instead of falling back
+                // to linear silently.
+                if (value == "quadratic") return EXPONENTIAL
                 return entries.find { it.value == value } ?: LINEAR
             }
         }
     }
 
     private object Defaults {
-        const val ENABLE_CONTROL_REPLACEMENT = true
-        const val ENABLE_AUTO_DRS = true
+        const val ENABLE_AUTO_DRS = false
         const val SHOW_OVERLAY = true
         const val DISABLE_AUTO_GEAR = false
         const val ENABLE_MANUAL_SHIFT = false
         const val ENABLE_UNLOCK = false
+        val PEDAL_MODE = PedalMode.SINGLE
         const val PEDAL_DEADZONE = 0.05f
         const val PEDAL_TRANSITION = 0.5f
-        val PEDAL_CURVE = PedalCurve.LINEAR
+        val THROTTLE_CURVE = PedalCurve.LINEAR
+        val BRAKE_CURVE = PedalCurve.LINEAR
         val PEDAL_POSITION = OverlayPosition.DEFAULT_PEDAL
         val GEAR_POSITION = OverlayPosition.DEFAULT_GEAR
+        val BRAKE_POSITION = OverlayPosition.DEFAULT_BRAKE
         const val LOG_ENABLED = false
     }
 
@@ -103,14 +144,10 @@ object ModConfig {
 
             val json = JSONObject(file.readText())
             Settings(
-                enableControlReplacement = json.optBoolean(
-                    KEY_ENABLE_CONTROL_REPLACEMENT,
-                    Defaults.ENABLE_CONTROL_REPLACEMENT
-                ),
-                enableAutoDrs = json.optBoolean(
-                    KEY_ENABLE_AUTO_DRS,
-                    Defaults.ENABLE_AUTO_DRS
-                ),
+                pedalMode = migratePedalMode(json),
+                // 自动 DRS 功能未实现，强制读成 false，忽略任何旧配置里的 true，
+                // 避免老用户升级后开关显示"开"但实际无效果。
+                enableAutoDrs = false,
                 showOverlay = json.optBoolean(
                     KEY_SHOW_OVERLAY,
                     Defaults.SHOW_OVERLAY
@@ -135,11 +172,15 @@ object ModConfig {
                     KEY_PEDAL_TRANSITION,
                     Defaults.PEDAL_TRANSITION.toDouble()
                 ).toFloat(),
-                pedalCurve = PedalCurve.from(
-                    json.optString(KEY_PEDAL_CURVE, Defaults.PEDAL_CURVE.value)
+                throttleCurve = PedalCurve.from(
+                    json.optString(KEY_THROTTLE_CURVE, json.optString(KEY_LEGACY_PEDAL_CURVE, Defaults.THROTTLE_CURVE.value))
+                ),
+                brakeCurve = PedalCurve.from(
+                    json.optString(KEY_BRAKE_CURVE, json.optString(KEY_LEGACY_PEDAL_CURVE, Defaults.BRAKE_CURVE.value))
                 ),
                 pedalPosition = readOverlayPosition(json, KEY_PEDAL_POSITION, Defaults.PEDAL_POSITION),
                 gearPosition = readOverlayPosition(json, KEY_GEAR_POSITION, Defaults.GEAR_POSITION),
+                brakePosition = readOverlayPosition(json, KEY_BRAKE_POSITION, Defaults.BRAKE_POSITION),
                 logEnabled = json.optBoolean(KEY_LOG_ENABLED, Defaults.LOG_ENABLED)
             )
         } catch (e: Throwable) {
@@ -156,7 +197,7 @@ object ModConfig {
         file.parentFile?.mkdirs()
 
         val json = JSONObject().apply {
-            put(KEY_ENABLE_CONTROL_REPLACEMENT, settings.enableControlReplacement)
+            put(KEY_PEDAL_MODE, settings.pedalMode.value)
             put(KEY_ENABLE_AUTO_DRS, settings.enableAutoDrs)
             put(KEY_SHOW_OVERLAY, settings.showOverlay)
             put(KEY_DISABLE_AUTO_GEAR, settings.disableAutoGear)
@@ -164,9 +205,11 @@ object ModConfig {
             put(KEY_ENABLE_UNLOCK, settings.enableUnlock)
             put(KEY_PEDAL_DEADZONE, settings.pedalDeadzone.toDouble())
             put(KEY_PEDAL_TRANSITION, settings.pedalTransition.toDouble())
-            put(KEY_PEDAL_CURVE, settings.pedalCurve.value)
+            put(KEY_THROTTLE_CURVE, settings.throttleCurve.value)
+            put(KEY_BRAKE_CURVE, settings.brakeCurve.value)
             put(KEY_PEDAL_POSITION, settings.pedalPosition.toJson())
             put(KEY_GEAR_POSITION, settings.gearPosition.toJson())
+            put(KEY_BRAKE_POSITION, settings.brakePosition.toJson())
             put(KEY_LOG_ENABLED, settings.logEnabled)
         }
 
@@ -201,6 +244,19 @@ object ModConfig {
         return read(context)
     }
 
+    /**
+     * One-way migration: if the new `pedal_mode` key is present, use it.
+     * Otherwise derive from the legacy `enable_control_replacement` bool:
+     *   true  -> SINGLE (the legacy single-view default)
+     *   false -> OFF
+     */
+    private fun migratePedalMode(json: JSONObject): PedalMode {
+        val explicit = json.optString(KEY_PEDAL_MODE, "")
+        if (explicit.isNotEmpty()) return PedalMode.from(explicit)
+        return if (json.optBoolean(KEY_LEGACY_ENABLE_CONTROL_REPLACEMENT, true)) PedalMode.SINGLE
+        else PedalMode.OFF
+    }
+
     private fun readOverlayPosition(
         json: JSONObject,
         key: String,
@@ -230,7 +286,7 @@ object ModConfig {
 
     private fun defaultSettings(): Settings {
         return Settings(
-            enableControlReplacement = Defaults.ENABLE_CONTROL_REPLACEMENT,
+            pedalMode = Defaults.PEDAL_MODE,
             enableAutoDrs = Defaults.ENABLE_AUTO_DRS,
             showOverlay = Defaults.SHOW_OVERLAY,
             disableAutoGear = Defaults.DISABLE_AUTO_GEAR,
@@ -238,15 +294,17 @@ object ModConfig {
             enableUnlock = Defaults.ENABLE_UNLOCK,
             pedalDeadzone = Defaults.PEDAL_DEADZONE,
             pedalTransition = Defaults.PEDAL_TRANSITION,
-            pedalCurve = Defaults.PEDAL_CURVE,
+            throttleCurve = Defaults.THROTTLE_CURVE,
+            brakeCurve = Defaults.BRAKE_CURVE,
             pedalPosition = Defaults.PEDAL_POSITION,
             gearPosition = Defaults.GEAR_POSITION,
+            brakePosition = Defaults.BRAKE_POSITION,
             logEnabled = Defaults.LOG_ENABLED
         )
     }
 
     data class Settings(
-        val enableControlReplacement: Boolean,
+        val pedalMode: PedalMode,
         val enableAutoDrs: Boolean,
         val showOverlay: Boolean,
         val disableAutoGear: Boolean,
@@ -254,9 +312,11 @@ object ModConfig {
         val enableUnlock: Boolean,
         val pedalDeadzone: Float,
         val pedalTransition: Float,
-        val pedalCurve: PedalCurve,
+        val throttleCurve: PedalCurve,
+        val brakeCurve: PedalCurve,
         val pedalPosition: OverlayPosition = OverlayPosition.DEFAULT_PEDAL,
         val gearPosition: OverlayPosition = OverlayPosition.DEFAULT_GEAR,
+        val brakePosition: OverlayPosition = OverlayPosition.DEFAULT_BRAKE,
         val logEnabled: Boolean = Defaults.LOG_ENABLED
     )
 }

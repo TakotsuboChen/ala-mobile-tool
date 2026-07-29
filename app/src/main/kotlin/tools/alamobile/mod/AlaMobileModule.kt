@@ -116,8 +116,9 @@ class AlaMobileModule : XposedModule() {
             }
         } else null
 
-        val enableControlReplacement = settings?.enableControlReplacement ?: true
-        val enableAutoDrs = settings?.enableAutoDrs ?: true
+        val pedalMode = settings?.pedalMode ?: ModConfig.PedalMode.SINGLE
+        val enableControlReplacement = pedalMode != ModConfig.PedalMode.OFF
+        val enableAutoDrs = settings?.enableAutoDrs ?: false
         val showOverlay = settings?.showOverlay ?: true
         // 手动换挡开 ⇒ 关闭游戏自动换挡（disableAutoGear 由 enableManualShift 派生）。
         // 当前 enableManualShift 默认 false，所以 disableAutoGear=false，游戏自动换挡保持原样。

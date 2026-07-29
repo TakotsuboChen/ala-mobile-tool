@@ -1,5 +1,10 @@
 package tools.alamobile.mod.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,13 +24,14 @@ import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.DisplaySettings
 import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Menu
-import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Straighten
 import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.Traffic
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import tools.alamobile.mod.config.ModConfig
@@ -46,7 +52,8 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 @Composable
 fun ConfigurePage(
     uiState: ConfigUiState,
-    onSave: () -> Unit
+    onSave: () -> Unit,
+    bottomBarHeight: Dp = 0.dp
 ) {
     val scrollBehavior = MiuixScrollBehavior()
 
@@ -66,7 +73,12 @@ fun ConfigurePage(
                 .scrollEndHaptic()
                 .overScrollVertical()
                 .padding(horizontal = 12.dp),
-            contentPadding = innerPadding,
+            // 底部留出底栏高度，否则最后一个 item 会被 NavigationBar 挡住。
+            // 叠在外层 Scaffold 给的 topBar padding 之下，两者互不干扰。
+            contentPadding = PaddingValues(
+                top = innerPadding.calculateTopPadding(),
+                bottom = innerPadding.calculateBottomPadding() + bottomBarHeight
+            ),
             overscrollEffect = null
         ) {
             item {
@@ -80,6 +92,16 @@ fun ConfigurePage(
                     )
                     Card(modifier = Modifier.fillMaxWidth()) {
                         SwitchRow(
+                            title = "解锁付费内容",
+                            summary = "强制解锁 DLC 和 IAP",
+                            icon = Icons.Rounded.LockOpen,
+                            checked = uiState.enableUnlock.value,
+                            onCheckedChange = {
+                                uiState.enableUnlock.value = it
+                                onSave()
+                            }
+                        )
+                        SwitchRow(
                             title = "自动 DRS（开发中）",
                             summary = "在 DRS 区域自动开启 DRS",
                             icon = Icons.Rounded.Traffic,
@@ -87,16 +109,6 @@ fun ConfigurePage(
                             enabled = false,
                             onCheckedChange = {
                                 uiState.enableAutoDrs.value = it
-                                onSave()
-                            }
-                        )
-                        SwitchRow(
-                            title = "解锁付费内容",
-                            summary = "Hook BillingManager 强制解锁 DLC 和 IAP",
-                            icon = Icons.Rounded.LockOpen,
-                            checked = uiState.enableUnlock.value,
-                            onCheckedChange = {
-                                uiState.enableUnlock.value = it
                                 onSave()
                             }
                         )
@@ -117,16 +129,61 @@ fun ConfigurePage(
                                 onSave()
                             }
                         )
-                        SwitchRow(
+                        OverlayDropdownPreference(
                             title = "线性踏板",
-                            summary = "用悬浮窗踏板替代游戏默认输入",
-                            icon = Icons.Rounded.Menu,
-                            checked = uiState.enableControlReplacement.value,
-                            onCheckedChange = {
-                                uiState.enableControlReplacement.value = it
+                            summary = "悬浮窗踏板替代游戏默认输入",
+                            items = ModConfig.PedalMode.entries.map { modeName(it) },
+                            selectedIndex = ModConfig.PedalMode.entries.indexOf(uiState.pedalMode.value),
+                            onSelectedIndexChange = { index ->
+                                uiState.pedalMode.value = ModConfig.PedalMode.entries[index]
                                 onSave()
+                            },
+                            insideMargin = PaddingValues(vertical = 12.dp, horizontal = 16.dp),
+                            startAction = {
+                                Icon(
+                                    imageVector = Icons.Rounded.Menu,
+                                    contentDescription = null,
+                                    modifier = Modifier.padding(end = 6.dp),
+                                    tint = MiuixTheme.colorScheme.onBackground
+                                )
                             }
                         )
+                        // 死区和过渡点只在单踏板模式下有意义：单踏板上下分区靠
+                        // 过渡点分界、靠死区消除中间误触；双踏板各自全行程无需这两项。
+                        // 用 AnimatedVisibility 做向下展开/向上收起的优雅过渡，
+                        // 切到双踏板/关闭时收起，切回单踏板时弹出。
+                        AnimatedVisibility(
+                            visible = uiState.pedalMode.value == ModConfig.PedalMode.SINGLE,
+                            enter = expandVertically() + fadeIn(),
+                            exit = shrinkVertically() + fadeOut()
+                        ) {
+                            Column {
+                                SliderRow(
+                                    title = "死区",
+                                    summary = "踏板中间过渡区域的无效范围",
+                                    value = uiState.deadzone.value,
+                                    onValueChange = {
+                                        uiState.deadzone.value = it
+                                        onSave()
+                                    },
+                                    valueRange = 0f..0.2f,
+                                    displayFormat = { String.format("%.0f%%", it * 100) },
+                                    icon = Icons.Rounded.Straighten
+                                )
+                                SliderRow(
+                                    title = "过渡点",
+                                    summary = "油门和刹车的分界位置",
+                                    value = uiState.transition.value,
+                                    onValueChange = {
+                                        uiState.transition.value = it
+                                        onSave()
+                                    },
+                                    valueRange = 0.2f..0.8f,
+                                    displayFormat = { String.format("%.0f%%", it * 100) },
+                                    icon = Icons.Rounded.SwapVert
+                                )
+                            }
+                        }
                         SwitchRow(
                             title = "手动换挡（开发中）",
                             summary = "启用换挡悬浮窗并关闭游戏自动换挡",
@@ -141,46 +198,42 @@ fun ConfigurePage(
                     }
 
                     SmallTitle(
-                        text = "踏板映射",
+                        text = "响应曲线",
                         insideMargin = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
                     )
                     Card(modifier = Modifier.fillMaxWidth()) {
-                        SliderRow(
-                            title = "死区",
-                            summary = "踏板中间过渡区域的无效范围",
-                            value = uiState.deadzone.value,
-                            onValueChange = {
-                                uiState.deadzone.value = it
-                                onSave()
-                            },
-                            valueRange = 0f..0.2f,
-                            displayFormat = { String.format("%.0f%%", it * 100) },
-                            icon = Icons.Rounded.Straighten
-                        )
-                        SliderRow(
-                            title = "过渡点",
-                            summary = "油门和刹车的分界位置",
-                            value = uiState.transition.value,
-                            onValueChange = {
-                                uiState.transition.value = it
-                                onSave()
-                            },
-                            valueRange = 0.2f..0.8f,
-                            displayFormat = { String.format("%.0f%%", it * 100) },
-                            icon = Icons.Rounded.SwapVert
-                        )
                         OverlayDropdownPreference(
-                            title = "响应曲线",
-                            summary = "选择油门/刹车的响应方式",
+                            title = "油门响应曲线",
+                            summary = "油门行程到实际输出的映射方式",
                             items = ModConfig.PedalCurve.entries.map { curveName(it) },
-                            selectedIndex = ModConfig.PedalCurve.entries.indexOf(uiState.curve.value),
+                            selectedIndex = ModConfig.PedalCurve.entries.indexOf(uiState.throttleCurve.value),
                             onSelectedIndexChange = { index ->
-                                uiState.curve.value = ModConfig.PedalCurve.entries[index]
+                                uiState.throttleCurve.value = ModConfig.PedalCurve.entries[index]
                                 onSave()
                             },
+                            insideMargin = PaddingValues(vertical = 12.dp, horizontal = 16.dp),
                             startAction = {
                                 Icon(
-                                    imageVector = Icons.Rounded.Settings,
+                                    imageVector = Icons.Rounded.Speed,
+                                    contentDescription = null,
+                                    modifier = Modifier.padding(end = 6.dp),
+                                    tint = MiuixTheme.colorScheme.onBackground
+                                )
+                            }
+                        )
+                        OverlayDropdownPreference(
+                            title = "刹车响应曲线",
+                            summary = "刹车行程到实际输出的映射方式",
+                            items = ModConfig.PedalCurve.entries.map { curveName(it) },
+                            selectedIndex = ModConfig.PedalCurve.entries.indexOf(uiState.brakeCurve.value),
+                            onSelectedIndexChange = { index ->
+                                uiState.brakeCurve.value = ModConfig.PedalCurve.entries[index]
+                                onSave()
+                            },
+                            insideMargin = PaddingValues(vertical = 12.dp, horizontal = 16.dp),
+                            startAction = {
+                                Icon(
+                                    imageVector = Icons.Rounded.Speed,
                                     contentDescription = null,
                                     modifier = Modifier.padding(end = 6.dp),
                                     tint = MiuixTheme.colorScheme.onBackground
@@ -206,7 +259,7 @@ private fun SwitchRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp, horizontal = 16.dp),
+            .padding(vertical = 12.dp, horizontal = 16.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -281,7 +334,12 @@ private fun SliderRow(
 }
 
 private fun curveName(curve: ModConfig.PedalCurve): String = when (curve) {
-    ModConfig.PedalCurve.LINEAR -> "线性"
-    ModConfig.PedalCurve.QUADRATIC -> "二次"
-    ModConfig.PedalCurve.EXPONENTIAL -> "指数"
+    ModConfig.PedalCurve.LINEAR -> "不修改（线性）"
+    ModConfig.PedalCurve.EXPONENTIAL -> "拟真（指数）"
+}
+
+private fun modeName(mode: ModConfig.PedalMode): String = when (mode) {
+    ModConfig.PedalMode.OFF -> "关闭"
+    ModConfig.PedalMode.SINGLE -> "单踏板模式"
+    ModConfig.PedalMode.DUAL -> "双踏板模式"
 }

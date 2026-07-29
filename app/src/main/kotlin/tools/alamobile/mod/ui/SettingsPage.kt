@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.Card
@@ -40,7 +41,8 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 @Composable
 fun SettingsPage(
     uiState: ConfigUiState,
-    onSave: () -> Unit
+    onSave: () -> Unit,
+    bottomBarHeight: Dp = 0.dp
 ) {
     val context = LocalContext.current
     val scrollBehavior = MiuixScrollBehavior()
@@ -61,7 +63,11 @@ fun SettingsPage(
                 .scrollEndHaptic()
                 .overScrollVertical()
                 .padding(horizontal = 12.dp),
-            contentPadding = innerPadding,
+            // 底部留出底栏高度，否则最后一个 item 会被 NavigationBar 挡住。
+            contentPadding = PaddingValues(
+                top = innerPadding.calculateTopPadding(),
+                bottom = innerPadding.calculateBottomPadding() + bottomBarHeight
+            ),
             overscrollEffect = null
         ) {
             item {
@@ -133,7 +139,7 @@ private fun SwitchRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp, horizontal = 16.dp),
+            .padding(vertical = 12.dp, horizontal = 16.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {

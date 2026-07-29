@@ -23,9 +23,11 @@ class OverlayManager(context: Context) {
     private val appContext = context.applicationContext
     private val root: ViewGroup?
     private var pedalView: PedalOverlayView? = null
+    private var brakeView: PedalOverlayView? = null
     private var gearView: GearShiftView? = null
     private var toggleButton: View? = null
     private var pedalEditView: OverlayEditView? = null
+    private var brakeEditView: OverlayEditView? = null
     private var gearEditView: OverlayEditView? = null
     private val density = appContext.resources.displayMetrics.density
 
@@ -79,13 +81,15 @@ class OverlayManager(context: Context) {
 
     private fun toggleOverlays() {
         // 只用 pedalView 判空触发 addGamingOverlays —— 手动换挡关时 gearView
-        // 永远 null 是正常态，不应触发重复 add。
-        if (pedalView == null) {
+        // 永远 null 是正常态，不应触发重复 add。pedalMode=OFF 时 pedalView
+        // 也永远 null，同样不应反复触发。
+        if (pedalView == null && brakeView == null && settings.pedalMode != ModConfig.PedalMode.OFF) {
             addGamingOverlays()
         }
         overlaysVisible = !overlaysVisible
         val newVisibility = if (overlaysVisible) View.VISIBLE else View.GONE
         pedalView?.visibility = newVisibility
+        brakeView?.visibility = newVisibility
         gearView?.visibility = newVisibility
         if (!overlaysVisible) {
             editMode = false
@@ -94,12 +98,13 @@ class OverlayManager(context: Context) {
     }
 
     private fun toggleEditMode() {
-        if (pedalView == null) {
+        if (pedalView == null && brakeView == null && settings.pedalMode != ModConfig.PedalMode.OFF) {
             addGamingOverlays()
         }
         // Make sure the underlying overlays are visible so the edit layer is
         // meaningful, but do not change the usage-visible state.
         pedalView?.visibility = View.VISIBLE
+        brakeView?.visibility = View.VISIBLE
         gearView?.visibility = View.VISIBLE
         editMode = !editMode
         updateEditModeVisibility()
@@ -107,6 +112,10 @@ class OverlayManager(context: Context) {
 
     private fun updateEditModeVisibility() {
         pedalEditView?.let { view ->
+            view.visibility = if (editMode) View.VISIBLE else View.GONE
+            view.bringToFront()
+        }
+        brakeEditView?.let { view ->
             view.visibility = if (editMode) View.VISIBLE else View.GONE
             view.bringToFront()
         }
@@ -122,6 +131,7 @@ class OverlayManager(context: Context) {
 
         val gearPosition = settings.gearPosition
         val pedalPosition = settings.pedalPosition
+        val brakePosition = settings.brakePosition
 
         // 手动换挡关时不创建换挡控件；gearView 保持 null。
         if (settings.enableManualShift) {
@@ -140,20 +150,66 @@ class OverlayManager(context: Context) {
             addGearEditLayer(gearParams)
         }
 
-        pedalView = PedalOverlayView(appContext, settings).apply {
-            tag = "pedal_overlay"
-            visibility = View.GONE
-        }
-        val pedalParams = FrameLayout.LayoutParams(
-            pedalPosition.widthPx(appContext, screenWidth),
-            pedalPosition.heightPx(appContext, screenHeight)
-        ).apply {
-            leftMargin = pedalPosition.leftPx(screenWidth)
-            topMargin = pedalPosition.topPx(screenHeight)
-        }
-        root?.addView(pedalView, pedalParams)
+        // 按 pedalMode 创建踏板 view：OFF 不创建，SINGLE 创建一个双分区 view，
+        // DUAL 创建两个独立 view（油门 + 刹车），各自独立位置可调。
+        when (settings.pedalMode) {
+            ModConfig.PedalMode.OFF -> {
+                // 不创建踏板 view；pedalView/brakeView 保持 null。
+            }
+            ModConfig.PedalMode.SINGLE -> {
+                pedalView = PedalOverlayView(
+                    appContext, settings,
+                    PedalOverlayView.PedalRole.SINGLE, pedalPosition
+                ).apply {
+                    tag = "pedal_overlay"
+                    visibility = View.GONE
+                }
+                val pedalParams = FrameLayout.LayoutParams(
+                    pedalPosition.widthPx(appContext, screenWidth),
+                    pedalPosition.heightPx(appContext, screenHeight)
+                ).apply {
+                    leftMargin = pedalPosition.leftPx(screenWidth)
+                    topMargin = pedalPosition.topPx(screenHeight)
+                }
+                root?.addView(pedalView, pedalParams)
+                addPedalEditLayer(pedalParams)
+            }
+            ModConfig.PedalMode.DUAL -> {
+                pedalView = PedalOverlayView(
+                    appContext, settings,
+                    PedalOverlayView.PedalRole.THROTTLE, pedalPosition
+                ).apply {
+                    tag = "pedal_overlay"
+                    visibility = View.GONE
+                }
+                val pedalParams = FrameLayout.LayoutParams(
+                    pedalPosition.widthPx(appContext, screenWidth),
+                    pedalPosition.heightPx(appContext, screenHeight)
+                ).apply {
+                    leftMargin = pedalPosition.leftPx(screenWidth)
+                    topMargin = pedalPosition.topPx(screenHeight)
+                }
+                root?.addView(pedalView, pedalParams)
+                addPedalEditLayer(pedalParams)
 
-        addPedalEditLayer(pedalParams)
+                brakeView = PedalOverlayView(
+                    appContext, settings,
+                    PedalOverlayView.PedalRole.BRAKE, brakePosition
+                ).apply {
+                    tag = "brake_overlay"
+                    visibility = View.GONE
+                }
+                val brakeParams = FrameLayout.LayoutParams(
+                    brakePosition.widthPx(appContext, screenWidth),
+                    brakePosition.heightPx(appContext, screenHeight)
+                ).apply {
+                    leftMargin = brakePosition.leftPx(screenWidth)
+                    topMargin = brakePosition.topPx(screenHeight)
+                }
+                root?.addView(brakeView, brakeParams)
+                addBrakeEditLayer(brakeParams)
+            }
+        }
     }
 
     private fun addPedalEditLayer(pedalParams: FrameLayout.LayoutParams) {
@@ -181,6 +237,35 @@ class OverlayManager(context: Context) {
             ).apply {
                 leftMargin = pedalParams.leftMargin
                 topMargin = pedalParams.topMargin
+            }
+        )
+    }
+
+    private fun addBrakeEditLayer(brakeParams: FrameLayout.LayoutParams) {
+        val brake = brakeView ?: return
+        val minPx = (48 * density).toInt()
+
+        brakeEditView = OverlayEditView(
+            appContext,
+            brake,
+            minPx,
+            minPx,
+            settings.brakePosition
+        ) { left, top, width, height ->
+            saveOverlayPosition(ModConfig.KEY_BRAKE_POSITION, left, top, width, height)
+        }
+        brakeEditView?.apply {
+            tag = "brake_overlay_edit"
+            visibility = View.GONE
+        }
+        root?.addView(
+            brakeEditView,
+            FrameLayout.LayoutParams(
+                brakeParams.width,
+                brakeParams.height
+            ).apply {
+                leftMargin = brakeParams.leftMargin
+                topMargin = brakeParams.topMargin
             }
         )
     }
@@ -231,13 +316,17 @@ class OverlayManager(context: Context) {
     private fun removeExisting() {
         root?.findViewWithTag<View>("ala_tool_toggle")?.let { root.removeView(it) }
         root?.findViewWithTag<View>("pedal_overlay")?.let { root.removeView(it) }
+        root?.findViewWithTag<View>("brake_overlay")?.let { root.removeView(it) }
         root?.findViewWithTag<View>("gear_shift_overlay")?.let { root.removeView(it) }
         root?.findViewWithTag<View>("pedal_overlay_edit")?.let { root.removeView(it) }
+        root?.findViewWithTag<View>("brake_overlay_edit")?.let { root.removeView(it) }
         root?.findViewWithTag<View>("gear_shift_overlay_edit")?.let { root.removeView(it) }
         pedalView = null
+        brakeView = null
         gearView = null
         toggleButton = null
         pedalEditView = null
+        brakeEditView = null
         gearEditView = null
     }
 

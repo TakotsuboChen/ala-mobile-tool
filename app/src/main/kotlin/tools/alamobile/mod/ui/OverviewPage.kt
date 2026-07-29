@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -36,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import tools.alamobile.mod.BuildConfig
@@ -56,7 +58,7 @@ import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
 @Composable
-fun OverviewPage() {
+fun OverviewPage(bottomBarHeight: Dp = 0.dp) {
     val scrollBehavior = MiuixScrollBehavior()
 
     Scaffold(
@@ -75,7 +77,11 @@ fun OverviewPage() {
                 .scrollEndHaptic()
                 .overScrollVertical()
                 .padding(horizontal = 12.dp),
-            contentPadding = innerPadding,
+            // 底部留出底栏高度，否则最后一个 item 会被 NavigationBar 挡住。
+            contentPadding = PaddingValues(
+                top = innerPadding.calculateTopPadding(),
+                bottom = innerPadding.calculateBottomPadding() + bottomBarHeight
+            ),
             overscrollEffect = null
         ) {
             item {
@@ -164,7 +170,7 @@ private fun DeviceInfoCard() {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(vertical = 12.dp, horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(
@@ -199,13 +205,13 @@ private fun LinksCard() {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp),
+                .fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
             BasicComponent(
                 title = "检查更新",
                 summary = "点击检查 GitHub Releases",
+                insideMargin = PaddingValues(vertical = 12.dp, horizontal = 16.dp),
                 startAction = {
                     Icon(
                         imageVector = Icons.Rounded.Refresh,
@@ -219,6 +225,7 @@ private fun LinksCard() {
             BasicComponent(
                 title = "QQ 群",
                 summary = "点击加入交流群",
+                insideMargin = PaddingValues(vertical = 12.dp, horizontal = 16.dp),
                 startAction = {
                     Icon(
                         imageVector = Icons.Rounded.Phone,
@@ -232,6 +239,7 @@ private fun LinksCard() {
             BasicComponent(
                 title = "GitHub 源代码",
                 summary = "欢迎 Star",
+                insideMargin = PaddingValues(vertical = 12.dp, horizontal = 16.dp),
                 startAction = {
                     Icon(
                         imageVector = Icons.Rounded.Info,

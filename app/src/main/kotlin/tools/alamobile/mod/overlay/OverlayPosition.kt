@@ -22,6 +22,7 @@ data class OverlayPosition(
     companion object {
         val DEFAULT_PEDAL = OverlayPosition(0.75f, 0.35f, 0.18f, 0.55f)
         val DEFAULT_GEAR = OverlayPosition(0.04f, 0.60f, 0.22f, 0.30f)
+        val DEFAULT_BRAKE = OverlayPosition(0.55f, 0.35f, 0.18f, 0.55f)
 
         private const val MIN_DIMENSION_DP = 48f
 

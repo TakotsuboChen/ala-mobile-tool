@@ -12,20 +12,26 @@ import tools.alamobile.mod.config.ModConfig
 import kotlin.math.pow
 
 /**
- * Dual-zone vertical pedal overlay.
+ * Vertical pedal overlay view. Supports three topologies via [PedalRole]:
  *
- * The touch area is split vertically around [ModConfig.Settings.pedalTransition].
- * - Top half: throttle. Finger at the top => full throttle; near the transition
- *   line (inside the deadzone) => zero throttle.
- * - Bottom half: brake. Finger at the bottom => full brake; near the transition
- *   line (inside the deadzone) => zero brake.
+ * - SINGLE: one view split into throttle (top) + brake (bottom) around
+ *   [ModConfig.Settings.pedalTransition]; deadzone applies around the
+ *   transition line. Finger at the top = full throttle, at the bottom =
+ *   full brake.
+ * - THROTTLE: dedicated full-travel throttle view. Finger at top = full
+ *   throttle, at bottom = zero. No transition, no deadzone.
+ * - BRAKE: dedicated full-travel brake view. Finger at bottom = full
+ *   brake, at top = zero. No transition, no deadzone.
  *
- * The mapping curve can be linear, quadratic, or exponential.
+ * The response curve (linear / exponential ease-out ≈ 30%→60%) is applied
+ * on top of the raw travel; SINGLE applies throttleCurve on the throttle
+ * half and brakeCurve on the brake half, DUAL applies the matching curve
+ * to each dedicated view.
  */
 class PedalOverlayView(
     context: Context,
     private val settings: ModConfig.Settings = ModConfig.Settings(
-        enableControlReplacement = true,
+        pedalMode = ModConfig.PedalMode.SINGLE,
         enableAutoDrs = true,
         showOverlay = true,
         disableAutoGear = false,
@@ -33,9 +39,14 @@ class PedalOverlayView(
         enableUnlock = false,
         pedalDeadzone = 0.05f,
         pedalTransition = 0.5f,
-        pedalCurve = ModConfig.PedalCurve.LINEAR
-    )
+        throttleCurve = ModConfig.PedalCurve.LINEAR,
+        brakeCurve = ModConfig.PedalCurve.LINEAR
+    ),
+    private val role: PedalRole = PedalRole.SINGLE,
+    private val position: OverlayPosition = settings.pedalPosition
 ) : View(context) {
+
+    enum class PedalRole { SINGLE, THROTTLE, BRAKE }
 
     companion object {
         private const val TAG = "AlaMobileTool"
@@ -59,12 +70,23 @@ class PedalOverlayView(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        val centerY = height * settings.pedalTransition
-        val throttleHeight = centerY * throttle
-        val brakeHeight = (height - centerY) * brake
-
-        canvas.drawRect(0f, centerY - throttleHeight, width.toFloat(), centerY, throttlePaint)
-        canvas.drawRect(0f, centerY, width.toFloat(), centerY + brakeHeight, brakePaint)
+        when (role) {
+            PedalRole.SINGLE -> {
+                val centerY = height * settings.pedalTransition
+                val throttleHeight = centerY * throttle
+                val brakeHeight = (height - centerY) * brake
+                canvas.drawRect(0f, centerY - throttleHeight, width.toFloat(), centerY, throttlePaint)
+                canvas.drawRect(0f, centerY, width.toFloat(), centerY + brakeHeight, brakePaint)
+            }
+            PedalRole.THROTTLE -> {
+                val h = height * throttle
+                canvas.drawRect(0f, height - h, width.toFloat(), height.toFloat(), throttlePaint)
+            }
+            PedalRole.BRAKE -> {
+                val h = height * brake
+                canvas.drawRect(0f, height - h, width.toFloat(), height.toFloat(), brakePaint)
+            }
+        }
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), borderPaint)
     }
 
@@ -72,15 +94,15 @@ class PedalOverlayView(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
                 // 用 rawY - 配置的 view top 重建相对坐标。
-                // 不能用 event.getY()（相对 view 左上角）：共存版被 pairip 壳
-                // 反复 relayout，view 实际位置漂移，相对坐标跟着跳，归一化后
+                // 不能用 event.getY()（相对 view 左上角）：共存版被 pairip
+                // 壳反复 relayout，view 实际位置漂移，相对坐标跟着跳，归一化后
                 // throttle/brake 值抖动。rawY 是屏幕绝对坐标，不受 view 位置影响；
                 // 配置值 (topPx/heightPx) 是用户配置的、不依赖运行时 layout，也稳定。
                 // 原版上 view 布局稳定，配置值 == 实际值，行为不变；
                 // 共存版上用配置值绕开漂移，行为与原版一致。
                 val screenHeight = resources.displayMetrics.heightPixels
-                val viewTop = settings.pedalPosition.topPx(screenHeight)
-                val viewHeight = settings.pedalPosition.heightPx(context, screenHeight).toFloat()
+                val viewTop = position.topPx(screenHeight)
+                val viewHeight = position.heightPx(context, screenHeight).toFloat()
                 val relativeY = event.rawY - viewTop
                 updateValues(relativeY, viewHeight)
                 return true
@@ -100,21 +122,44 @@ class PedalOverlayView(
         if (viewHeight <= 0f) return
 
         val t = (y / viewHeight).coerceIn(0f, 1f)
+
+        when (role) {
+            PedalRole.SINGLE -> updateSingle(t)
+            PedalRole.THROTTLE -> updateDedicatedThrottle(t)
+            PedalRole.BRAKE -> updateDedicatedBrake(t)
+        }
+
+        updateNativeValues()
+        invalidate()
+    }
+
+    private fun updateSingle(t: Float) {
+        // Split around transition; each half normalized 0..1, deadzone applied
+        // near the transition line so resting/misplaced fingers don't bleed input.
         val transition = settings.pedalTransition.coerceIn(0.1f, 0.9f)
         val deadzone = settings.pedalDeadzone.coerceIn(0f, 0.5f)
 
         if (t <= transition) {
             val raw = if (transition <= 0f) 0f else 1f - (t / transition)
-            throttle = applyCurve(applyDeadzone(raw, deadzone))
+            throttle = applyCurve(applyDeadzone(raw, deadzone), settings.throttleCurve)
             brake = 0f
         } else {
             val raw = if (transition >= 1f) 0f else (t - transition) / (1f - transition)
             throttle = 0f
-            brake = applyCurve(applyDeadzone(raw, deadzone))
+            brake = applyCurve(applyDeadzone(raw, deadzone), settings.brakeCurve)
         }
+    }
 
-        updateNativeValues()
-        invalidate()
+    private fun updateDedicatedThrottle(t: Float) {
+        // Top = full, bottom = zero; full travel, no deadzone/transition.
+        throttle = applyCurve(1f - t, settings.throttleCurve)
+        brake = 0f
+    }
+
+    private fun updateDedicatedBrake(t: Float) {
+        // Bottom = full, top = zero; full travel, no deadzone/transition.
+        throttle = 0f
+        brake = applyCurve(t, settings.brakeCurve)
     }
 
     private fun applyDeadzone(value: Float, deadzone: Float): Float {
@@ -123,14 +168,14 @@ class PedalOverlayView(
         return (value - deadzone) / (1f - deadzone)
     }
 
-    private fun applyCurve(value: Float): Float {
-        val exponent = when (settings.pedalCurve) {
+    private fun applyCurve(value: Float, curve: ModConfig.PedalCurve): Float {
+        // exponent < 1 => ease-out (fast rise, soft tail), realistic feel:
+        // ~30% travel yields ~60% output. LINEAR stays identity.
+        val exponent = when (curve) {
             ModConfig.PedalCurve.LINEAR -> 1f
-            ModConfig.PedalCurve.QUADRATIC -> 2f
-            ModConfig.PedalCurve.EXPONENTIAL -> 2.5f
+            ModConfig.PedalCurve.EXPONENTIAL -> 0.42f
         }
-        val result = value.coerceIn(0f, 1f).pow(exponent)
-        return result.coerceIn(0f, 1f)
+        return value.coerceIn(0f, 1f).pow(exponent).coerceIn(0f, 1f)
     }
 
     private fun updateNativeValues() {
