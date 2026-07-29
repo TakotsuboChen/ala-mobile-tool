@@ -1,6 +1,7 @@
 package tools.alamobile.mod.config
 
 import android.content.Context
+import android.content.Intent
 import android.os.Environment
 import org.json.JSONObject
 import java.io.File
@@ -17,6 +18,15 @@ object ModConfig {
 
     private const val FILE_NAME = "ala_tool_config.json"
     private const val MODULE_PACKAGE = "tools.alamobile.mod"
+
+    // 目标游戏包名（原版 + 共存版）。ConfigActivity（模块进程）写配置时
+    // 需通过 createPackageContext 拿到游戏包的 externalFilesDir，才能让
+    // 游戏进程读到——因为 Android 11+ scoped storage 下两个进程的
+    // externalFilesDir 是不同沙箱，按 packageName 分流会让它们读写不同文件。
+    private val GAME_PACKAGES = setOf(
+        "com.Vince.AlamobileFormula",
+        "com.Takotsubo.AlamobileFormula"
+    )
 
     // Feature toggles
     const val KEY_ENABLE_AUTO_DRS = "enable_auto_drs"
@@ -109,26 +119,34 @@ object ModConfig {
     /**
      * Returns the shared config file.
      *
-     * Uses the module's own external files directory when running in the
-     * module process; otherwise falls back to a world-readable path in
-     * external storage that works in the target game process on Android 10+.
+     * Config 跨进程路径策略（Android 11+ scoped storage）：
+     * - 模块进程（ConfigActivity/ConfigProvider）：用 context.filesDir（应用私有
+     *   内部存储，天然可读写，无需权限，不受 scoped storage 影响）。这个文件
+     *   游戏进程不能直接读，但游戏进程通过 ContentResolver 调 ConfigProvider
+     *   间接读取——Binder 路由到模块进程执行，模块进程对自己 filesDir 有权。
+     * - 游戏进程直接读文件走不通（scoped storage 隔离 Android/data/<pkg>，
+     *   外部存储根也 EACCES），所以游戏进程必须走 ConfigProvider 的 call(READ)。
+     *   ModConfig.readFromTargetProcess 会先试 ContentProvider，失败再回退文件。
+     *
+     * 旧的"按 packageName 分流 + 外部存储根"路径在 targetSdk 35 下两边都不可达，
+     * 是 M10 配置不流动的真正根因。
      */
     private fun getConfigFile(context: Context): File {
-        val baseDir = context.getExternalFilesDir(null)
-        return if (baseDir != null && context.packageName == MODULE_PACKAGE) {
-            File(baseDir, FILE_NAME)
-        } else {
-            File(Environment.getExternalStorageDirectory(), "AlaMobileTool/$FILE_NAME")
+        // 模块进程：filesDir 始终可达（应用私有内部存储）。
+        if (context.packageName == MODULE_PACKAGE) {
+            return File(context.filesDir, FILE_NAME)
         }
+        // 游戏进程直接读文件：理论上读不到模块的 filesDir，但保留分支以防
+        // ContentProvider 不可用时回退（实际 readFromTargetProcess 会优先走 Provider）。
+        // 走游戏自己的 externalFilesDir——游戏进程对它天然可读，至少不崩。
+        val baseDir = context.getExternalFilesDir(null)
+            ?: return File(Environment.getExternalStorageDirectory(), "AlaMobileTool/$FILE_NAME")
+        return File(baseDir, FILE_NAME)
     }
 
     private fun getSharedConfigDir(context: Context): File {
-        val baseDir = context.getExternalFilesDir(null)
-        return if (baseDir != null && context.packageName == MODULE_PACKAGE) {
-            baseDir
-        } else {
-            File(Environment.getExternalStorageDirectory(), "AlaMobileTool")
-        }
+        val file = getConfigFile(context)
+        return file.parentFile ?: File(Environment.getExternalStorageDirectory(), "AlaMobileTool")
     }
 
     /**
@@ -189,13 +207,19 @@ object ModConfig {
     }
 
     /**
-     * Writes the module settings to the shared JSON file.
-     * Should only be called from the module's own process.
+     * Writes the module settings to the module's filesDir (persistence backup)
+     * AND broadcasts the JSON to the target game processes via ConfigReceiver.
+     *
+     * Android 11+ 包可见性 + scoped storage 让文件直读跨进程不可行：
+     * - 模块 filesDir：模块进程可写，但游戏进程读不到（包不可见 + scoped）。
+     * - 游戏 externalFilesDir：游戏进程可写，但模块进程写不到（uid 隔离）。
+     *
+     * 所以模块进程写完备份后，发定向广播给游戏包；游戏进程 ConfigReceiver
+     * 收到后用自己 context 写自己 externalFilesDir（天然可写）。OverlayManager
+     * 读同一路径生效。定向广播 setPackage() 不查 PackageManager 可见性，
+     * 绕过 Android 11+ 的包可见性限制。
      */
     fun write(context: Context, settings: Settings) {
-        val file = getConfigFile(context)
-        file.parentFile?.mkdirs()
-
         val json = JSONObject().apply {
             put(KEY_PEDAL_MODE, settings.pedalMode.value)
             put(KEY_ENABLE_AUTO_DRS, settings.enableAutoDrs)
@@ -211,9 +235,30 @@ object ModConfig {
             put(KEY_GEAR_POSITION, settings.gearPosition.toJson())
             put(KEY_BRAKE_POSITION, settings.brakePosition.toJson())
             put(KEY_LOG_ENABLED, settings.logEnabled)
+        }.toString(2)
+
+        // 1. 写模块 filesDir 作持久化备份（模块进程天然可写）。
+        try {
+            val file = File(context.filesDir, FILE_NAME)
+            file.writeText(json)
+            android.util.Log.i("AlaMobileTool", "Config written to module filesDir: ${file.absolutePath}")
+        } catch (e: Throwable) {
+            android.util.Log.e("AlaMobileTool", "ModConfig.write to filesDir failed", e)
         }
 
-        file.writeText(json.toString(2))
+        // 2. 发定向广播给所有目标游戏包，让游戏进程 ConfigReceiver 写自己目录。
+        //    setPackage 定向派发，不查 PackageManager 可见性，绕过包可见性限制。
+        for (pkg in GAME_PACKAGES) {
+            try {
+                val intent = Intent(ConfigReceiver.ACTION_CONFIG_UPDATE)
+                    .setPackage(pkg)
+                    .putExtra(ConfigReceiver.EXTRA_JSON, json)
+                context.sendBroadcast(intent)
+                android.util.Log.i("AlaMobileTool", "Config broadcast sent to $pkg")
+            } catch (e: Throwable) {
+                android.util.Log.w("AlaMobileTool", "Config broadcast to $pkg failed", e)
+            }
+        }
     }
 
     /**
@@ -238,10 +283,59 @@ object ModConfig {
 
     /**
      * Reads the module settings from the target game process.
-     * The shared JSON file is world-readable through external storage.
+     *
+     * Android 11+ 包可见性 + scoped storage 让游戏进程既看不到模块 ContentProvider
+     * 也读不到模块 filesDir。广播方案下，ConfigActivity 发定向广播带 JSON，
+     * 游戏进程 ConfigReceiver 收到后用自己 context 写自己 getExternalFilesDir
+     * （游戏进程天然可读写）。这里读游戏自己目录的配置。
      */
     fun readFromTargetProcess(context: Context): Settings {
-        return read(context)
+        // 游戏进程读自己 externalFilesDir 的配置——这是 ConfigReceiver 收到
+        // 广播后写入的位置。游戏进程对它天然可读，无需权限，无 scoped storage 限制。
+        val file = File(context.getExternalFilesDir(null) ?: return defaultSettings(), FILE_NAME)
+        return if (file.exists()) {
+            try {
+                val json = file.readText()
+                val settings = fromJson(json)
+                android.util.Log.i("AlaMobileTool", "Config read from game dir: pedalMode=${settings.pedalMode}")
+                settings
+            } catch (e: Throwable) {
+                android.util.Log.w("AlaMobileTool", "Config read failed, using defaults", e)
+                defaultSettings()
+            }
+        } else {
+            android.util.Log.i("AlaMobileTool", "No config in game dir, using defaults")
+            defaultSettings()
+        }
+    }
+
+    /** 从 JSON 字符串解析 Settings，供 ConfigProvider 和 readFromTargetProcess 复用。 */
+    fun fromJson(json: String): Settings {
+        return try {
+            val j = JSONObject(json)
+            Settings(
+                pedalMode = migratePedalMode(j),
+                enableAutoDrs = false,
+                showOverlay = j.optBoolean(KEY_SHOW_OVERLAY, Defaults.SHOW_OVERLAY),
+                disableAutoGear = j.optBoolean(KEY_DISABLE_AUTO_GEAR, Defaults.DISABLE_AUTO_GEAR),
+                enableManualShift = j.optBoolean(KEY_ENABLE_MANUAL_SHIFT, Defaults.ENABLE_MANUAL_SHIFT),
+                enableUnlock = j.optBoolean(KEY_ENABLE_UNLOCK, Defaults.ENABLE_UNLOCK),
+                pedalDeadzone = j.optDouble(KEY_PEDAL_DEADZONE, Defaults.PEDAL_DEADZONE.toDouble()).toFloat(),
+                pedalTransition = j.optDouble(KEY_PEDAL_TRANSITION, Defaults.PEDAL_TRANSITION.toDouble()).toFloat(),
+                throttleCurve = PedalCurve.from(
+                    j.optString(KEY_THROTTLE_CURVE, j.optString(KEY_LEGACY_PEDAL_CURVE, Defaults.THROTTLE_CURVE.value))
+                ),
+                brakeCurve = PedalCurve.from(
+                    j.optString(KEY_BRAKE_CURVE, j.optString(KEY_LEGACY_PEDAL_CURVE, Defaults.BRAKE_CURVE.value))
+                ),
+                pedalPosition = readOverlayPosition(j, KEY_PEDAL_POSITION, Defaults.PEDAL_POSITION),
+                gearPosition = readOverlayPosition(j, KEY_GEAR_POSITION, Defaults.GEAR_POSITION),
+                brakePosition = readOverlayPosition(j, KEY_BRAKE_POSITION, Defaults.BRAKE_POSITION),
+                logEnabled = j.optBoolean(KEY_LOG_ENABLED, Defaults.LOG_ENABLED)
+            )
+        } catch (e: Throwable) {
+            defaultSettings()
+        }
     }
 
     /**

@@ -31,7 +31,10 @@ class OverlayManager(context: Context) {
     private var gearEditView: OverlayEditView? = null
     private val density = appContext.resources.displayMetrics.density
 
-    private val settings by lazy { ModConfig.readFromTargetProcess(appContext) }
+    // 可重读的配置：每次 show/toggle 都重新读 JSON，避免 by lazy 缓存
+    // 导致配置页改的 pedalMode/curve 流不到运行时（M10 真机不生效根因）。
+    // PedalOverlayView 构造时拷贝 settings 快照，所以光重读不够——必须重建 view。
+    private var settings = ModConfig.readFromTargetProcess(appContext)
 
     private var overlaysVisible = false
     private var editMode = false
@@ -43,6 +46,11 @@ class OverlayManager(context: Context) {
 
     fun showOverlays() {
         root ?: return
+
+        // 每次显示前重读配置——配置页（模块进程）改的 pedalMode/curve 通过
+        // 共享 JSON 文件传递，游戏进程必须主动读才能拿到新值。原 by lazy 只读一次，
+        // 导致运行时永远用旧配置（M10 真机不生效根因）。
+        settings = ModConfig.readFromTargetProcess(appContext)
 
         // Remove existing views to avoid duplicates.
         removeExisting()
@@ -80,12 +88,14 @@ class OverlayManager(context: Context) {
     }
 
     private fun toggleOverlays() {
-        // 只用 pedalView 判空触发 addGamingOverlays —— 手动换挡关时 gearView
-        // 永远 null 是正常态，不应触发重复 add。pedalMode=OFF 时 pedalView
-        // 也永远 null，同样不应反复触发。
-        if (pedalView == null && brakeView == null && settings.pedalMode != ModConfig.PedalMode.OFF) {
-            addGamingOverlays()
-        }
+        // 每次 toggle 都重读配置并重建控件：配置页改 pedalMode（关/单/双）、
+        // curve（线性/拟真）、enableManualShift 后，用户点工具按钮重新展开，
+        // 控件必须反映最新值。原实现用 pedalView==null 判空跳过重建，导致
+        // 首次创建后就永远用旧配置——切关/双踏板仍显示单踏板，切拟真仍线性。
+        settings = ModConfig.readFromTargetProcess(appContext)
+        removeGamingOverlays()
+        addGamingOverlays()
+
         overlaysVisible = !overlaysVisible
         val newVisibility = if (overlaysVisible) View.VISIBLE else View.GONE
         pedalView?.visibility = newVisibility
@@ -98,9 +108,10 @@ class OverlayManager(context: Context) {
     }
 
     private fun toggleEditMode() {
-        if (pedalView == null && brakeView == null && settings.pedalMode != ModConfig.PedalMode.OFF) {
-            addGamingOverlays()
-        }
+        settings = ModConfig.readFromTargetProcess(appContext)
+        removeGamingOverlays()
+        addGamingOverlays()
+
         // Make sure the underlying overlays are visible so the edit layer is
         // meaningful, but do not change the usage-visible state.
         pedalView?.visibility = View.VISIBLE
@@ -311,6 +322,23 @@ class OverlayManager(context: Context) {
         } catch (e: Throwable) {
             android.util.Log.e("AlaMobileTool", "Failed to save overlay position", e)
         }
+    }
+
+    private fun removeGamingOverlays() {
+        // 只移除游戏控件，保留 toggle 按钮——toggle 操作时按钮本身要留着
+        // 供用户再次点击，只需重建踏板/换挡 view 反映最新配置。
+        root?.findViewWithTag<View>("pedal_overlay")?.let { root.removeView(it) }
+        root?.findViewWithTag<View>("brake_overlay")?.let { root.removeView(it) }
+        root?.findViewWithTag<View>("gear_shift_overlay")?.let { root.removeView(it) }
+        root?.findViewWithTag<View>("pedal_overlay_edit")?.let { root.removeView(it) }
+        root?.findViewWithTag<View>("brake_overlay_edit")?.let { root.removeView(it) }
+        root?.findViewWithTag<View>("gear_shift_overlay_edit")?.let { root.removeView(it) }
+        pedalView = null
+        brakeView = null
+        gearView = null
+        pedalEditView = null
+        brakeEditView = null
+        gearEditView = null
     }
 
     private fun removeExisting() {

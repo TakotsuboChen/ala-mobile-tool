@@ -31,6 +31,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+            跨进程配置 IPC。游戏进程（LSPosed 注入的代码）通过 ContentResolver
+            调 READ_METHOD，Binder 路由到模块进程读取 filesDir 配置，绕开 Android 11+
+            scoped storage 对跨进程文件访问的限制。导出给游戏进程访问。
+        -->
+        <provider
+            android:name=".config.ConfigProvider"
+            android:authorities="tools.alamobile.mod.config"
+            android:exported="true" />
     </application>
 
 </manifest>

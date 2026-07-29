@@ -64,27 +64,35 @@ class PedalOverlayView(
         strokeWidth = 4f
     }
 
-    private var throttle = 0f
-    private var brake = 0f
+    // raw = 手指实际位移归一值（0..1），用于 onDraw 绘制，保证视觉跟手。
+    private var rawThrottle = 0f
+    private var rawBrake = 0f
+    // mapped = 曲线变换后送 native 的值（0..1），可能 raw≠mapped。
+    private var mappedThrottle = 0f
+    private var mappedBrake = 0f
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-
+        // 用 raw 值绘制填充——手指摸到哪，填充到哪，视觉跟手。
+        // mapped 值只送 native，不影响视觉。
         when (role) {
             PedalRole.SINGLE -> {
                 val centerY = height * settings.pedalTransition
-                val throttleHeight = centerY * throttle
-                val brakeHeight = (height - centerY) * brake
+                val throttleHeight = centerY * rawThrottle
+                val brakeHeight = (height - centerY) * rawBrake
                 canvas.drawRect(0f, centerY - throttleHeight, width.toFloat(), centerY, throttlePaint)
                 canvas.drawRect(0f, centerY, width.toFloat(), centerY + brakeHeight, brakePaint)
             }
             PedalRole.THROTTLE -> {
-                val h = height * throttle
+                val h = height * rawThrottle
                 canvas.drawRect(0f, height - h, width.toFloat(), height.toFloat(), throttlePaint)
             }
             PedalRole.BRAKE -> {
-                val h = height * brake
-                canvas.drawRect(0f, height - h, width.toFloat(), height.toFloat(), brakePaint)
+                // 红色从手指位置往下填到 view 底部：手指顶部=红色填满整条，
+                // 手指往下滑红色顶部边缘跟着下移、红色区域缩短。
+                // 与 THROTTLE（从底向上填到手指）镜像对称。
+                val top = height * (1f - rawBrake)
+                canvas.drawRect(0f, top, width.toFloat(), height.toFloat(), brakePaint)
             }
         }
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), borderPaint)
@@ -108,8 +116,10 @@ class PedalOverlayView(
                 return true
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                throttle = 0f
-                brake = 0f
+                rawThrottle = 0f
+                rawBrake = 0f
+                mappedThrottle = 0f
+                mappedBrake = 0f
                 updateNativeValues()
                 invalidate()
                 return true
@@ -134,32 +144,48 @@ class PedalOverlayView(
     }
 
     private fun updateSingle(t: Float) {
-        // Split around transition; each half normalized 0..1, deadzone applied
-        // near the transition line so resting/misplaced fingers don't bleed input.
+        // raw = 手指位移（跟手，用于绘制）；mapped = 曲线变换后送 native。
         val transition = settings.pedalTransition.coerceIn(0.1f, 0.9f)
         val deadzone = settings.pedalDeadzone.coerceIn(0f, 0.5f)
 
         if (t <= transition) {
             val raw = if (transition <= 0f) 0f else 1f - (t / transition)
-            throttle = applyCurve(applyDeadzone(raw, deadzone), settings.throttleCurve)
-            brake = 0f
+            val afterDead = applyDeadzone(raw, deadzone)
+            rawThrottle = raw
+            rawBrake = 0f
+            mappedThrottle = applyCurve(afterDead, settings.throttleCurve)
+            mappedBrake = 0f
         } else {
             val raw = if (transition >= 1f) 0f else (t - transition) / (1f - transition)
-            throttle = 0f
-            brake = applyCurve(applyDeadzone(raw, deadzone), settings.brakeCurve)
+            val afterDead = applyDeadzone(raw, deadzone)
+            rawThrottle = 0f
+            rawBrake = raw
+            mappedThrottle = 0f
+            mappedBrake = applyCurve(afterDead, settings.brakeCurve)
         }
     }
 
     private fun updateDedicatedThrottle(t: Float) {
         // Top = full, bottom = zero; full travel, no deadzone/transition.
-        throttle = applyCurve(1f - t, settings.throttleCurve)
-        brake = 0f
+        // raw 跟手（1-t）：手指顶部=1 满油门，底部=0。
+        // mapped 送 native：曲线变换后的值。
+        val raw = 1f - t
+        rawThrottle = raw
+        rawBrake = 0f
+        mappedThrottle = applyCurve(raw, settings.throttleCurve)
+        mappedBrake = 0f
     }
 
     private fun updateDedicatedBrake(t: Float) {
-        // Bottom = full, top = zero; full travel, no deadzone/transition.
-        throttle = 0f
-        brake = applyCurve(t, settings.brakeCurve)
+        // BRAKE view：顶部=满刹车，底部=零（与 THROTTLE 对称：顶部=满，底部=零）。
+        // raw=1-t 跟手：手指顶部 raw=1 红色画满，往下滑 raw 减小红色从顶往下退，
+        // 视觉"红色从下往上涨到手指位置"，和油门填充方向一致。
+        // mapped=applyCurve(1-t) 送 native，非线性映射。
+        val raw = 1f - t
+        rawThrottle = 0f
+        rawBrake = raw
+        mappedThrottle = 0f
+        mappedBrake = applyCurve(raw, settings.brakeCurve)
     }
 
     private fun applyDeadzone(value: Float, deadzone: Float): Float {
@@ -171,6 +197,7 @@ class PedalOverlayView(
     private fun applyCurve(value: Float, curve: ModConfig.PedalCurve): Float {
         // exponent < 1 => ease-out (fast rise, soft tail), realistic feel:
         // ~30% travel yields ~60% output. LINEAR stays identity.
+        // 仅作用于 mapped（送 native），不影响 raw（绘制用）。
         val exponent = when (curve) {
             ModConfig.PedalCurve.LINEAR -> 1f
             ModConfig.PedalCurve.EXPONENTIAL -> 0.42f
@@ -179,15 +206,11 @@ class PedalOverlayView(
     }
 
     private fun updateNativeValues() {
-        // Direct JNI path. With the dual-ClassLoader guard in
-        // AlaMobileModule, NativeBridge.isAvailable is reliably true in both
-        // original and coexistence builds, so the legacy file-based IPC
-        // fallback (which raced with seek+write and caused pedal stutter)
-        // has been removed.
+        // 送 mapped 值给 native（曲线变换后），raw 留给绘制。
         if (NativeBridge.isAvailable) {
             try {
-                NativeBridge.setThrottle(throttle)
-                NativeBridge.setBrake(brake)
+                NativeBridge.setThrottle(mappedThrottle)
+                NativeBridge.setBrake(mappedBrake)
             } catch (e: Throwable) {
                 Log.w(TAG, "JNI setThrottle/setBrake failed", e)
             }

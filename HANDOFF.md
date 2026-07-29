@@ -1,119 +1,83 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-07-30T02:30:00+08:00 · Git HEAD: 5d86f09（交接前；本次改动尚未 commit）
+生成时间: 2026-07-30T03:50:00+08:00 · Git HEAD: 6c5b65b（本次改动尚未 commit）
 恢复方式: 对 Claude 说"读一下 HANDOFF.md，按头部 Git HEAD 复核本文件"。
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待。
 
 ## 1. 当前目标
 
-线性踏板下拉化 + 双踏板模式 + 响应曲线拆分与修复。**UI 改动完成、编译通过、装机验证，但真机实测发现运行时未生效——根因是 OverlayManager 的 `settings` 是 `by lazy` 缓存旧值，游戏进程不重读配置。**
-
-完成定义（UI 层）：① "线性踏板" Switch→下拉（关/单/双踏板）；② 死区/过渡点移入 Overlay 控件 Card、仅 SINGLE 显示、带 AnimatedVisibility 动画；③ 响应曲线拆成油门+刹车两条下拉；④ curve exponent 改 0.42（ease-out）；⑤ 底栏挡内容修复（三页面加 bottomBarHeight）；⑥ Card 内行间距统一 12垂直+16水平；⑦ 自动 DRS 默认关+读时强制 false；⑧ 解锁付费内容上移+删描述。
-**未完成（运行时层）**：⑨ 游戏内切关/双踏板仍显示单踏板控件；⑩ 拟真曲线仍线性。两者根因相同：OverlayManager 缓存配置，不重读。
+修复 M10 遗留的"踏板模式切换 + 响应曲线切换运行时不生效"问题。**已完成**：根因定位为 Android 11+ scoped storage + 包可见性双重隔离，落地广播方案 + raw/mapped 分离 + 刹车视觉方向修复，真机全过。
 
 ## 2. 已验证状态 — 工作实际停在哪
 
-- [V] 当前分支 `main`，HEAD `5d86f09`（交接前），10 个文件 modified 未 commit。
+- [V] 当前分支 `main`，HEAD `6c5b65b`，8 个文件改动（6 modified + 2 新增）未 commit。
 - [V] `./gradlew :app:assembleDebug` BUILD SUCCESSFUL in 3s。
-- [V] 装机成功（adb install -r），UI 层所有改动在配置页可见。
-- [?] **真机实测失败** [用户反馈]：① 切"关"/"双踏板"模式，游戏内仍是单踏板控件（上半油门下半刹车）；
-  ② 响应曲线切"拟真"仍是线性。**这不是曲线函数方向问题，是配置值根本没流到运行时。**
-- [V] 根因定位：`OverlayManager.kt:34` `private val settings by lazy { ModConfig.readFromTargetProcess(appContext) }`。
-  lazy 在 overlay 首次创建时读一次 JSON，之后永远用缓存值。配置页（模块进程）改 pedalMode 写 JSON，
-  游戏进程的 OverlayManager 不会重读。toggle 复用 pedalView（非空不重建）加剧此问题。
-- [V] `PedalOverlayView` 构造时传入的 `settings` 是 OverlayManager 缓存的旧值，curve/throttleCurve/brakeCurve
-  全是旧值，所以拟真曲线不生效。即便修对 exponent 方向，运行时拿到的 curve 仍是旧 LINEAR。
-- [V] ModConfig.read() 对 `enableAutoDrs` 强制读 false（功能未实现，无视旧 JSON 的 true）。
-  副作用：未来实现自动 DRS 时必须移除此强制 false，改回 `json.optBoolean(key, Defaults.ENABLE_AUTO_DRS)`。
+- [V] 装机成功，真机全功能验证通过（用户确认）：
+  - 配置页改双踏板 → 广播送达游戏进程 → toggle 后控件正确变化。
+  - 拟真曲线：视觉跟手（手指30%→填充30%），游戏油门非线性（30%→60%）。
+  - 刹车视觉：从手指位置往下填到底，与油门镜像对称。
+- [V] 根因链（每层都验证）：
+  1. `OverlayManager.settings by lazy` 缓存 → 改可重读 `var` + toggle 重建。
+  2. scoped storage：模块进程写模块 `filesDir`，游戏进程读不到（`EACCES` 外部存储根 + uid 隔离游戏 `Android/data`）。
+  3. ContentProvider 被包可见性拦：`createPackageContext` 抛 `NameNotFoundException`，`Failed to find provider info`。
+  4. **广播方案**：ConfigActivity 发定向广播（`Intent.setPackage` 不查可见性），游戏进程 `ConfigReceiver` 写自己 `externalFilesDir`，OverlayManager 读同一路径。
+- [V] ConfigProvider.kt 实际未使用（广播方案落地后废弃），但代码仍在，可删或留作备份。
+- [V] 首次启动限制：游戏进程首次启动时 `ConfigReceiver` 还没收到广播，读自己目录无文件 → 默认值。用户改一次配置后 toggle 即生效；后续启动因游戏目录已有配置文件，直接读到正确值。
 
-### 测试/build 输出 tail（本次交接的真实输出）
+### 测试/build 输出 tail
 
 ```
 $ ./gradlew :app:assembleDebug
 > Task :app:compileDebugKotlin
 > Task :app:assembleDebug
 BUILD SUCCESSFUL in 3s
-$ adb install -r app-debug.apk
-Performing Streamed Install
-Success
+$ adb install -r → Success
+真机：双踏板+拟真生效，视觉跟手，刹车方向正确（用户确认"现在对了"）
 ```
 
 ## 3. 决策与理由
 
-- **UI 重构方案** [V]——线性踏板下拉、死区/过渡点条件显示、曲线拆分、exponent 0.42、底栏 padding、
-  行间距统一、自动 DRS 强制关。全部编译通过、UI 层验证。否决：无。
-- **curve exponent 改 0.42 不是根因** [V]——用户最初说"三个曲线不生效"，我误判为函数方向反了
-  （旧 exponent≥1 是 ease-in）。真机实测证明：exponent 改对了方向，但运行时根本没用到新值——
-  OverlayManager 缓存旧 settings，curve 仍是旧的。**函数方向是次要 bug，配置不流动才是主因。**
-- **自动 DRS 强制读 false** [V]——功能未实现，避免老用户升级后开关显示"开"但无效果。
-  副作用：未来实现时必须改回读真实配置值。
+- **广播方案作跨进程配置 IPC** [V]——ConfigActivity（模块进程）写模块 `filesDir` + 发定向广播给游戏包；游戏进程 `ConfigReceiver` 收到后写自己 `externalFilesDir`；OverlayManager 读同一路径。`Intent.setPackage` 直接派发不查 PackageManager 可见性，绕过 Android 11+ 双重限制。否决方案：① 文件直读（scoped storage 拦）；② ContentProvider（包可见性拦 `NameNotFoundException`）；③ `createPackageContext`（同样被可见性拦）。三者全实测失败。
+- **raw/mapped 值分离** [V]——`rawThrottle`/`rawBrake` 是手指位移（绘制，跟手），`mappedThrottle`/`mappedBrake` 是曲线变换后送 native 的值（非线性）。否决：原设计 `applyCurve` 直接作用在 `throttle` 字段，导致视觉填充也非线性，"触摸30%填充60%"不跟手。
+- **刹车视觉从手指位置往下填到底** [V]——`drawRect(0, top, width, height)`，`top=height*(1-rawBrake)`。与油门（从底向上填到手指）镜像对称。否决：原从底向上画水位式，方向反。
+- **ConfigReceiver 用 RECEIVER_EXPORTED 注册** [V]——Android 13+ 强制要求，广播跨应用派发必须 EXPORTED。
 
 ## 4. 失败的尝试 — 不要再试
 
-- **仅改 curve exponent 方向无法让拟真生效** [V]——旧 exponent≥1（ease-in）确实方向反了，但真机
-  实测拟真仍线性，根因是 OverlayManager 缓存 settings、不重读 JSON。修对 exponent 但运行时
-  拿不到新 curve 值，等于没修。**不要再只改数学方向而不解决配置流动。**
-- **`PedalOverlayView` 默认参数漏新字段** [V]——给 `ModConfig.Settings` 加/改字段后必须同步
-  `PedalOverlayView` 默认参数构造。本次改了 pedalMode/throttleCurve/brakeCurve/brakePosition。
-  （搬运自旧 HANDOFF，仍有效）
-- （搬运自旧 HANDOFF，仍有效）
-- **`gh run download` 验证 `archive: false` artifact** [V]——CLI 把 apk 当目录解包。验证 artifact 用 curl/浏览器。
-- **`gh release view` 查 asset 文件名** [V]——API 返回点号风格，浏览器保留空格。看浏览器。
-- **`android-actions/setup-android@v4` 装 `platforms;android-37`** [V]——Google SDK 仓库未发布。
-- **symlink `android-37.0` → `android-37`** [V]——AGP 报 inconsistent location。必须复制 + 改路径标识。
-- **只改 source.properties 不改 package.xml** [V]——4 处都要改。
-- **YAML `- name:` 值含冒号未加引号** [V]——workflow 0s 失败。
-- **旧 CI 的 `|| true` + `continue-on-error` 吞错** [V]——lint 假绿。已去掉。
-- **`onModuleLoaded` 立即 `markInitialized()`** [?]——自杀，拦掉同 ClassLoader 后续回调。
-- **IPC 文件路径优化写法** [?]——`RandomAccessFile.seek+write` 非原子。全试过全失败。
-- **`getLocationOnScreen()` 重建相对坐标** [?]——pairip 壳 relayout 漂移。用 rawY + 配置位置。
+- **文件直读跨进程** [V]——`Environment.getExternalStorageDirectory()/AlaMobileTool/` 在 targetSdk 35 下模块进程写 `EACCES`、游戏进程读 `EACCES`（scoped storage）。`getExternalFilesDir` 各进程是自己包私有目录，uid 隔离互相读不到。不要再试文件 IPC。
+- **ContentProvider 跨进程** [V]——`resolver.call(uri,...)` 报 `Failed to find provider info`（游戏进程看不到模块 Provider，包可见性）。`createPackageContext(MODULE_PACKAGE, CONTEXT_IGNORE_SECURITY)` 抛 `NameNotFoundException`——`CONTEXT_IGNORE_SECURITY` 不绕过包可见性过滤。不要再试 Provider/createPackageContext。
+- **`ContentResolver.call(String, String, String, String, Bundle)` 显式包名重载** [V]——Kotlin SDK 在 minSdk 26 下编译期解析为旧 4 参 `call(Uri,...)`，5 参重载（API 30+）不可用。要反射或 `@RequiresApi(30)`，未试（广播方案已落地）。
+- **`OverlayManager.settings by lazy` 只改缓存不够** [V]——即使改可重读 `var`，`PedalOverlayView` 构造时拷 settings 快照（data class 值语义），必须重建 view 才能让新配置生效。toggle 时要 `removeGamingOverlays`+重建。
+- **`applyCurve` 作用在 throttle 单字段** [V]——导致视觉和 native 都非线性，不跟手。必须 raw/mapped 分离。
+- **BRAKE 填充从底向上画水位式** [V]——与油门方向不一致，用户感觉反。要镜像对称。
 
 ## 5. 已知坑
 
-- **OverlayManager `settings` by lazy 缓存是运行时不生效的根因** [V]——游戏进程首次创建 overlay
-  后，配置页改的 pedalMode/curve 不会流到 OverlayManager，必须重启游戏或改代码让它重读。
-  **下次必须解决这个，否则任何配置改动在运行时都不生效。**
-- **加/改 `ModConfig.Settings` 字段必同步所有构造点** [V]——`ModConfig.defaultSettings()`、
-  `ModConfig.read()`、`ConfigMainScreen.remember{}`、`ConfigMainScreen.saveNow`、`PedalOverlayView` 默认参数。
-- **`PedalCurve` 精简后旧值兼容** [V]——`from()` 必须处理 `quadratic` 旧值→EXPONENTIAL。
-- **`PedalMode` 迁移必须处理旧 `enable_control_replacement`** [V]——`migratePedalMode()` 先看新 key，
-  没有再从旧 bool 派生（true→SINGLE, false→OFF）。
-- **`applyCurve` exponent 方向** [V]——exponent < 1 是 ease-out（先快后慢），> 1 是 ease-in（先慢后快）。
-  拟真要前者。但这是次要 bug，主因是配置不流动（见上）。
-- **`archive: false` 对 apk 有效但 CLI 误导** [V]——验证用 curl/浏览器。
-- **`gh release view` asset name 转义空格成点号** [V]——看浏览器。
-- **AGP ApiLevel 整数比较** [V]——复制 platform 后必须 sed `37.0`→`37`。
-- **AGP inconsistent location 检查** [V]——必须改 package.xml `path` + source.properties `Pkg.Path`。
-- **Google SDK 仓库未发布 `platforms;android-37`** [V]——GitHub runner 预装 `android-37.0` 可复制改路径。
-- **Aliyun 镜像 CI 502** [V]——`settings.gradle.kts` 用 `System.getenv("CI") == null` 条件化。
-- **lint baseline 不锁 AGP AAR metadata 检查** [V]——AAR metadata 必须从根上修。
-- **miuix 0.9.3 `minCompileSdk=37` 硬要求** [V]——不能降 compileSdk。
-- **LSPosed 双 ClassLoader 注入** [?]——共存版触发双注入，必须 `System.setProperty` 守卫。
-- **pairip 壳 relayout 漂移** [?]——用 `event.rawY - settings.pedalPosition.topPx()`。
-- **keystore 不在 git** [V]——`.gitignore` 排除，CI 靠 `KEYSTORE_BASE64` secret。
-- **module.prop versionCode 必须同步** [?]——LSPosed 用 module.prop 识别更新。
-- **游戏刹车辅助** [?]——弯道自动刹车，和模块无关，用户在游戏设置关掉。
-- **GitHub Actions `if` 里不能直接引用 `secrets`** [V]——先 `env:` 再 `if: env.X != ''`。
-- **keystore 解码 step 的 `KEYSTORE_PATH` 只在解码成功时设** [V]——`if: env.KS_B64 != ''` 守卫整个 step。
-- **`KEYSTORE_PASSWORD`/`KEYSTORE_ALIAS` 走 Gradle 默认值** [V]——真实密码=默认值 `alamobiletool`。
-- **workflow `prerelease: true` 硬编码** [V]——正式版发 Release 时必须改 `false`。
+- **Android 11+ scoped storage** [V]——外部存储根 `EACCES`，`Android/data/<pkg>` uid 隔离。模块进程和游戏进程只能各写自己 `filesDir`/`externalFilesDir`，跨进程靠广播。
+- **Android 11+ 包可见性** [V]——targetSdk≥30 默认看不到未在 `<queries>` 声明的包。游戏 manifest 改不了，`createPackageContext` 和 ContentProvider 都被拦。`Intent.setPackage` 定向广播是唯一绕过方式。
+- **`CONTEXT_IGNORE_SECURITY` 不绕过包可见性** [V]——只忽略 security context，`PackageManager.NameNotFoundException` 仍抛。
+- **Android 13+ `registerReceiver` 需 flag** [V]——`RECEIVER_EXPORTED`（跨应用）或 `RECEIVER_NOT_EXPORTED`（同应用）。targetSdk 35 强制。
+- **广播首次启动滞后** [V]——游戏进程 `onPackageReady` 注册 receiver 前，ConfigActivity 发的广播丢。首次安装后首次进游戏读默认值。用户改一次配置后 toggle 生效；之后游戏目录有文件，直接读对。
+- **Meizu AppsFilter BLOCKED** [?]——系统层额外包交互过滤，可能加剧可见性问题。非根因（广播已绕过）。
+- **`PedalOverlayView` 构造拷 settings 快照** [V]——加/改 `ModConfig.Settings` 字段必须同步默认参数构造；配置变更必须重建 view（toggle 时 removeGamingOverlays+addGamingOverlays）。
+- **`applyCurve` exponent 方向** [V]——<1 是 ease-out（先快后慢），≥1 是 ease-in。拟真用 0.42（30%→60%）。仅作用于 mapped（送 native），不影响 raw（绘制）。
+- **`ConfigProvider.kt` 已废弃** [V]——广播方案落地后未使用，代码仍在，可删。
+- **`OverlayManager.settings` 不再 by lazy** [V]——改可重读 `var`，show/toggle 时重读 JSON。
+- **`removeGamingOverlays` vs `removeExisting`** [V]——前者只清踏板/换挡 view 保留 toggle 按钮（toggle 操作用），后者连按钮清（showOverlays 全量初始化用）。
+- **ModConfig.read() 对 enableAutoDrs 强制 false** [V]——功能未实现，避免老用户升级后开关显示"开"但无效果。未来实现时改回读真实值。
+- **共存版双 ClassLoader** [?]——LSPosed 注入两次，`markNativeInstalled()` 守卫拦第二个。日志常见"Native already installed by another ClassLoader"是正常态。
+- **pairip 壳 relayout 漂移** [?]——共存版 view 位置漂移，用 `rawY - settings.pedalPosition.topPx()` 绕开。
 
 ## 6. 下一步（有序）
 
-1. **修复 OverlayManager 配置不流动**（最高优先）——让 `settings` 不再 by lazy 缓存，
-   或在 toggle/addGamingOverlays 前重新读配置。方案候选：
-   - A. `addGamingOverlays` 开头 `val settings = ModConfig.readFromTargetProcess(appContext)` 重新读，覆盖成员变量；
-   - B. `toggleOverlays`/`toggleEditMode` 触发 removeExisting + 重建，强制重读；
-   - C. 给 OverlayManager 加 `refreshSettings()`，配置变更时调用（需 IPC 通知游戏进程，复杂）。
-   推荐先试 A（最简单），验证 toggle 一次能否让新配置生效。
-2. 验证修复后真机：切关/双踏板 → toggle → 控件正确变化；切拟真 → 实际手感非线性。
-3. 若步骤 2 仍不生效，排查 `readFromTargetProcess` 在游戏进程读到的 JSON 是否真是新值
-   （可能是 ConfigActivity 写的路径与游戏进程读的路径不一致——M6 改过路径逻辑，复核）。
-4. （可选）真机冒烟测试全部通过后 commit + 发 Beta 2。
-5. （可选）后续实现"手动换挡""自动 DRS"。
+1. **清理 ConfigProvider.kt**（可选）——广播方案落地后未使用，可删避免混淆。manifest 里 provider 声明也可一并删。
+2. **首次启动体验优化**（可选）——当前首次安装后首次进游戏读默认值。若要改善：ConfigActivity 启动时检测游戏是否在跑（`ActivityManager.getRunningAppProcesses`，需权限），在跑则立即发一次当前配置广播。或文档说明"改配置需 toggle 一次"。
+3. **curve exponent 真机调参**（可选）——0.42（30%→60%）是初始值，用户可反馈手感是否合适，调整 `PedalOverlayView.applyCurve` 的 exponent。
+4. **commit + 发 Beta**——本次修复闭环，可 commit 后发 Beta 2（versionCode 100221, versionName `1.0.0 Beta 2`）。
+5. （后续）实现"手动换挡""自动 DRS"。
 
 ## 7. 留给用户的开放问题
 
-- 配置页改动是否需要重启游戏才生效？还是期望 toggle 即时生效？（影响修复方案选择）
-- 拟真曲线 exponent=0.42（30%→60%）的手感是否合适？（待配置流动修复后才能真机验证）
-- 双踏板默认刹车位置（pedal 左侧 0.55f）是否合适？
+- 拟真曲线 exponent=0.42（30%→60%）手感是否合适？需调参吗？
+- 首次安装后首次进游戏读默认值（需改一次配置 toggle 才生效）是否可接受？还是要做启动时主动广播？
+- ConfigProvider.kt 是删还是留作备份？

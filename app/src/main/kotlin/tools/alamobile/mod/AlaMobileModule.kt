@@ -11,6 +11,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
+import tools.alamobile.mod.config.ConfigReceiver
 import tools.alamobile.mod.config.ModConfig
 import tools.alamobile.mod.hook.BillingHook
 import tools.alamobile.mod.overlay.OverlayManager
@@ -105,6 +106,30 @@ class AlaMobileModule : XposedModule() {
         } catch (e: Throwable) {
             Log.e(TAG, "Failed to initialize ShadowHook: ${e.message}")
             return
+        }
+
+        // 注册 ConfigReceiver：接收 ConfigActivity 发来的定向广播（带最新配置 JSON），
+        // 写入游戏进程自己的 externalFilesDir。广播 setPackage 定向派发，不查
+        // PackageManager 可见性，绕过 Android 11+ 包可见性限制——这是文件
+        // IPC 和 ContentProvider 在 scoped storage + 包可见性双重限制下失效后，
+        // 唯一可靠的跨进程配置推送方式。必须在 onPackageReady 早期注册，
+        // 这样用户在游戏启动后改配置，receiver 能立即接收写入。
+        if (context != null) {
+            try {
+                val receiver = ConfigReceiver()
+                val filter = android.content.IntentFilter(ConfigReceiver.ACTION_CONFIG_UPDATE)
+                // RECEIVER_EXPORTED：广播来自模块进程（不同应用），跨应用派发，
+                // 必须用 EXPORTED 标志（Android 13+ 强制要求）。
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    context.registerReceiver(receiver, filter, android.content.Context.RECEIVER_EXPORTED)
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.registerReceiver(receiver, filter)
+                }
+                Log.i(TAG, "ConfigReceiver registered")
+            } catch (e: Throwable) {
+                Log.e(TAG, "Failed to register ConfigReceiver: ${e.message}")
+            }
         }
 
         val settings = if (context != null) {
