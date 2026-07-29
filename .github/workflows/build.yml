@@ -47,6 +47,26 @@ jobs:
         run: |
           (echo y | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager "ndk;26.1.10909125") 2>&1 || echo "ndk install failed"
 
+      # 仅在配了 KEYSTORE_BASE64 secret 时才解码；没配则跳过，
+      # Gradle fallback 到 debug 签名，CI 仍能产出可安装 APK。
+      # 注意：KEYSTORE_PATH 必须只在解码成功时才设，否则 Gradle 的
+      # `System.getenv("KEYSTORE_PATH") != null` 会判到 true 却找不到文件。
+      # 用 env 中转 secret 再在 if 里引用：GitHub Actions 的 if 表达式不能
+      # 直接读 secrets 上下文（旧经验，HANDOFF 第 5 节记过此坑）。
+      - name: Decode release keystore
+        if: ${{ env.KS_B64 != '' }}
+        env:
+          KS_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          KS_PW: ${{ secrets.KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+        run: |
+          keystore_path="$RUNNER_TEMP/release.keystore"
+          printf '%s' "$KS_B64" | base64 -d > "$keystore_path"
+          echo "KEYSTORE_PATH=$keystore_path" >> "$GITHUB_ENV"
+          echo "KEYSTORE_PASSWORD=$KS_PW" >> "$GITHUB_ENV"
+          echo "KEYSTORE_ALIAS=$KS_ALIAS" >> "$GITHUB_ENV"
+          echo "Decoded keystore to $keystore_path"
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
