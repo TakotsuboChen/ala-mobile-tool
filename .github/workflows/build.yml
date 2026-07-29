@@ -22,10 +22,51 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
-        with:
-          packages: 'platforms;android-37 build-tools;37.0.0 ndk;26.1.10909125'
+      - name: Probe preinstalled Android platforms
+        run: |
+          echo "=== Platforms dir ==="
+          ls -la /usr/local/lib/android/sdk/platforms/ 2>/dev/null || echo "no platforms dir"
+          echo "=== Each platform source.properties ==="
+          for d in /usr/local/lib/android/sdk/platforms/android-*; do
+            [ -d "$d" ] || continue
+            echo "--- $d ---"
+            cat "$d/source.properties" 2>/dev/null || echo "no source.properties"
+          done
+
+      - name: Try install platforms;android-37 (preview channel)
+        run: |
+          # 先试 stable channel
+          echo "=== stable channel ==="
+          /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --list_platforms 2>&1 | head -40 || true
+          echo "=== try install platforms;android-37 ==="
+          (echo y | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-37") 2>&1 || echo "stable failed"
+          echo "=== try preview channel --channel=3 ==="
+          (echo y | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --channel=3 "platforms;android-37") 2>&1 || echo "preview failed"
+
+      - name: Fallback: symlink android-37.0 → android-37 if 37 missing
+        run: |
+          if [ ! -d /usr/local/lib/android/sdk/platforms/android-37 ]; then
+            echo "android-37 not present, trying fallback"
+            # 找一个 ApiLevel=37 的预装 platform（runner 可能带 android-37.0 等）
+            for d in /usr/local/lib/android/sdk/platforms/android-37*; do
+              [ -d "$d" ] || continue
+              api=$(grep -E 'AndroidVersion.ApiLevel' "$d/source.properties" 2>/dev/null | cut -d= -f2 | tr -d ' \r')
+              echo "found $d ApiLevel=$api"
+              if [ "$api" = "37" ]; then
+                echo "Found real API 37 at $d, symlinking to android-37"
+                ln -sf "$d" /usr/local/lib/android/sdk/platforms/android-37
+                break
+              fi
+            done
+          fi
+          echo "=== final platforms dir ==="
+          ls -la /usr/local/lib/android/sdk/platforms/
+          echo "=== android-37 source.properties ==="
+          cat /usr/local/lib/android/sdk/platforms/android-37/source.properties 2>/dev/null || echo "still missing"
+
+      - name: Install NDK 26.1.10909125
+        run: |
+          (echo y | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager "ndk;26.1.10909125") 2>&1 || echo "ndk install failed"
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
