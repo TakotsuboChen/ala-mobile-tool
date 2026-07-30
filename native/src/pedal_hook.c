@@ -62,6 +62,11 @@ static inline uintptr_t read_ptr(void *instance, uintptr_t offset) {
     return *(volatile uintptr_t *) ((uintptr_t) instance + offset);
 }
 
+// 把当前模块 desired 输入值写到 controller 实例字段。
+// 只在对应 active 时写字段——不踩时绝不写，避免覆盖游戏自带输入
+// （方向键 ButtonsSteering 模式的转向辅助依赖油门/刹车值）。
+// 松开瞬间的清零由 pedal_set_throttle_value/pedal_set_brake_value
+// 主动调 clear_*_field 完成，不在此处轮询清零。
 static void apply_inputs_to_controller(void *controller) {
     if (controller == NULL) return;
 
@@ -70,8 +75,6 @@ static void apply_inputs_to_controller(void *controller) {
         if (g_config.actual_throttle_field_offset != 0) {
             write_float_field(controller, g_config.actual_throttle_field_offset, g_throttle_value);
         }
-    } else if (g_throttle_value <= 0.0f) {
-        write_float_field(controller, g_config.throttle_field_offset, 0.0f);
     }
 
     if (g_brake_active) {
@@ -79,8 +82,24 @@ static void apply_inputs_to_controller(void *controller) {
         if (g_config.actual_brake_field_offset != 0) {
             write_float_field(controller, g_config.actual_brake_field_offset, g_brake_value);
         }
-    } else if (g_brake_value <= 0.0f) {
-        write_float_field(controller, g_config.brake_field_offset, 0.0f);
+    }
+}
+
+// 用户松开踏板时主动清零一次对应字段，避免值卡在最后值。
+// 只清对应的那个字段（油门或刹车），不互相干扰。
+static void clear_throttle_field(void *controller) {
+    if (controller == NULL) return;
+    write_float_field(controller, g_config.throttle_field_offset, 0.0f);
+    if (g_config.actual_throttle_field_offset != 0) {
+        write_float_field(controller, g_config.actual_throttle_field_offset, 0.0f);
+    }
+}
+
+static void clear_brake_field(void *controller) {
+    if (controller == NULL) return;
+    write_float_field(controller, g_config.brake_field_offset, 0.0f);
+    if (g_config.actual_brake_field_offset != 0) {
+        write_float_field(controller, g_config.actual_brake_field_offset, 0.0f);
     }
 }
 
@@ -100,14 +119,27 @@ static void apply_inputs_to_controller(void *controller) {
 // stale values — the "pedal stutter" bug. With the dual-ClassLoader guard
 // in AlaMobileModule, JNI is reliably available in both original and
 // coexistence builds, so the file IPC fallback is no longer needed.
+//
+// 关键:用户没踩踏板时（两个 active 都为 0）整体早返回，不写任何字段。
+// 原实现每 2ms 持续往 throttle/brake 字段写 0.0f，会覆盖游戏自带输入——
+// ButtonsSteering（屏幕方向键）模式下的转向辅助（steerHelp、
+// LockSteerAtVelocity、TractionFilter）依赖油门/刹车值决定辅助力度，
+// 被持续清零后转向辅助失效，方向键表现为"不转向"。陀螺仪模式不依赖
+// 油门/刹车做转向，所以不受影响。松开瞬间的清零由
+// pedal_set_throttle_value/pedal_set_brake_value 在 active→inactive
+// 转变时主动调 clear_throttle_field/clear_brake_field 完成，不依赖
+// writer 轮询。
 static void *input_writer_thread(void *arg) {
     (void) arg;
 
     while (g_writer_running) {
-        // Apply inputs to controller
-        void *controller = (void *) g_last_controller;
-        if (controller != NULL) {
-            apply_inputs_to_controller(controller);
+        // 用户完全没操作时不写字段——让游戏自带油门/刹车/方向键输入
+        // 不被覆盖。只有任一 active 为真（用户按住模块踏板）才写。
+        if (g_throttle_active || g_brake_active) {
+            void *controller = (void *) g_last_controller;
+            if (controller != NULL) {
+                apply_inputs_to_controller(controller);
+            }
         }
         usleep(1000 * 2); // 2 ms -> ~500 Hz
     }
@@ -430,6 +462,8 @@ void pedal_set_disable_auto_gear(int disable) {
 }
 
 void pedal_set_throttle_value(float value) {
+    int was_active = g_throttle_active;
+
     if (value <= 0.0f) {
         g_throttle_active = 0;
         g_throttle_value = 0.0f;
@@ -439,12 +473,22 @@ void pedal_set_throttle_value(float value) {
     }
 
     void *controller = (void *) g_last_controller;
-    if (controller != NULL) {
+    if (controller == NULL) return;
+
+    if (g_throttle_active) {
+        // 用户按住/调整：写当前值。
         apply_inputs_to_controller(controller);
+    } else if (was_active) {
+        // active→inactive（松开）：主动清零一次，避免值卡住。
+        // writer 线程和 FixedUpdate hook 在 !active 时不再写字段，
+        // 所以这里必须主动清一次。
+        clear_throttle_field(controller);
     }
 }
 
 void pedal_set_brake_value(float value) {
+    int was_active = g_brake_active;
+
     if (value <= 0.0f) {
         g_brake_active = 0;
         g_brake_value = 0.0f;
@@ -454,7 +498,11 @@ void pedal_set_brake_value(float value) {
     }
 
     void *controller = (void *) g_last_controller;
-    if (controller != NULL) {
+    if (controller == NULL) return;
+
+    if (g_brake_active) {
         apply_inputs_to_controller(controller);
+    } else if (was_active) {
+        clear_brake_field(controller);
     }
 }

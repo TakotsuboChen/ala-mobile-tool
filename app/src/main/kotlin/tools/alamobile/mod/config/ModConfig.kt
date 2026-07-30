@@ -55,6 +55,17 @@ object ModConfig {
     // 避免用户在 SINGLE 模式拖拽的 position 污染 DUAL 油门 view 的位置。
     const val KEY_SINGLE_PEDAL_POSITION = "single_pedal_position"
 
+    // position 字段由游戏进程持有（拖拽时 saveOverlayPosition 写），
+    // ConfigActivity 广播的 JSON 不含这些字段。合并写时（ConfigReceiver
+    // 收到广播、readFromTargetProcess 从 provider 拉取）跳过这些 key，
+    // 保留游戏进程已有的 position 值。
+    val POSITION_KEYS = setOf(
+        KEY_PEDAL_POSITION,
+        KEY_GEAR_POSITION,
+        KEY_BRAKE_POSITION,
+        KEY_SINGLE_PEDAL_POSITION
+    )
+
     // Debug/logging
     const val KEY_LOG_ENABLED = "log_enabled"
 
@@ -263,6 +274,10 @@ object ModConfig {
 
         // 2. 发定向广播给所有目标游戏包，让游戏进程 ConfigReceiver 写自己目录。
         //    setPackage 定向派发，不查 PackageManager 可见性，绕过包可见性限制。
+        //    已知限制：游戏没运行时广播丢失，下次启动读到旧值（M11 遗留），
+        //    所有跨进程拉取路径（公共目录/ContentProvider/createPackageContext）
+        //    在 Android 11+ scoped storage + 包可见性下全部失效，待 LSPosed
+        //    特性研究后用正确方案修复。
         for (pkg in GAME_PACKAGES) {
             try {
                 val intent = Intent(ConfigReceiver.ACTION_CONFIG_UPDATE)
@@ -307,12 +322,35 @@ object ModConfig {
     fun readFromTargetProcess(context: Context): Settings {
         // 游戏进程读自己 externalFilesDir 的配置——这是 ConfigReceiver 收到
         // 广播后写入的位置。游戏进程对它天然可读，无需权限，无 scoped storage 限制。
-        val file = File(context.getExternalFilesDir(null) ?: return defaultSettings(), FILE_NAME)
+        val dir = context.getExternalFilesDir(null) ?: run {
+            android.util.Log.w("AlaMobileTool", "readFromTargetProcess: externalFilesDir null, using defaults")
+            return defaultSettings()
+        }
+        val file = File(dir, FILE_NAME)
+        // 诊断日志：打印路径、是否存在、lastModified、内容预览，用于排查
+        // "游戏启动读到陈旧配置"的 M11 首次滞后 bug。
+        android.util.Log.i(
+            "AlaMobileTool",
+            "readFromTargetProcess: path=${file.absolutePath} exists=${file.exists()} " +
+                "lastModified=${if (file.exists()) java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date(file.lastModified())) else "n/a"} " +
+                "now=${java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())}"
+        )
+
+        // 已知限制（M11 遗留）：广播在游戏没运行时丢失，游戏 externalFilesDir
+        // 的配置会陈旧。所有跨进程拉取路径（ContentProvider/createPackageContext
+        // /公共目录）在 Android 11+ 都已实测失效，待 LSPosed 特性研究后用
+        // 正确方案修复。当前先读游戏目录，保证游戏运行时广播路径正常工作。
+        // 诊断日志保留，用于排查"读到陈旧配置"场景。
+
         return if (file.exists()) {
             try {
                 val json = file.readText()
                 val settings = fromJson(json)
-                android.util.Log.i("AlaMobileTool", "Config read from game dir: pedalMode=${settings.pedalMode}")
+                android.util.Log.i(
+                    "AlaMobileTool",
+                    "Config read from game dir: pedalMode=${settings.pedalMode} " +
+                        "jsonPreview=${json.take(120).replace('\n', ' ')}"
+                )
                 settings
             } catch (e: Throwable) {
                 android.util.Log.w("AlaMobileTool", "Config read failed, using defaults", e)

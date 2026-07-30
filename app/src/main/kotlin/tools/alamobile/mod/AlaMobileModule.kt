@@ -137,7 +137,9 @@ class AlaMobileModule : XposedModule() {
 
         val settings = if (context != null) {
             try {
-                ModConfig.readFromTargetProcess(context)
+                val s = ModConfig.readFromTargetProcess(context)
+                Log.i(TAG, "onPackageReady read config: pedalMode=${s.pedalMode} showOverlay=${s.showOverlay}")
+                s
             } catch (e: Throwable) {
                 Log.e(TAG, "Failed to read config, using defaults", e)
                 null

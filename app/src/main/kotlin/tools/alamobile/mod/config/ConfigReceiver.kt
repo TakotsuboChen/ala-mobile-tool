@@ -36,12 +36,8 @@ class ConfigReceiver : BroadcastReceiver() {
 
         // position 字段由游戏进程持有（拖拽时 saveOverlayPosition 写），
         // ConfigActivity 广播的 JSON 不含这三字段。合并时跳过，保留游戏进程已有值。
-        private val POSITION_KEYS = setOf(
-            "pedal_position",
-            "gear_position",
-            "brake_position",
-            "single_pedal_position"
-        )
+        // 定义在 ModConfig.POSITION_KEYS，这里复用避免重复维护。
+        private val POSITION_KEYS = ModConfig.POSITION_KEYS
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -79,7 +75,13 @@ class ConfigReceiver : BroadcastReceiver() {
                 }
             }
             file.writeText(existing.toString(2))
-            Log.i(TAG, "ConfigReceiver: merged ${json.length} bytes to ${file.absolutePath}")
+            Log.i(
+                TAG,
+                "ConfigReceiver: merged ${json.length} bytes to ${file.absolutePath} " +
+                    "pedalMode_in=${incoming.optString("pedal_mode", "?")} " +
+                    "pedalMode_written=${existing.optString("pedal_mode", "?")} " +
+                    "ts=${java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())}"
+            )
 
             // 通知 OverlayManager 重建——PedalOverlayView 构造拷 settings 快照，
             // 光写文件不够，必须重建 view 才能让新配置流进去。post 到主线程
