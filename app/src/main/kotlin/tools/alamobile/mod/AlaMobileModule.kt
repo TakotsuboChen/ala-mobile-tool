@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Environment
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.bytedance.shadowhook.ShadowHook
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
@@ -119,13 +120,15 @@ class AlaMobileModule : XposedModule() {
                 val receiver = ConfigReceiver()
                 val filter = android.content.IntentFilter(ConfigReceiver.ACTION_CONFIG_UPDATE)
                 // RECEIVER_EXPORTED：广播来自模块进程（不同应用），跨应用派发，
-                // 必须用 EXPORTED 标志（Android 13+ 强制要求）。
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                    context.registerReceiver(receiver, filter, android.content.Context.RECEIVER_EXPORTED)
-                } else {
-                    @Suppress("DEPRECATION")
-                    context.registerReceiver(receiver, filter)
-                }
+                // 必须用 EXPORTED 标志（Android 13+ 强制要求）。用 ContextCompat
+                // 重载：内部按 SDK_INT 自动分发旧/新 API，且对 lint 的
+                // UnspecifiedRegisterReceiverFlag 检查友好（显式传 flag）。
+                ContextCompat.registerReceiver(
+                    context,
+                    receiver,
+                    filter,
+                    ContextCompat.RECEIVER_EXPORTED
+                )
                 Log.i(TAG, "ConfigReceiver registered")
             } catch (e: Throwable) {
                 Log.e(TAG, "Failed to register ConfigReceiver: ${e.message}")
