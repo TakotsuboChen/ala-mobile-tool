@@ -107,10 +107,11 @@ fun SettingsPage(
                     Card(modifier = Modifier.fillMaxWidth()) {
                         ArrowRow(
                             title = "清除激活标记",
-                            summary = "删除 LSPosed 激活状态缓存文件",
+                            summary = "删除 LSPosed / Non-root 激活状态缓存",
                             icon = Icons.Rounded.Delete,
                             onClick = {
-                                Toast.makeText(context, "功能即将上线", Toast.LENGTH_SHORT).show()
+                                tools.alamobile.mod.LsposedStatus.clearAll(context)
+                                Toast.makeText(context, "已清除激活标记", Toast.LENGTH_SHORT).show()
                             }
                         )
                         ArrowRow(

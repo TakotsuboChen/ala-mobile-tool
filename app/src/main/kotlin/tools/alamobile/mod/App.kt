@@ -27,6 +27,12 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
         const val PREF_GROUP = "ala_mobile_tool"
         const val KEY_CONFIG_JSON = "config_json"
 
+        // 激活状态相关 key（存同一份 Remote Preferences）。
+        // module_loaded：模块 onModuleLoaded 执行时写 "1"，作为"曾被框架加载"的持久信号。
+        // nonroot_confirmed：用户在弹窗里确认用了 LSPatch/NPatch/FPA 等 Non-root 框架后写 "1"。
+        const val KEY_MODULE_LOADED = "module_loaded_v1"
+        const val KEY_NONROOT_CONFIRMED = "nonroot_confirmed_v1"
+
         @Volatile
         var xposedService: XposedService? = null
             private set

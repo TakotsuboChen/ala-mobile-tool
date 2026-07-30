@@ -4,7 +4,6 @@ import android.app.Application
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import android.os.Environment
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.bytedance.shadowhook.ShadowHook
@@ -23,6 +22,23 @@ class AlaMobileModule : XposedModule() {
 
     companion object {
         const val TAG = "AlaMobileTool"
+
+        /**
+         * 进程级"模块已被框架加载"标记的 property key。
+         *
+         * ConfigActivity 与 AlaMobileModule 跑在同一模块进程，java.lang.System
+         * 由 bootstrap ClassLoader 加载、进程内全局共享。onModuleLoaded 由
+         * libxposed 框架在模块进程启动时调用——只有模块真的被 LSPosed /
+         * Non-root 框架（LSPatch 等）启用才会调到。ConfigActivity 读这个
+         * property 即可严格判断"当前进程本次启动是否真被框架加载"，不受
+         * 旧 flag 文件长期残留污染（LSPosed 关掉模块后重启进程，property
+         * 自然不存在）。
+         *
+         * 注意：onModuleLoaded 的调用时机由框架决定，可能在 Application.onCreate
+         * 之后。ConfigActivity 读检测时若太早可能还没设上——[tools.alamobile.mod.ActivationStatus]
+         * 用带轮询的 evaluate 兜住这个时序窗口。
+         */
+        const val MODULE_LOADED_FLAG = "tools.alamobile.mod.module_loaded"
 
         /**
          * 进程级"native hooks 已装"标记的 property key。
@@ -57,13 +73,23 @@ class AlaMobileModule : XposedModule() {
         markActivated()
     }
 
+    /**
+     * 写"模块已被框架加载"的信号：进程级 property（ConfigActivity 同进程直读）
+     * + Remote Preferences 持久化（跨进程/重启后仍可查）。
+     *
+     * Remote Preferences 路径里写 "1"，ConfigActivity 经 App.xposedService 读
+     * daemon SQLite——daemon 常驻，不依赖 ConfigActivity 进程是否在运行。
+     */
     private fun markActivated() {
+        System.setProperty(MODULE_LOADED_FLAG, "true")
         try {
-            val flag = File(Environment.getExternalStorageDirectory(), "AlaMobileTool/activated.flag")
-            flag.parentFile?.mkdirs()
-            flag.writeText("1")
+            getRemotePreferences(tools.alamobile.mod.App.PREF_GROUP)
+                .edit()
+                .putString(tools.alamobile.mod.App.KEY_MODULE_LOADED, "1")
+                .apply()
+            Log.i(TAG, "markActivated: remote prefs updated")
         } catch (e: Throwable) {
-            Log.w(TAG, "Failed to write activation flag", e)
+            Log.w(TAG, "markActivated: remote prefs write failed", e)
         }
     }
 

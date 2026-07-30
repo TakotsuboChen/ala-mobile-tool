@@ -36,3 +36,6 @@ il2cpp-dumps/
 # OS
 .DS_Store
 Thumbs.db
+
+# Reference repos (cloned upstream sources for reading, not committed)
+references/
