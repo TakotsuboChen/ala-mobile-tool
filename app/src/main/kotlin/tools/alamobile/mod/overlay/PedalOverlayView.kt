@@ -21,7 +21,9 @@ import kotlin.math.pow
  * - THROTTLE: dedicated full-travel throttle view. Finger at top = full
  *   throttle, at bottom = zero. No transition, no deadzone.
  * - BRAKE: dedicated full-travel brake view. Finger at bottom = full
- *   brake, at top = zero. No transition, no deadzone.
+ *   brake, at top = zero. No transition, no deadzone. Direction
+ *   reversible via [ModConfig.Settings.brakeInvert] (default fills
+ *   bottom-up like throttle; inverted fills top-down).
  *
  * The response curve (linear / exponential ease-out ≈ 30%→60%) is applied
  * on top of the raw travel; SINGLE applies throttleCurve on the throttle
@@ -40,6 +42,7 @@ class PedalOverlayView(
         pedalDeadzone = 0.05f,
         pedalTransition = 0.5f,
         brakeTransition = 0.1f,
+        brakeInvert = false,
         throttleCurve = ModConfig.PedalCurve.LINEAR,
         brakeCurve = ModConfig.PedalCurve.LINEAR
     ),
@@ -105,11 +108,20 @@ class PedalOverlayView(
                 canvas.drawRect(0f, height - h, width.toFloat(), height.toFloat(), throttlePaint)
             }
             PedalRole.BRAKE -> {
-                // 红色从手指位置往下填到 view 底部：手指顶部=红色填满整条，
-                // 手指往下滑红色顶部边缘跟着下移、红色区域缩短。
-                // 与 THROTTLE（从底向上填到手指）镜像对称。
-                val top = height * (1f - rawBrake)
-                canvas.drawRect(0f, top, width.toFloat(), height.toFloat(), brakePaint)
+                // 默认（brakeInvert=false）：raw=1-t（手指顶部=满刹车）。
+                // 红色锚在底部，随 raw 增大从底部向上生长——手指往顶部拉
+                // 红色从底往上涨到手指位置，"从下往上拉"。
+                // 反转（brakeInvert=true）：raw=t（手指底部=满刹车）。
+                // 红色锚在顶部，随 raw 增大从顶部向下生长——手指往底部拉
+                // 红色从顶往下涨到手指位置，"从上往下拉"。
+                // 两种方向 raw 都送 native mapped，游戏内输入同步反转。
+                if (settings.brakeInvert) {
+                    val bottom = height * rawBrake
+                    canvas.drawRect(0f, 0f, width.toFloat(), bottom, brakePaint)
+                } else {
+                    val top = height * (1f - rawBrake)
+                    canvas.drawRect(0f, top, width.toFloat(), height.toFloat(), brakePaint)
+                }
             }
         }
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), borderPaint)
@@ -205,11 +217,14 @@ class PedalOverlayView(
     }
 
     private fun updateDedicatedBrake(t: Float) {
-        // BRAKE view：顶部=满刹车，底部=零（与 THROTTLE 对称：顶部=满，底部=零）。
-        // raw=1-t 跟手：手指顶部 raw=1 红色画满，往下滑 raw 减小红色从顶往下退，
-        // 视觉"红色从下往上涨到手指位置"，和油门填充方向一致。
-        // mapped=applyCurve(1-t) 送 native，再经双踏板仲裁。
-        val raw = 1f - t
+        // BRAKE view：默认顶部=满刹车、底部=零（与 THROTTLE 对称）。
+        //   raw=1-t 跟手：手指顶部 raw=1 红色画满，往下滑 raw 减小，
+        //   视觉"红色从底往上涨到手指位置"，和油门填充方向一致。
+        // 反转（brakeInvert=true）：底部=满刹车、顶部=零。
+        //   raw=t 跟手：手指底部 raw=1 红色画满，往上拉 raw 减小，
+        //   视觉"红色从顶往下涨到手指位置"，即用户要的"从上往下拉"。
+        // raw 送绘制与仲裁判定，mapped 送 native，三者方向同步。
+        val raw = if (settings.brakeInvert) t else 1f - t
         rawThrottle = 0f
         rawBrake = raw
         val curveMapped = applyCurve(raw, settings.brakeCurve)

@@ -193,18 +193,35 @@ fun ConfigurePage(
                             enter = expandVertically() + fadeIn(),
                             exit = shrinkVertically() + fadeOut()
                         ) {
-                            SliderRow(
-                                title = "刹车过渡点",
-                                summary = "刹车值超过此点则刹车优先，否则油门优先",
-                                value = uiState.brakeTransition.value,
-                                onValueChange = {
-                                    uiState.brakeTransition.value = it
-                                    onSave()
-                                },
-                                valueRange = 0f..0.2f,
-                                displayFormat = { String.format("%.0f%%", it * 100) },
-                                icon = Icons.Rounded.SwapVert
-                            )
+                            Column {
+                                SliderRow(
+                                    title = "刹车过渡点",
+                                    summary = "刹车值超过此点则刹车优先，否则油门优先",
+                                    value = uiState.brakeTransition.value,
+                                    onValueChange = {
+                                        uiState.brakeTransition.value = it
+                                        onSave()
+                                    },
+                                    valueRange = 0f..0.2f,
+                                    displayFormat = { String.format("%.0f%%", it * 100) },
+                                    icon = Icons.Rounded.SwapVert
+                                )
+                                // 刹车踏板方向反转：DUAL 模式下刹车 view 的红色填充
+                                // 默认（关闭）从下往上生长（原行为，手指顶部=满刹车），
+                                // 开启后改成从上往下生长（手指底部=满刹车），适配
+                                // 用户"从上往下拉"的触感偏好。raw 与 mapped 都反转，
+                                // 视觉与游戏内输入同步生效。
+                                SwitchRow(
+                                    title = "刹车踏板方向反转",
+                                    summary = "开启后红色改为从上往下生长（默认从下往上）",
+                                    icon = Icons.Rounded.SwapVert,
+                                    checked = uiState.brakeInvert.value,
+                                    onCheckedChange = {
+                                        uiState.brakeInvert.value = it
+                                        onSave()
+                                    }
+                                )
+                            }
                         }
                         SwitchRow(
                             title = "手动换挡（开发中）",

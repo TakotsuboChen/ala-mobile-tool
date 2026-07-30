@@ -68,6 +68,7 @@ fun ConfigMainScreen(
             deadzone = mutableStateOf(settings.pedalDeadzone),
             transition = mutableStateOf(settings.pedalTransition),
             brakeTransition = mutableStateOf(settings.brakeTransition),
+            brakeInvert = mutableStateOf(settings.brakeInvert),
             throttleCurve = mutableStateOf(settings.throttleCurve),
             brakeCurve = mutableStateOf(settings.brakeCurve),
             logEnabled = mutableStateOf(settings.logEnabled)
@@ -92,6 +93,7 @@ fun ConfigMainScreen(
                     pedalDeadzone = uiState.deadzone.value,
                     pedalTransition = uiState.transition.value,
                     brakeTransition = uiState.brakeTransition.value,
+                    brakeInvert = uiState.brakeInvert.value,
                     throttleCurve = uiState.throttleCurve.value,
                     brakeCurve = uiState.brakeCurve.value,
                     logEnabled = uiState.logEnabled.value
@@ -220,6 +222,7 @@ class ConfigUiState(
     val deadzone: MutableState<Float>,
     val transition: MutableState<Float>,
     val brakeTransition: MutableState<Float>,
+    val brakeInvert: MutableState<Boolean>,
     val throttleCurve: MutableState<ModConfig.PedalCurve>,
     val brakeCurve: MutableState<ModConfig.PedalCurve>,
     val logEnabled: MutableState<Boolean>
