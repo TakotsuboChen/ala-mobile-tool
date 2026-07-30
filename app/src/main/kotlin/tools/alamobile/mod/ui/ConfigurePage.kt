@@ -213,7 +213,7 @@ fun ConfigurePage(
                                 // 视觉与游戏内输入同步生效。
                                 SwitchRow(
                                     title = "刹车踏板方向反转",
-                                    summary = "开启后红色改为从上往下生长（默认从下往上）",
+                                    summary = "开启后刹车行程变为由上往下",
                                     icon = Icons.Rounded.SwapVert,
                                     checked = uiState.brakeInvert.value,
                                     onCheckedChange = {

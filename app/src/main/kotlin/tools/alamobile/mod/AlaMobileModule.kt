@@ -109,12 +109,34 @@ class AlaMobileModule : XposedModule() {
             return
         }
 
+        // 注入 Remote Preferences reader：readFromTargetProcess 经此回调读 LSPosed
+        // daemon SQLite 里的权威配置 JSON。getRemotePreferences 是 XposedModule 基类方法
+        // （libxposed API 102），经 Binder 路由到 daemon（常驻），不依赖游戏进程是否
+        // 在运行——根治"游戏没运行→广播丢失→下次启动读旧值"的 M11 首次滞后。
+        // 必须在 onPackageReady 早期注入，这样后面的 readFromTargetProcess 调用就能用上。
+        // key 不存在或异常返回 null，readFromTargetProcess 会回退本地 externalFilesDir。
+        ModConfig.remoteConfigReader = {
+            try {
+                val prefs = getRemotePreferences(tools.alamobile.mod.App.PREF_GROUP)
+                val json = prefs.getString(tools.alamobile.mod.App.KEY_CONFIG_JSON, null)
+                if (json != null) {
+                    Log.i(TAG, "getRemotePreferences ok, len=${json.length}")
+                } else {
+                    Log.w(TAG, "getRemotePreferences: key not found in daemon db")
+                }
+                json
+            } catch (e: Throwable) {
+                Log.w(TAG, "getRemotePreferences failed: ${e.message}")
+                null
+            }
+        }
+
         // 注册 ConfigReceiver：接收 ConfigActivity 发来的定向广播（带最新配置 JSON），
-        // 写入游戏进程自己的 externalFilesDir。广播 setPackage 定向派发，不查
-        // PackageManager 可见性，绕过 Android 11+ 包可见性限制——这是文件
-        // IPC 和 ContentProvider 在 scoped storage + 包可见性双重限制下失效后，
-        // 唯一可靠的跨进程配置推送方式。必须在 onPackageReady 早期注册，
-        // 这样用户在游戏启动后改配置，receiver 能立即接收写入。
+        // 写入游戏进程自己的 externalFilesDir。Remote Preferences 路线下广播的价值是
+        // "游戏运行时即时更新"——service 异步绑定可能延迟，广播立即推送让 overlay 马上
+        // 重建。setPackage 定向派发，不查 PackageManager 可见性，绕过 Android 11+ 包可见性
+        // 限制。游戏没运行时广播丢失不再造成问题：下次启动 readFromTargetProcess 走
+        // Remote Preferences 读 daemon 的最新权威值。
         if (context != null) {
             try {
                 val receiver = ConfigReceiver()
