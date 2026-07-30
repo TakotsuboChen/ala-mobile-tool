@@ -74,23 +74,18 @@ class AlaMobileModule : XposedModule() {
     }
 
     /**
-     * 写"模块已被框架加载"的信号：进程级 property（ConfigActivity 同进程直读）
-     * + Remote Preferences 持久化（跨进程/重启后仍可查）。
+     * 写"模块已被框架加载"的进程级 property。
      *
-     * Remote Preferences 路径里写 "1"，ConfigActivity 经 App.xposedService 读
-     * daemon SQLite——daemon 常驻，不依赖 ConfigActivity 进程是否在运行。
+     * 历史用途：旧版 ConfigActivity 读此 property 判激活态。现已废弃——ConfigActivity
+     * 进程不被 LSPosed 注入，onModuleLoaded 不会在模块进程调，property 永不设上。
+     * 新版激活判定改用 `App.xposedService` 绑定状态（见 [tools.alamobile.mod.LsposedStatus]）。
+     *
+     * 保留 setProperty 仅作向后兼容：[tools.alamobile.mod.LsposedStatus.clearAll]
+     * 仍清它，避免旧版用户升级后残留 property 造成迷惑。daemon `module_loaded`
+     * 持久标记的写入已移除——被 service 绑定状态取代，不再需要。
      */
     private fun markActivated() {
         System.setProperty(MODULE_LOADED_FLAG, "true")
-        try {
-            getRemotePreferences(tools.alamobile.mod.App.PREF_GROUP)
-                .edit()
-                .putString(tools.alamobile.mod.App.KEY_MODULE_LOADED, "1")
-                .apply()
-            Log.i(TAG, "markActivated: remote prefs updated")
-        } catch (e: Throwable) {
-            Log.w(TAG, "markActivated: remote prefs write failed", e)
-        }
     }
 
     override fun onPackageLoaded(param: PackageLoadedParam) {

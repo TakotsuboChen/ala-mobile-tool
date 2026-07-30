@@ -32,6 +32,12 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Phone
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.PathNode
+import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.graphics.vector.path
+
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -108,13 +114,13 @@ fun OverviewPage(bottomBarHeight: Dp = 0.dp) {
 @Composable
 private fun ActivationCard() {
     val context = LocalContext.current
-    var status by remember { mutableStateOf(LsposedStatus.evaluate(context, awaitModuleLoad = true)) }
+    var status by remember { mutableStateOf(LsposedStatus.evaluate(context, awaitService = true)) }
     var showNonRootDialog by remember { mutableStateOf(false) }
     val isDark = isSystemInDarkTheme()
 
     // 进入页面时刷新一次（不轮询）：覆盖弹窗选完后的回写、或从设置页清除标记回来。
     LaunchedEffect(Unit) {
-        status = LsposedStatus.evaluate(context, awaitModuleLoad = false)
+        status = LsposedStatus.evaluate(context, awaitService = false)
     }
 
     // 配色照搬 KernelSU HomeMiuix 的 StatusCard：已激活用绿色调强调底
@@ -193,7 +199,7 @@ private fun ActivationCard() {
         NonRootConfirmDialog(
             onConfirm = {
                 LsposedStatus.confirmNonRoot(context)
-                status = LsposedStatus.evaluate(context, awaitModuleLoad = false)
+                status = LsposedStatus.evaluate(context, awaitService = false)
                 showNonRootDialog = false
             },
             onDismiss = {
@@ -301,7 +307,7 @@ private fun LinksCard() {
                 insideMargin = PaddingValues(vertical = 12.dp, horizontal = 16.dp),
                 startAction = {
                     Icon(
-                        imageVector = Icons.Rounded.Phone,
+                        imageVector = QqMark,
                         contentDescription = null,
                         modifier = Modifier.padding(end = 12.dp),
                         tint = MiuixTheme.colorScheme.onBackground
@@ -315,7 +321,7 @@ private fun LinksCard() {
                 insideMargin = PaddingValues(vertical = 12.dp, horizontal = 16.dp),
                 startAction = {
                     Icon(
-                        imageVector = Icons.Rounded.Info,
+                        imageVector = GithubMark,
                         contentDescription = null,
                         modifier = Modifier.padding(end = 12.dp),
                         tint = MiuixTheme.colorScheme.onBackground
@@ -326,3 +332,55 @@ private fun LinksCard() {
         }
     }
 }
+
+// 内嵌 SVG path → ImageVector 的 helper。compose-ui 的 PathParser 直接吃
+// SVG `d` 字符串（含 M/m/c/a/z 全命令），转成 PathNode 列表；再在 path() DSL
+// 的 PathBuilder lambda 里按 node 类型分发到对应方法——零手动转译，比手写
+// moveTo/curveTo 链稳，尤其 QQ 含 arc 相对命令。path 数据均来自 simple-icons
+// （CC0），24×24 viewBox，与 Material 图标坐标系一致。
+private fun svgIcon(name: String, svgPath: String): ImageVector =
+    ImageVector.Builder(
+        name = name,
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).apply {
+        path(fill = SolidColor(Color.Black)) {
+            PathParser().parsePathString(svgPath).toNodes().forEach { node ->
+                when (node) {
+                    is PathNode.MoveTo -> moveTo(node.x, node.y)
+                    is PathNode.LineTo -> lineTo(node.x, node.y)
+                    is PathNode.RelativeMoveTo -> moveToRelative(node.dx, node.dy)
+                    is PathNode.RelativeLineTo -> lineToRelative(node.dx, node.dy)
+                    is PathNode.HorizontalTo -> horizontalLineTo(node.x)
+                    is PathNode.VerticalTo -> verticalLineTo(node.y)
+                    is PathNode.RelativeHorizontalTo -> horizontalLineToRelative(node.dx)
+                    is PathNode.RelativeVerticalTo -> verticalLineToRelative(node.dy)
+                    is PathNode.CurveTo -> curveTo(node.x1, node.y1, node.x2, node.y2, node.x3, node.y3)
+                    is PathNode.RelativeCurveTo -> curveToRelative(node.dx1, node.dy1, node.dx2, node.dy2, node.dx3, node.dy3)
+                    is PathNode.QuadTo -> quadTo(node.x1, node.y1, node.x2, node.y2)
+                    is PathNode.RelativeQuadTo -> quadToRelative(node.dx1, node.dy1, node.dx2, node.dy2)
+                    is PathNode.ReflectiveCurveTo -> reflectiveCurveTo(node.x1, node.y1, node.x2, node.y2)
+                    is PathNode.RelativeReflectiveCurveTo -> reflectiveCurveToRelative(node.dx1, node.dy1, node.dx2, node.dy2)
+                    is PathNode.ReflectiveQuadTo -> reflectiveQuadTo(node.x, node.y)
+                    is PathNode.RelativeReflectiveQuadTo -> reflectiveQuadToRelative(node.dx, node.dy)
+                    is PathNode.ArcTo -> arcTo(node.horizontalEllipseRadius, node.verticalEllipseRadius, node.theta, node.isMoreThanHalf, node.isPositiveArc, node.arcStartX, node.arcStartY)
+                    is PathNode.RelativeArcTo -> arcToRelative(node.horizontalEllipseRadius, node.verticalEllipseRadius, node.theta, node.isMoreThanHalf, node.isPositiveArc, node.arcStartDx, node.arcStartDy)
+                    is PathNode.Close -> close()
+                }
+            }
+        }
+    }.build()
+
+// GitHub mark（Octocat）。simple-icons GitHub path（24×24）。
+val GithubMark: ImageVector = svgIcon(
+    "GithubMark",
+    "M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"
+)
+
+// QQ 企鹅 logo。simple-icons QQ path（24×24）。
+val QqMark: ImageVector = svgIcon(
+    "QqMark",
+    "M21.395 15.035a40 40 0 0 0-.803-2.264l-1.079-2.695c.001-.032.014-.562.014-.836C19.526 4.632 17.351 0 12 0S4.474 4.632 4.474 9.241c0 .274.013.804.014.836l-1.08 2.695a39 39 0 0 0-.802 2.264c-1.021 3.283-.69 4.643-.438 4.673.54.065 2.103-2.472 2.103-2.472 0 1.469.756 3.387 2.394 4.771-.612.188-1.363.479-1.845.835-.434.32-.379.646-.301.778.343.578 5.883.369 7.482.189 1.6.18 7.14.389 7.483-.189.078-.132.132-.458-.301-.778-.483-.356-1.233-.646-1.846-.836 1.637-1.384 2.393-3.302 2.393-4.771 0 0 1.563 2.537 2.103 2.472.251-.03.581-1.39-.438-4.673"
+)

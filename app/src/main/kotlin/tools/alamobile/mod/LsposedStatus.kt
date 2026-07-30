@@ -6,26 +6,23 @@ import android.util.Log
 /**
  * 模块激活状态判定。
  *
- * 用户规则：
- * - 真被 LSPosed（或 Non-root 框架）激活 → 显示"已激活" + "模块已通过 LSPosed 加载"。
- * - 未检测到激活 → 显示"未激活" + "点击确认是否使用了免 Root 框架"。
- * - 点击卡片弹窗问"是否安装了 LSPatch/NPatch/FPA 等免 Root 框架"。
- *   - 选"是" → 写 nonroot_confirmed 标记 → 显示"已激活" + "模块已通过 Non-root LSPosed 加载"。
- *   - 选"否" → 保持未激活。
- * - 迁移规则：LSPosed 真激活会覆盖并忘掉 Non-root 标记（清 nonroot_confirmed）；
- *   之后 LSPosed 没了 → 不保留 Non-root 已激活状态，必须重新点选。
+ * 判定基准（用户确认："Manager 当前启用"语义）：
+ * - **LSPosed 真激活** = LSPosed daemon 已绑定到本进程。daemon binder 只在
+ *   LSPosed Manager（root 框架）启用本模块时由框架经 `XposedProvider.call("SendBinder")`
+ *   触发；用户在 Manager 里关掉模块 → 不触发 → `App.xposedService == null`。
+ *   这个信号随 Manager 启用态实时变化，不需要进程重启，也不依赖 onModuleLoaded
+ *   时机（onModuleLoaded 只在目标 App 进程调，ConfigActivity 进程永不调——
+ *   旧的 System.getProperty 路径对 ConfigActivity 根本不可达，已废弃）。
+ * - **Non-root 框架**（LSPatch/NPatch/FPA）：不装 LSPosed Manager，不绑 daemon，
+ *   `App.xposedService == null` → 落到手动手动确认路径。用户在弹窗里选"是"后
+ *   写 `nonroot_confirmed` 标记（daemon 没绑时写本地 filesDir）。
  *
- * 真激活信号源：
- * 1. 进程级 [AlaMobileModule.MODULE_LOADED_FLAG]（System.setProperty）—— 严格反映
- *    "当前 ConfigActivity 进程本次启动是否被框架调用了 onModuleLoaded"。
- *    LSPosed 关掉模块后重启进程，property 自然不存在，立即变未激活。
- * 2. Remote Preferences 的 module_loaded 标记 —— onModuleLoaded 同时写 daemon
- *    持久化，作为"曾被加载过"的补充信号（用户关了 LSPosed Manager 但进程未重启时
- *    property 仍在，daemon 标记也仍在——两者都不会自动反映"Manager 关了"。
- *    真正区分"当前是否还在 LSPosed 下运行"靠 property，因为它随进程生命周期）。
+ * 迁移规则：LSPosed 真激活覆盖并忘掉 Non-root 标记（清 nonroot_confirmed）；
+ * 之后 LSPosed 关了 → 不保留 Non-root 已激活状态，必须重新点选。
  *
- * 时序：onModuleLoaded 不保证在 Application.onCreate 之前调用。ConfigActivity
- * 首次读检测时 property 可能还没设上。[evaluate] 提供带轮询的读取兜住这个窗口。
+ * 异步陷阱：[App.xposedService] 在 ConfigActivity.onCreate 时可能仍为 null
+ * （XposedServiceHelper 异步绑定）。[evaluate] 的 `awaitService` 参数提供轮询
+ * 兜住这个绑定窗口——首次进入页面时传 true，后续刷新传 false。
  */
 object LsposedStatus {
 
@@ -33,7 +30,7 @@ object LsposedStatus {
 
     /** 激活状态。UI 据此渲染卡片标题、描述、颜色与点击行为。 */
     enum class Status {
-        /** 真被 LSPosed 加载（onModuleLoaded 在当前进程执行过）。 */
+        /** 真被 LSPosed 加载（daemon 已绑定 = Manager 当前启用本模块）。 */
         LSPOSED,
         /** 用户确认用 Non-root 框架（LSPatch/NPatch/FPA）加载。 */
         NONROOT,
@@ -45,22 +42,21 @@ object LsposedStatus {
      * 判定当前激活状态。
      *
      * @param context ConfigActivity 的 context（模块进程）
-     * @param awaitModuleLoad 是否轮询等待进程级 module_loaded 标记（处理框架注入
-     *   时序晚于读检测的情况）。首次进入页面时传 true，后续手动刷新传 false。
+     * @param awaitService 是否轮询等待 daemon 绑定（处理 XposedServiceHelper 异步
+     *   绑定晚于读检测的情况）。首次进入页面时传 true，后续手动刷新传 false。
      */
-    fun evaluate(context: Context, awaitModuleLoad: Boolean = false): Status {
-        // 1) 进程级标记 —— 当前进程本次启动真的被框架加载过。
-        if (System.getProperty(AlaMobileModule.MODULE_LOADED_FLAG) == "true") {
-            // LSPosed 真激活 → 覆盖并忘掉 Non-root 标记（满足迁移规则）。
+    fun evaluate(context: Context, awaitService: Boolean = false): Status {
+        // 1) LSPosed daemon 绑定 = Manager 当前启用本模块。
+        //    App.xposedService 由 App.onServiceBind 赋值，只在框架触发 binder 时调到。
+        //    异步绑定可能晚于首次读检测——轮询等待最多 ~3s。
+        if (App.xposedService != null) {
             clearNonRootConfirmed(context)
             return Status.LSPOSED
         }
-
-        // 时序兜底：onModuleLoaded 可能晚于读检测。轮询等待最多 ~3s。
-        if (awaitModuleLoad) {
+        if (awaitService) {
             val deadline = System.currentTimeMillis() + 3000
             while (System.currentTimeMillis() < deadline) {
-                if (System.getProperty(AlaMobileModule.MODULE_LOADED_FLAG) == "true") {
+                if (App.xposedService != null) {
                     clearNonRootConfirmed(context)
                     return Status.LSPOSED
                 }
@@ -119,6 +115,8 @@ object LsposedStatus {
     /** "设置 → 清除激活标记"用：彻底清掉所有激活痕迹。 */
     fun clearAll(context: Context) {
         clearNonRootConfirmed(context)
+        // 旧版本（property/daemon module_loaded 路径）残留清理，向后兼容。
+        // 新方案下这两个标记已不再写，但用户可能从旧版升级，清掉避免迷惑。
         val service = App.xposedService
         if (service != null) {
             try {
