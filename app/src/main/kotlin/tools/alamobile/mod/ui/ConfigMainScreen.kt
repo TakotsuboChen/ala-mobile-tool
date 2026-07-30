@@ -67,6 +67,7 @@ fun ConfigMainScreen(
             enableUnlock = mutableStateOf(settings.enableUnlock),
             deadzone = mutableStateOf(settings.pedalDeadzone),
             transition = mutableStateOf(settings.pedalTransition),
+            brakeTransition = mutableStateOf(settings.brakeTransition),
             throttleCurve = mutableStateOf(settings.throttleCurve),
             brakeCurve = mutableStateOf(settings.brakeCurve),
             logEnabled = mutableStateOf(settings.logEnabled)
@@ -90,6 +91,7 @@ fun ConfigMainScreen(
                     enableUnlock = uiState.enableUnlock.value,
                     pedalDeadzone = uiState.deadzone.value,
                     pedalTransition = uiState.transition.value,
+                    brakeTransition = uiState.brakeTransition.value,
                     throttleCurve = uiState.throttleCurve.value,
                     brakeCurve = uiState.brakeCurve.value,
                     logEnabled = uiState.logEnabled.value
@@ -217,6 +219,7 @@ class ConfigUiState(
     val enableUnlock: MutableState<Boolean>,
     val deadzone: MutableState<Float>,
     val transition: MutableState<Float>,
+    val brakeTransition: MutableState<Float>,
     val throttleCurve: MutableState<ModConfig.PedalCurve>,
     val brakeCurve: MutableState<ModConfig.PedalCurve>,
     val logEnabled: MutableState<Boolean>

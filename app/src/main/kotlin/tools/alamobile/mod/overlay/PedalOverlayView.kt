@@ -39,6 +39,7 @@ class PedalOverlayView(
         enableUnlock = false,
         pedalDeadzone = 0.05f,
         pedalTransition = 0.5f,
+        brakeTransition = 0.1f,
         throttleCurve = ModConfig.PedalCurve.LINEAR,
         brakeCurve = ModConfig.PedalCurve.LINEAR
     ),
@@ -50,6 +51,22 @@ class PedalOverlayView(
 
     companion object {
         private const val TAG = "AlaMobileTool"
+
+        // 双踏板模式跨 view 仲裁：油门和刹车是两个独立 view，各自 onTouchEvent
+        // 独立调 NativeBridge.setThrottle/setBrake。两指同时按下时，native 层
+        // throttle/brake 字段虽不互覆盖，但游戏逻辑不允许两者同时非零（否则
+        // "只有先按着的生效"——油门和刹车互相抵消）。这里持共享 raw 值，每次
+        // 任意 view 更新都调 arbitrate() 按刹车过渡点规则仲裁：
+        //   brake ≥ brakeTransition → 刹车优先，屏蔽油门（mappedThrottle=0）
+        //   brake <  brakeTransition 且 throttle>0 → 油门优先，屏蔽刹车（mappedBrake=0）
+        // 屏蔽只作用于 mapped/native；raw 仍跟手绘制（视觉反馈手指位移）。
+        @Volatile private var sharedRawThrottle = 0f
+        @Volatile private var sharedRawBrake = 0f
+        @Volatile private var sharedBrakeTransition = 0.1f
+        // 仲裁后的 mapped 值，双踏板两 view 共享——谁 update 谁送 native，
+        // 但值由 arbitrate() 决定，避免"后按者覆盖"导致先按者失效。
+        @Volatile private var arbitratedThrottle = 0f
+        @Volatile private var arbitratedBrake = 0f
     }
 
     private val throttlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -120,6 +137,15 @@ class PedalOverlayView(
                 rawBrake = 0f
                 mappedThrottle = 0f
                 mappedBrake = 0f
+                // 双踏板：本 view 抬起要同步清共享 raw，否则另一指还在屏上时
+                // 仲裁仍用旧 raw 误判。mapped 由另一 view 下次 MOVE 重新仲裁。
+                if (role == PedalRole.THROTTLE) {
+                    sharedRawThrottle = 0f
+                    arbitratedThrottle = 0f
+                } else if (role == PedalRole.BRAKE) {
+                    sharedRawBrake = 0f
+                    arbitratedBrake = 0f
+                }
                 updateNativeValues()
                 invalidate()
                 return true
@@ -168,24 +194,60 @@ class PedalOverlayView(
     private fun updateDedicatedThrottle(t: Float) {
         // Top = full, bottom = zero; full travel, no deadzone/transition.
         // raw 跟手（1-t）：手指顶部=1 满油门，底部=0。
-        // mapped 送 native：曲线变换后的值。
+        // mapped 送 native：曲线变换后，再经双踏板仲裁（刹车优先/油门优先）。
         val raw = 1f - t
         rawThrottle = raw
         rawBrake = 0f
-        mappedThrottle = applyCurve(raw, settings.throttleCurve)
-        mappedBrake = 0f
+        val curveMapped = applyCurve(raw, settings.throttleCurve)
+        // DUAL 仲裁：本 view 是油门，共享 rawThrottle 已更新，调 arbitrate
+        // 决定 mappedThrottle（可能被刹车屏蔽）和 mappedBrake。
+        arbitrateDual(curveMapped, isThrottleView = true)
     }
 
     private fun updateDedicatedBrake(t: Float) {
         // BRAKE view：顶部=满刹车，底部=零（与 THROTTLE 对称：顶部=满，底部=零）。
         // raw=1-t 跟手：手指顶部 raw=1 红色画满，往下滑 raw 减小红色从顶往下退，
         // 视觉"红色从下往上涨到手指位置"，和油门填充方向一致。
-        // mapped=applyCurve(1-t) 送 native，非线性映射。
+        // mapped=applyCurve(1-t) 送 native，再经双踏板仲裁。
         val raw = 1f - t
         rawThrottle = 0f
         rawBrake = raw
-        mappedThrottle = 0f
-        mappedBrake = applyCurve(raw, settings.brakeCurve)
+        val curveMapped = applyCurve(raw, settings.brakeCurve)
+        arbitrateDual(curveMapped, isThrottleView = false)
+    }
+
+    /**
+     * 双踏板跨 view 仲裁。两指同时按下时油门和刹车 view 各自独立更新，
+     * 这里用 companion 共享状态仲裁：brake ≥ brakeTransition → 刹车优先屏蔽
+     * 油门；brake < brakeTransition 且 throttle>0 → 油门优先屏蔽刹车。
+     * 屏蔽只作用于 mapped/native，raw 仍跟手绘制（视觉反馈手指位移）。
+     *
+     * 调用方传本 view 曲线变换后的 mapped 值 [curveMapped]；方法内合并共享 raw
+     * 状态计算仲裁结果写入 arbitratedThrottle/Brake，再由 updateNativeValues
+     * 送 native。SINGLE 模式不走此路径（单 view 内 updateSingle 已自洽）。
+     */
+    private fun arbitrateDual(curveMapped: Float, isThrottleView: Boolean) {
+        sharedBrakeTransition = settings.brakeTransition
+        if (isThrottleView) {
+            sharedRawThrottle = rawThrottle
+            arbitratedThrottle = curveMapped
+        } else {
+            sharedRawBrake = rawBrake
+            arbitratedBrake = curveMapped
+        }
+        // 仲裁规则：
+        //   刹车值（raw）≥ 过渡点 → 刹车优先，油门 mapped 置 0
+        //   刹车值 < 过渡点 且 油门 raw > 0 → 油门优先，刹车 mapped 置 0
+        // 注意用 raw 判定（跟手、即时），用 mapped 屏蔽（送 native）。
+        if (sharedRawBrake >= sharedBrakeTransition && sharedRawBrake > 0f) {
+            arbitratedThrottle = 0f
+            // mappedBrake 保留刹车 view 算出的值
+        } else if (sharedRawThrottle > 0f) {
+            arbitratedBrake = 0f
+            // mappedThrottle 保留油门 view 算出的值
+        }
+        mappedThrottle = arbitratedThrottle
+        mappedBrake = arbitratedBrake
     }
 
     private fun applyDeadzone(value: Float, deadzone: Float): Float {
@@ -195,12 +257,13 @@ class PedalOverlayView(
     }
 
     private fun applyCurve(value: Float, curve: ModConfig.PedalCurve): Float {
-        // exponent < 1 => ease-out (fast rise, soft tail), realistic feel:
-        // ~30% travel yields ~60% output. LINEAR stays identity.
+        // exponent < 1 => ease-out (fast rise, soft tail), realistic feel.
+        // 0.66 使 ~30% 物理行程 → ~45% 输出（0.3^0.66 ≈ 0.45），比旧的 0.42
+        // （30%→60%）更温和不激进。LINEAR stays identity.
         // 仅作用于 mapped（送 native），不影响 raw（绘制用）。
         val exponent = when (curve) {
             ModConfig.PedalCurve.LINEAR -> 1f
-            ModConfig.PedalCurve.EXPONENTIAL -> 0.42f
+            ModConfig.PedalCurve.EXPONENTIAL -> 0.66f
         }
         return value.coerceIn(0f, 1f).pow(exponent).coerceIn(0f, 1f)
     }

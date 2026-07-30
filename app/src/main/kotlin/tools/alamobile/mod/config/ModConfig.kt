@@ -39,6 +39,7 @@ object ModConfig {
     const val KEY_PEDAL_MODE = "pedal_mode"
     const val KEY_PEDAL_DEADZONE = "pedal_deadzone"
     const val KEY_PEDAL_TRANSITION = "pedal_transition"
+    const val KEY_BRAKE_TRANSITION = "brake_transition"
     const val KEY_THROTTLE_CURVE = "throttle_curve"
     const val KEY_BRAKE_CURVE = "brake_curve"
 
@@ -50,6 +51,9 @@ object ModConfig {
     const val KEY_PEDAL_POSITION = "pedal_position"
     const val KEY_GEAR_POSITION = "gear_position"
     const val KEY_BRAKE_POSITION = "brake_position"
+    // SINGLE 模式专用位置字段：与 DUAL 油门位置（pedal_position）分离，
+    // 避免用户在 SINGLE 模式拖拽的 position 污染 DUAL 油门 view 的位置。
+    const val KEY_SINGLE_PEDAL_POSITION = "single_pedal_position"
 
     // Debug/logging
     const val KEY_LOG_ENABLED = "log_enabled"
@@ -108,11 +112,15 @@ object ModConfig {
         val PEDAL_MODE = PedalMode.SINGLE
         const val PEDAL_DEADZONE = 0.05f
         const val PEDAL_TRANSITION = 0.5f
+        // 双踏板模式下油门/刹车仲裁的过渡点（用户配置 0..0.2）。
+        // 刹车值 ≥ 此点 → 刹车优先屏蔽油门；< 此点且油门>0 → 油门优先屏蔽刹车。
+        const val BRAKE_TRANSITION = 0.1f
         val THROTTLE_CURVE = PedalCurve.LINEAR
         val BRAKE_CURVE = PedalCurve.LINEAR
         val PEDAL_POSITION = OverlayPosition.DEFAULT_PEDAL
         val GEAR_POSITION = OverlayPosition.DEFAULT_GEAR
         val BRAKE_POSITION = OverlayPosition.DEFAULT_BRAKE
+        val SINGLE_PEDAL_POSITION = OverlayPosition.DEFAULT_PEDAL
         const val LOG_ENABLED = false
     }
 
@@ -190,6 +198,10 @@ object ModConfig {
                     KEY_PEDAL_TRANSITION,
                     Defaults.PEDAL_TRANSITION.toDouble()
                 ).toFloat(),
+                brakeTransition = json.optDouble(
+                    KEY_BRAKE_TRANSITION,
+                    Defaults.BRAKE_TRANSITION.toDouble()
+                ).toFloat(),
                 throttleCurve = PedalCurve.from(
                     json.optString(KEY_THROTTLE_CURVE, json.optString(KEY_LEGACY_PEDAL_CURVE, Defaults.THROTTLE_CURVE.value))
                 ),
@@ -199,6 +211,7 @@ object ModConfig {
                 pedalPosition = readOverlayPosition(json, KEY_PEDAL_POSITION, Defaults.PEDAL_POSITION),
                 gearPosition = readOverlayPosition(json, KEY_GEAR_POSITION, Defaults.GEAR_POSITION),
                 brakePosition = readOverlayPosition(json, KEY_BRAKE_POSITION, Defaults.BRAKE_POSITION),
+                singlePedalPosition = readOverlayPosition(json, KEY_SINGLE_PEDAL_POSITION, Defaults.SINGLE_PEDAL_POSITION),
                 logEnabled = json.optBoolean(KEY_LOG_ENABLED, Defaults.LOG_ENABLED)
             )
         } catch (e: Throwable) {
@@ -229,6 +242,7 @@ object ModConfig {
             put(KEY_ENABLE_UNLOCK, settings.enableUnlock)
             put(KEY_PEDAL_DEADZONE, settings.pedalDeadzone.toDouble())
             put(KEY_PEDAL_TRANSITION, settings.pedalTransition.toDouble())
+            put(KEY_BRAKE_TRANSITION, settings.brakeTransition.toDouble())
             put(KEY_THROTTLE_CURVE, settings.throttleCurve.value)
             put(KEY_BRAKE_CURVE, settings.brakeCurve.value)
             // 不写 position 三字段：position 由游戏进程持有（拖拽时
@@ -323,6 +337,7 @@ object ModConfig {
                 enableUnlock = j.optBoolean(KEY_ENABLE_UNLOCK, Defaults.ENABLE_UNLOCK),
                 pedalDeadzone = j.optDouble(KEY_PEDAL_DEADZONE, Defaults.PEDAL_DEADZONE.toDouble()).toFloat(),
                 pedalTransition = j.optDouble(KEY_PEDAL_TRANSITION, Defaults.PEDAL_TRANSITION.toDouble()).toFloat(),
+                brakeTransition = j.optDouble(KEY_BRAKE_TRANSITION, Defaults.BRAKE_TRANSITION.toDouble()).toFloat(),
                 throttleCurve = PedalCurve.from(
                     j.optString(KEY_THROTTLE_CURVE, j.optString(KEY_LEGACY_PEDAL_CURVE, Defaults.THROTTLE_CURVE.value))
                 ),
@@ -332,6 +347,7 @@ object ModConfig {
                 pedalPosition = readOverlayPosition(j, KEY_PEDAL_POSITION, Defaults.PEDAL_POSITION),
                 gearPosition = readOverlayPosition(j, KEY_GEAR_POSITION, Defaults.GEAR_POSITION),
                 brakePosition = readOverlayPosition(j, KEY_BRAKE_POSITION, Defaults.BRAKE_POSITION),
+                singlePedalPosition = readOverlayPosition(j, KEY_SINGLE_PEDAL_POSITION, Defaults.SINGLE_PEDAL_POSITION),
                 logEnabled = j.optBoolean(KEY_LOG_ENABLED, Defaults.LOG_ENABLED)
             )
         } catch (e: Throwable) {
@@ -389,11 +405,13 @@ object ModConfig {
             enableUnlock = Defaults.ENABLE_UNLOCK,
             pedalDeadzone = Defaults.PEDAL_DEADZONE,
             pedalTransition = Defaults.PEDAL_TRANSITION,
+            brakeTransition = Defaults.BRAKE_TRANSITION,
             throttleCurve = Defaults.THROTTLE_CURVE,
             brakeCurve = Defaults.BRAKE_CURVE,
             pedalPosition = Defaults.PEDAL_POSITION,
             gearPosition = Defaults.GEAR_POSITION,
             brakePosition = Defaults.BRAKE_POSITION,
+            singlePedalPosition = Defaults.SINGLE_PEDAL_POSITION,
             logEnabled = Defaults.LOG_ENABLED
         )
     }
@@ -407,11 +425,13 @@ object ModConfig {
         val enableUnlock: Boolean,
         val pedalDeadzone: Float,
         val pedalTransition: Float,
+        val brakeTransition: Float,
         val throttleCurve: PedalCurve,
         val brakeCurve: PedalCurve,
         val pedalPosition: OverlayPosition = OverlayPosition.DEFAULT_PEDAL,
         val gearPosition: OverlayPosition = OverlayPosition.DEFAULT_GEAR,
         val brakePosition: OverlayPosition = OverlayPosition.DEFAULT_BRAKE,
+        val singlePedalPosition: OverlayPosition = OverlayPosition.DEFAULT_PEDAL,
         val logEnabled: Boolean = Defaults.LOG_ENABLED
     )
 }

@@ -199,6 +199,7 @@ class OverlayManager(context: Context) {
         val gearPosition = settings.gearPosition
         val pedalPosition = settings.pedalPosition
         val brakePosition = settings.brakePosition
+        val singlePosition = settings.singlePedalPosition
 
         // 手动换挡关时不创建换挡控件；gearView 保持 null。
         // DUAL 模式下也不创建——刹车和换挡默认坐标相同（左下角），
@@ -230,20 +231,20 @@ class OverlayManager(context: Context) {
             ModConfig.PedalMode.SINGLE -> {
                 pedalView = PedalOverlayView(
                     appContext, settings,
-                    PedalOverlayView.PedalRole.SINGLE, pedalPosition
+                    PedalOverlayView.PedalRole.SINGLE, singlePosition
                 ).apply {
                     tag = "pedal_overlay"
                     visibility = View.GONE
                 }
                 val pedalParams = FrameLayout.LayoutParams(
-                    pedalPosition.widthPx(appContext, screenWidth),
-                    pedalPosition.heightPx(appContext, screenHeight)
+                    singlePosition.widthPx(appContext, screenWidth),
+                    singlePosition.heightPx(appContext, screenHeight)
                 ).apply {
-                    leftMargin = pedalPosition.leftPx(screenWidth)
-                    topMargin = pedalPosition.topPx(screenHeight)
+                    leftMargin = singlePosition.leftPx(screenWidth)
+                    topMargin = singlePosition.topPx(screenHeight)
                 }
                 root?.addView(pedalView, pedalParams)
-                addPedalEditLayer(pedalParams)
+                addPedalEditLayer(pedalParams, singlePosition, ModConfig.KEY_SINGLE_PEDAL_POSITION)
             }
             ModConfig.PedalMode.DUAL -> {
                 pedalView = PedalOverlayView(
@@ -261,7 +262,7 @@ class OverlayManager(context: Context) {
                     topMargin = pedalPosition.topPx(screenHeight)
                 }
                 root?.addView(pedalView, pedalParams)
-                addPedalEditLayer(pedalParams)
+                addPedalEditLayer(pedalParams, pedalPosition, ModConfig.KEY_PEDAL_POSITION)
 
                 brakeView = PedalOverlayView(
                     appContext, settings,
@@ -283,7 +284,11 @@ class OverlayManager(context: Context) {
         }
     }
 
-    private fun addPedalEditLayer(pedalParams: FrameLayout.LayoutParams) {
+    private fun addPedalEditLayer(
+        pedalParams: FrameLayout.LayoutParams,
+        runtimePosition: OverlayPosition,
+        positionKey: String
+    ) {
         val pedal = pedalView ?: return
         val minPx = (48 * density).toInt()
 
@@ -292,9 +297,14 @@ class OverlayManager(context: Context) {
             pedal,
             minPx,
             minPx,
-            settings.pedalPosition
+            // 长按重置到出厂默认（OverlayPosition.DEFAULT_*），不再用运行时
+            // 已保存的 position——否则"重置"只是回到当前已保存值，用户感知
+            // 无变化。出厂默认是固定值，重置才有意义。
+            OverlayPosition.DEFAULT_PEDAL,
+            runtimePosition
+ // 运行时 position 作为初始布局（与 target view 对齐）
         ) { left, top, width, height ->
-            saveOverlayPosition(ModConfig.KEY_PEDAL_POSITION, left, top, width, height)
+            saveOverlayPosition(positionKey, left, top, width, height)
         }
         pedalEditView?.apply {
             tag = "pedal_overlay_edit"
@@ -321,6 +331,7 @@ class OverlayManager(context: Context) {
             brake,
             minPx,
             minPx,
+            OverlayPosition.DEFAULT_BRAKE,
             settings.brakePosition
         ) { left, top, width, height ->
             saveOverlayPosition(ModConfig.KEY_BRAKE_POSITION, left, top, width, height)
@@ -350,6 +361,7 @@ class OverlayManager(context: Context) {
             gear,
             minPx,
             minPx,
+            OverlayPosition.DEFAULT_GEAR,
             settings.gearPosition
         ) { left, top, width, height ->
             saveOverlayPosition(ModConfig.KEY_GEAR_POSITION, left, top, width, height)

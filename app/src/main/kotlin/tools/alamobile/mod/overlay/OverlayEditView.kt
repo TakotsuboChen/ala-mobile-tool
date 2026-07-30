@@ -22,7 +22,12 @@ class OverlayEditView(
     private val target: View,
     private val minWidth: Int,
     private val minHeight: Int,
+    // 长按重置到此出厂默认（OverlayPosition.DEFAULT_*）——重置才有意义，
+    // 不再用运行时已保存的 position（否则"重置"只是回到当前已保存值）。
     private val defaultPosition: OverlayPosition,
+    // 运行时已保存的 position（拖拽后 saveOverlayPosition 写入），
+    // 用于 syncStateFromTarget 初始对齐 target view 布局。
+    private val runtimePosition: OverlayPosition,
     private val onChanged: ((left: Int, top: Int, width: Int, height: Int) -> Unit)?
 ) : View(context) {
 

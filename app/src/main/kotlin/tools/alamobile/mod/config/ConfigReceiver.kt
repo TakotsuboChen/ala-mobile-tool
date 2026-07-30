@@ -39,7 +39,8 @@ class ConfigReceiver : BroadcastReceiver() {
         private val POSITION_KEYS = setOf(
             "pedal_position",
             "gear_position",
-            "brake_position"
+            "brake_position",
+            "single_pedal_position"
         )
     }
 

@@ -184,6 +184,28 @@ fun ConfigurePage(
                                 )
                             }
                         }
+                        // 双踏板模式：油门和刹车是两个独立 view，两指同时按下时
+                        // 需要仲裁——刹车值超过此过渡点则刹车优先屏蔽油门，未超过
+                        // 且油门>0 则油门优先屏蔽刹车。范围 0..20%，0=几乎不碰刹车
+                        // 就让刹车优先（保守），20%=刹车踩过 1/5 行程才接管。
+                        AnimatedVisibility(
+                            visible = uiState.pedalMode.value == ModConfig.PedalMode.DUAL,
+                            enter = expandVertically() + fadeIn(),
+                            exit = shrinkVertically() + fadeOut()
+                        ) {
+                            SliderRow(
+                                title = "刹车过渡点",
+                                summary = "刹车值超过此点则刹车优先，否则油门优先",
+                                value = uiState.brakeTransition.value,
+                                onValueChange = {
+                                    uiState.brakeTransition.value = it
+                                    onSave()
+                                },
+                                valueRange = 0f..0.2f,
+                                displayFormat = { String.format("%.0f%%", it * 100) },
+                                icon = Icons.Rounded.SwapVert
+                            )
+                        }
                         SwitchRow(
                             title = "手动换挡（开发中）",
                             summary = "启用换挡悬浮窗并关闭游戏自动换挡",
