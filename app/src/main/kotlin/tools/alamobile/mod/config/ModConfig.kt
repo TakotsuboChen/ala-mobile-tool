@@ -71,6 +71,11 @@ object ModConfig {
     // SINGLE 模式专用位置字段：与 DUAL 油门位置（pedal_position）分离，
     // 避免用户在 SINGLE 模式拖拽的 position 污染 DUAL 油门 view 的位置。
     const val KEY_SINGLE_PEDAL_POSITION = "single_pedal_position"
+    // "工具" 按钮位置。架构上和 pedal/gear/brake 一致（OverlayPosition 比例存），
+    // 但**当前不持久化**（不写 write、不读 read/fromJson、不在 POSITION_KEYS
+    // 合并）——按需求"每次打开游戏重置到默认位置"。保留字段是为以后加"记忆
+    // 位置"开关时零架构改动。
+    const val KEY_TOOL_POSITION = "tool_button_position"
 
     // position 字段由游戏进程持有（拖拽时 saveOverlayPosition 写），
     // ConfigActivity 广播的 JSON 不含这些字段。合并写时（ConfigReceiver
@@ -153,6 +158,10 @@ object ModConfig {
         val GEAR_POSITION = OverlayPosition.DEFAULT_GEAR
         val BRAKE_POSITION = OverlayPosition.DEFAULT_BRAKE
         val SINGLE_PEDAL_POSITION = OverlayPosition.DEFAULT_PEDAL
+        // 工具按钮默认位置：x=0.03 ≈ 8dp@360dp 屏，y=0.04 ≈ 40dp@1000dp 高。
+        // width/height 字段对 ToolButtonView 无意义（控件固定 96dp），保留只为
+        // 架构统一。运行时 resetToDefault() 只用 leftPx()/topPx()，不读 width/height。
+        val TOOL_BUTTON_POSITION = OverlayPosition(0.03f, 0.04f, 0.12f, 0.12f)
         const val LOG_ENABLED = false
     }
 
@@ -245,6 +254,9 @@ object ModConfig {
                 gearPosition = readOverlayPosition(json, KEY_GEAR_POSITION, Defaults.GEAR_POSITION),
                 brakePosition = readOverlayPosition(json, KEY_BRAKE_POSITION, Defaults.BRAKE_POSITION),
                 singlePedalPosition = readOverlayPosition(json, KEY_SINGLE_PEDAL_POSITION, Defaults.SINGLE_PEDAL_POSITION),
+                // 工具按钮位置：当前不持久化（不写 write），但读路径保留——读出
+                // JSON 里可能含这个 key（未来若开持久化），无 key 时落 Defaults。
+                toolButtonPosition = readOverlayPosition(json, KEY_TOOL_POSITION, Defaults.TOOL_BUTTON_POSITION),
                 logEnabled = json.optBoolean(KEY_LOG_ENABLED, Defaults.LOG_ENABLED)
             )
         } catch (e: Throwable) {
@@ -502,6 +514,7 @@ object ModConfig {
                 gearPosition = readOverlayPosition(j, KEY_GEAR_POSITION, Defaults.GEAR_POSITION),
                 brakePosition = readOverlayPosition(j, KEY_BRAKE_POSITION, Defaults.BRAKE_POSITION),
                 singlePedalPosition = readOverlayPosition(j, KEY_SINGLE_PEDAL_POSITION, Defaults.SINGLE_PEDAL_POSITION),
+                toolButtonPosition = readOverlayPosition(j, KEY_TOOL_POSITION, Defaults.TOOL_BUTTON_POSITION),
                 logEnabled = j.optBoolean(KEY_LOG_ENABLED, Defaults.LOG_ENABLED)
             )
         } catch (e: Throwable) {
@@ -567,6 +580,7 @@ object ModConfig {
             gearPosition = Defaults.GEAR_POSITION,
             brakePosition = Defaults.BRAKE_POSITION,
             singlePedalPosition = Defaults.SINGLE_PEDAL_POSITION,
+            toolButtonPosition = Defaults.TOOL_BUTTON_POSITION,
             logEnabled = Defaults.LOG_ENABLED
         )
     }
@@ -588,6 +602,10 @@ object ModConfig {
         val gearPosition: OverlayPosition = OverlayPosition.DEFAULT_GEAR,
         val brakePosition: OverlayPosition = OverlayPosition.DEFAULT_BRAKE,
         val singlePedalPosition: OverlayPosition = OverlayPosition.DEFAULT_PEDAL,
+        // 工具按钮位置。当前不写 write() / 不进 POSITION_KEYS 合并——
+        // 每次打开游戏 OverlayManager 调 resetToDefault() 回到 Defaults。
+        // 字段保留是为以后加"记忆位置"开关时零架构改动。
+        val toolButtonPosition: OverlayPosition = Defaults.TOOL_BUTTON_POSITION,
         val logEnabled: Boolean = Defaults.LOG_ENABLED
     )
 }

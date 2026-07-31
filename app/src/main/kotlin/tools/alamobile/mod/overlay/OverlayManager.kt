@@ -46,7 +46,7 @@ class OverlayManager(context: Context) {
     private var pedalView: PedalOverlayView? = null
     private var brakeView: PedalOverlayView? = null
     private var gearView: GearShiftView? = null
-    private var toggleButton: View? = null
+    private var toggleButton: ToolButtonView? = null
     private var pedalEditView: OverlayEditView? = null
     private var brakeEditView: OverlayEditView? = null
     private var gearEditView: OverlayEditView? = null
@@ -114,32 +114,50 @@ class OverlayManager(context: Context) {
         // Toggle button is always visible; overlays are hidden until toggled on.
         addToggleButton()
         addGamingOverlays()
+
+        // 每次进入游戏把工具按钮位置拉回默认（左上 8dp+40dp）——满足
+        // "每次打开游戏重置"需求。注意这条**只在 showOverlays 调**——
+        // 后续 toggleOverlays / rebuildFromConfigChange 不再 reset，因为
+        // 那是用户主动操作过程中，不应把按钮弹回默认。
+        toggleButton?.resetToDefault()
     }
 
     private fun addToggleButton() {
-        val btn = android.widget.Button(appContext).apply {
-            text = "工具"
-            tag = "ala_tool_toggle"
-            setBackgroundColor(0x99000000.toInt())
-            setTextColor(0xFFFFFFFF.toInt())
-            textSize = 12f
-        }
-        val params = FrameLayout.LayoutParams(
-            (70 * density).toInt(),
-            (70 * density).toInt()
+        // 96×96dp 圆角矩形 + 居中 App 图标的浮动工具按钮。
+        // - 单击：切换 overlay 展开/折叠（onClick → toggleOverlays）
+        // - 长按 500ms：进入其他 overlay 的编辑模式（onLongPress → toggleEditMode）
+        // - 拖动：移动按钮自身（onPositionChanged → 当前 no-op，未来开持久化再接 saveOverlayPosition）
+        // 每次 addGamingOverlays 入口会 resetToDefault()——满足"每次打开游戏重置
+        // 到默认位置"需求，不写 JSON。
+        val btn = ToolButtonView(
+            appContext,
+            // 传 defaultPosition 作为长按重置的兜底（ToolButtonView 长按不重置自身，
+            // 但 resetToDefault() 会用）。Settings.toolButtonPosition 字段保留是为
+            // 以后加"记忆位置"开关时零架构改动——当前 resetToDefault 总用 Defaults。
+            settings.toolButtonPosition
         ).apply {
+            tag = "ala_tool_toggle"
+            onClick = { toggleOverlays() }
+            onLongPress = { toggleEditMode() }
+            // 当前需求不持久化：拖动只更新 View layoutParams（ToolButtonView 内部
+            // 已做），回调保持 no-op。toggleOverlays 重建会调 addGamingOverlays
+            // 入口的 resetToDefault 拉回默认——拖动状态被丢弃。
+            onPositionChanged = { _, _, _, _ -> /* no-op: 每次重置 */ }
+        }
+        val screenHeight = appContext.resources.displayMetrics.heightPixels
+        // 工具按钮大小 = 屏幕高度的 10%（动态像素，跨设备视觉比例一致）。
+        // ToolButtonView.onMeasure 也强制此尺寸，但 layoutParams 也设一致
+        // 避免 0 尺寸测量路径出问题。
+        val buttonSize = (screenHeight * 0.10f).toInt()
+        val params = FrameLayout.LayoutParams(buttonSize, buttonSize).apply {
             gravity = Gravity.TOP or Gravity.START
             leftMargin = (8 * density).toInt()
             topMargin = (40 * density).toInt()
         }
-        btn.setOnClickListener {
-            toggleOverlays()
-        }
-        btn.setOnLongClickListener {
-            toggleEditMode()
-            true
-        }
         root?.addView(btn, params)
+        // addGamingOverlays 入口会再调一次 resetToDefault 把位置校正到 defaultPosition
+        // 比例——这里设的 leftMargin/topMargin 是兜底（首次创建时 resetToDefault
+        // 还没执行）。
         toggleButton = btn
     }
 
