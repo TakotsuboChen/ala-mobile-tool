@@ -40,6 +40,12 @@ typedef struct {
 
     // IRDSDrivetrain::FixedUpdate is hooked to keep automatic=false reliably.
     uintptr_t drivetrain_fixed_update_offset;
+
+    // IRDSPlayerControls::Update is hooked to continuously refresh
+    // g_last_controller from the player's IRDSPlayerControls.carInputs
+    // (offset 0x60). This survives scene reloads / restarts because Update
+    // is called every frame on the current player instance.
+    uintptr_t player_controls_update_offset;
 } pedal_hook_config_t;
 
 bool pedal_install_hooks(const pedal_hook_config_t *config);

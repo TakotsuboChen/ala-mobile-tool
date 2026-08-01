@@ -42,6 +42,13 @@ object OffsetTable {
     const val IRDS_DRIVETRAIN_THROTTLE_INPUT_FIELD: Long = 0xB8L
     const val IRDS_DRIVETRAIN_AUTOMATIC_FIELD: Long = 0xBCL
 
+    // IRDSPlayerControls (TypeDefIndex: 349)
+    // Update() 每帧调用，hook 它来持续刷新 g_last_controller——
+    // 从 this+0x60 (carInputs) 读当前玩家车的 IRDSCarControllInput。
+    // IRDSPlayerControls 只挂在玩家车 GameObject 上，天然身份过滤。
+    // 解决"重新开始"后旧 controller 实例失效、g_last_controller 停在野指针的问题。
+    const val IRDS_PLAYER_CONTROLS_UPDATE: Long = 0x1A62E04L
+
     // BillingManager (TypeDefIndex: 910)
     const val BILLING_MANAGER_AWAKE: Long = 0x186CC90L
     const val BILLING_MANAGER_INITIALIZE_BILLING: Long = 0x186CE20L

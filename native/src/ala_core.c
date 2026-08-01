@@ -29,6 +29,7 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
                                            jlong actual_throttle_field, jlong actual_brake_field,
                                            jlong clutch_field, jlong gear_field,
                                            jlong drivetrain_fixed_update, jlong drivetrain_automatic_field,
+                                           jlong player_controls_update,
                                            jlong drs_toggle,
                                            jlong billing_manager_awake,
                                            jlong billing_manager_initialize_billing,
@@ -60,7 +61,8 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
         .actual_brake_field_offset = (uintptr_t) actual_brake_field,
         .drivetrain_offset = 0x98,
         .drivetrain_automatic_field_offset = drivetrain_automatic_field,
-        .drivetrain_fixed_update_offset = (uintptr_t) drivetrain_fixed_update
+        .drivetrain_fixed_update_offset = (uintptr_t) drivetrain_fixed_update,
+        .player_controls_update_offset = (uintptr_t) player_controls_update
     };
 
     drs_hook_config_t drs_cfg = {

@@ -121,10 +121,10 @@ class AlaMobileModule : XposedModule() {
         try {
             ShadowHook.init(
                 ShadowHook.ConfigBuilder()
-                    .setMode(ShadowHook.Mode.SHARED)
+                    .setMode(ShadowHook.Mode.UNIQUE)
                     .build()
             )
-            Log.i(TAG, "ShadowHook initialized")
+            Log.i(TAG, "ShadowHook initialized (UNIQUE mode)")
         } catch (e: Throwable) {
             Log.e(TAG, "Failed to initialize ShadowHook: ${e.message}")
             return
