@@ -99,6 +99,7 @@ object NativeBridge {
         billingManagerOnOwnedNone: Long,
         billingManagerOnPurchaseFailed: Long,
         billingManagerSetUnlocked: Long,
+        billingManagerOnAlreadyOwned: Long,
         billingManagerIsUnlockedField: Long,
         billingManagerHasStoreConnectionField: Long,
         billingManagerHasCompletedOwnershipCheckField: Long,
@@ -106,6 +107,24 @@ object NativeBridge {
         enableAutoDRS: Boolean,
         disableAutoGear: Boolean,
         enableUnlock: Boolean
+    )
+
+    /**
+     * 独立的 unlock hooks 早期安装——在 onPackageReady 早期调用，
+     * 不等 15 秒延迟，让 hook_awake 能赶上 BillingManager.Awake()。
+     */
+    @JvmStatic
+    external fun initUnlock(
+        enableUnlock: Boolean,
+        billingManagerAwake: Long,
+        billingManagerInitializeBilling: Long,
+        billingManagerOnOwnedNone: Long,
+        billingManagerOnPurchaseFailed: Long,
+        billingManagerSetUnlocked: Long,
+        billingManagerOnAlreadyOwned: Long,
+        billingManagerIsUnlockedField: Long,
+        billingManagerHasStoreConnectionField: Long,
+        billingManagerHasCompletedOwnershipCheckField: Long
     )
 
     @JvmStatic
@@ -193,6 +212,7 @@ object NativeBridge {
             OffsetTable.BILLING_MANAGER_ON_OWNED_NONE,
             OffsetTable.BILLING_MANAGER_ON_PURCHASE_FAILED,
             OffsetTable.BILLING_MANAGER_SET_UNLOCKED,
+            OffsetTable.BILLING_MANAGER_ON_ALREADY_OWNED,
             OffsetTable.BILLING_MANAGER_IS_UNLOCKED_FIELD,
             OffsetTable.BILLING_MANAGER_HAS_STORE_CONNECTION_FIELD,
             OffsetTable.BILLING_MANAGER_HAS_COMPLETED_OWNERSHIP_CHECK_FIELD,

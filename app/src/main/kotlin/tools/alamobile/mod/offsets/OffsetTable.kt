@@ -56,6 +56,10 @@ object OffsetTable {
     const val BILLING_MANAGER_ON_PURCHASE_FAILED: Long = 0x186E2A0L
     const val BILLING_MANAGER_SET_UNLOCKED: Long = 0x186E440L
     const val BILLING_MANAGER_GET_INSTANCE: Long = 0x186C958L
+    // OnAlreadyOwned(string productId) — 主动注入"已拥有"的 IL2CPP 实例方法。
+    // 不依赖 Java BillingBridge.checkOwned → sendUnityMessage 回调链，
+    // 让 OnOwnedNone 被拦截后直接调用此方法完成解锁。
+    const val BILLING_MANAGER_ON_ALREADY_OWNED: Long = 0x186E1B4L
 
     // BillingManager instance fields
     const val BILLING_MANAGER_IS_UNLOCKED_FIELD: Long = 0x20L

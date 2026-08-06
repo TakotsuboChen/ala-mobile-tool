@@ -36,6 +36,7 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
                                            jlong billing_manager_on_owned_none,
                                            jlong billing_manager_on_purchase_failed,
                                            jlong billing_manager_set_unlocked,
+                                           jlong billing_manager_on_already_owned,
                                            jlong billing_manager_is_unlocked_field,
                                            jlong billing_manager_has_store_connection_field,
                                            jlong billing_manager_has_completed_ownership_check_field,
@@ -80,6 +81,8 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
         LOGE("Failed to install DRS hooks");
     }
 
+    // 15s 延迟路径的 unlock hooks：只装一次（如果 early init 没装的话）。
+    // on_already_owned offset 在这里传 0——early initUnlock 已设过。
     unlock_hook_config_t unlock_cfg = {
         .enable_unlock = (bool) enable_unlock,
         .billing_manager_awake_offset = (uintptr_t) billing_manager_awake,
@@ -87,6 +90,7 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
         .billing_manager_on_owned_none_offset = (uintptr_t) billing_manager_on_owned_none,
         .billing_manager_on_purchase_failed_offset = (uintptr_t) billing_manager_on_purchase_failed,
         .billing_manager_set_unlocked_offset = (uintptr_t) billing_manager_set_unlocked,
+        .billing_manager_on_already_owned_offset = 0,
         .billing_manager_is_unlocked_field_offset = (uintptr_t) billing_manager_is_unlocked_field,
         .billing_manager_has_store_connection_field_offset = (uintptr_t) billing_manager_has_store_connection_field,
         .billing_manager_has_completed_ownership_check_field_offset = (uintptr_t) billing_manager_has_completed_ownership_check_field,
@@ -105,6 +109,44 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
 
     LOGI("Native bridge initialized: controls=%d drs=%d disable_auto_gear=%d",
          enable_controls, enable_drs, disable_auto_gear);
+}
+
+// 独立的 unlock hooks 安装入口——在 onPackageReady 早期调用，
+// 不等 15 秒延迟，让 hook_awake 能赶上 BillingManager.Awake()（场景加载 ~2s 触发）。
+// pedal hooks 仍走原来的 15s 延迟路径（writer 线程需要游戏 controller 已存在）。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_initUnlock(JNIEnv *env, jclass clazz,
+                                                  jboolean enable_unlock,
+                                                  jlong billing_manager_awake,
+                                                  jlong billing_manager_initialize_billing,
+                                                  jlong billing_manager_on_owned_none,
+                                                  jlong billing_manager_on_purchase_failed,
+                                                  jlong billing_manager_set_unlocked,
+                                                  jlong billing_manager_on_already_owned,
+                                                  jlong billing_manager_is_unlocked_field,
+                                                  jlong billing_manager_has_store_connection_field,
+                                                  jlong billing_manager_has_completed_ownership_check_field) {
+    (void) env;
+    (void) clazz;
+
+    unlock_hook_config_t unlock_cfg = {
+        .enable_unlock = (bool) enable_unlock,
+        .billing_manager_awake_offset = (uintptr_t) billing_manager_awake,
+        .billing_manager_initialize_billing_offset = (uintptr_t) billing_manager_initialize_billing,
+        .billing_manager_on_owned_none_offset = (uintptr_t) billing_manager_on_owned_none,
+        .billing_manager_on_purchase_failed_offset = (uintptr_t) billing_manager_on_purchase_failed,
+        .billing_manager_set_unlocked_offset = (uintptr_t) billing_manager_set_unlocked,
+        .billing_manager_on_already_owned_offset = (uintptr_t) billing_manager_on_already_owned,
+        .billing_manager_is_unlocked_field_offset = (uintptr_t) billing_manager_is_unlocked_field,
+        .billing_manager_has_store_connection_field_offset = (uintptr_t) billing_manager_has_store_connection_field,
+        .billing_manager_has_completed_ownership_check_field_offset = (uintptr_t) billing_manager_has_completed_ownership_check_field,
+    };
+
+    LOGI("initUnlock: enable_unlock=%d (early install before 15s delay)", enable_unlock);
+
+    if (!unlock_install_hooks(&unlock_cfg)) {
+        LOGE("Failed to install unlock hooks (early)");
+    }
 }
 
 JNIEXPORT void JNICALL

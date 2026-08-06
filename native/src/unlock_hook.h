@@ -26,6 +26,10 @@ typedef struct {
     // BillingManager.SetUnlocked(bool) — actually sets unlock state
     uintptr_t billing_manager_set_unlocked_offset;
 
+    // BillingManager.OnAlreadyOwned(string) — 主动注入"已拥有"回调
+    // 在 hook_awake 里调用此方法，绕过 Java BillingBridge 依赖
+    uintptr_t billing_manager_on_already_owned_offset;
+
     // BillingManager instance fields
     uintptr_t billing_manager_is_unlocked_field_offset;           // 0x20
     uintptr_t billing_manager_has_store_connection_field_offset;  // 0x21

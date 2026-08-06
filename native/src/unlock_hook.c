@@ -1,5 +1,6 @@
 #include "unlock_hook.h"
 #include <android/log.h>
+#include <dlfcn.h>
 #include <inttypes.h>
 #include <link.h>
 #include <stdint.h>
@@ -29,6 +30,8 @@ static on_owned_none_func_t orig_on_owned_none = NULL;
 static on_purchase_failed_func_t orig_on_purchase_failed = NULL;
 static set_unlocked_func_t orig_set_unlocked = NULL;
 
+static volatile int g_hooks_installed = 0;
+
 // Use dl_iterate_phdr to get the actual load base of libil2cpp.so.
 // dlopen() returns an opaque soinfo* handle, NOT the load base address,
 // so we must not use it for offset calculations.
@@ -53,6 +56,65 @@ static uintptr_t get_module_base(const char *module_name) {
     return ctx.base;
 }
 
+// IL2CPP string 创建：调用 libil2cpp.so 的 il2cpp_string_new 函数。
+// OnAlreadyOwned(string productId) 需要一个 IL2CPP string 参数 "unlock_alamobile"。
+// 我们通过 dlsym 找到 il2cpp_string_new，把 C string 转成 IL2CPP string。
+static void *(*g_il2cpp_string_new)(const char *str) = NULL;
+
+static void resolve_il2cpp_string_new(void) {
+    if (g_il2cpp_string_new != NULL) return;
+    void *handle = dlopen("libil2cpp.so", RTLD_NOW | RTLD_NOLOAD);
+    if (handle) {
+        g_il2cpp_string_new = (void *(*)(const char *))dlsym(handle, "il2cpp_string_new");
+        LOGI("il2cpp_string_new resolved: %p", g_il2cpp_string_new);
+    } else {
+        LOGE("Failed to dlopen libil2cpp.so for il2cpp_string_new: %s", dlerror());
+    }
+}
+
+// BillingManager.OnAlreadyOwned(string) 的函数指针类型。
+// IL2CPP 实例方法的调用约定：第一个参数是 this（BillingManager 实例），
+// 第二个参数是方法的第一个参数（IL2CPP string 指针）。
+typedef void (*on_already_owned_func_t)(void *this_ptr, void *il2cpp_string);
+
+static on_already_owned_func_t g_on_already_owned = NULL;
+
+// 主动注入"已拥有"状态：在 BillingManager.Awake() hook 里直接调
+// OnAlreadyOwned("unlock_alamobile")，让 Unity 侧走完整的解锁链
+// (SetUnlocked(true) → OnUnlockedChanged → 持久化 PlayerPrefs AnciTuttu)。
+// 这不依赖游戏自己发起 BillingBridge.checkOwned → sendUnityMessage 回调链，
+// 在 vivo 等设备上游戏不主动调 checkOwned 时也能完成解锁。
+static void force_unlock_via_on_already_owned(void *this_ptr) {
+    if (this_ptr == NULL) return;
+
+    resolve_il2cpp_string_new();
+    if (g_il2cpp_string_new == NULL) {
+        LOGE("force_unlock: il2cpp_string_new not available, cannot create string");
+        return;
+    }
+
+    if (g_on_already_owned == NULL) {
+        uintptr_t base = get_module_base("libil2cpp.so");
+        if (base == 0) {
+            LOGE("force_unlock: libil2cpp.so base not found");
+            return;
+        }
+        g_on_already_owned = (on_already_owned_func_t)(base + g_config.billing_manager_on_already_owned_offset);
+        LOGI("force_unlock: OnAlreadyOwned at %p", g_on_already_owned);
+    }
+
+    // 创建 IL2CPP string "unlock_alamobile"
+    void *product_id_str = g_il2cpp_string_new("unlock_alamobile");
+    if (product_id_str == NULL) {
+        LOGE("force_unlock: il2cpp_string_new returned NULL");
+        return;
+    }
+
+    LOGI("force_unlock: calling OnAlreadyOwned(\"unlock_alamobile\") on BillingManager %p", this_ptr);
+    g_on_already_owned(this_ptr, product_id_str);
+    LOGI("force_unlock: OnAlreadyOwned called successfully");
+}
+
 // Hook for BillingManager.Awake() - completely skip it and set unlock state
 static void hook_awake(void *this_ptr) {
     LOGI("BillingManager.Awake() hooked - skipping original, forcing unlock");
@@ -72,6 +134,11 @@ static void hook_awake(void *this_ptr) {
     *has_completed_check = true;
 
     LOGI("Set BillingManager fields: IsUnlocked=true, HasStoreConnection=true, HasCompletedOwnershipCheck=true");
+
+    // 主动注入"已拥有"状态——调用 OnAlreadyOwned("unlock_alamobile")
+    // 让 Unity 侧走完整解锁链 (SetUnlocked → OnUnlockedChanged → 持久化)。
+    // 不依赖游戏自己发起 BillingBridge.checkOwned → sendUnityMessage。
+    force_unlock_via_on_already_owned(this_ptr);
 
     // DO NOT call original Awake() - it will trigger InitializeBilling() which queries Google Play
 }
@@ -101,6 +168,18 @@ bool unlock_install_hooks(const unlock_hook_config_t *config) {
     }
 
     memcpy(&g_config, config, sizeof(unlock_hook_config_t));
+
+    LOGI("unlock_install_hooks: enable_unlock=%d", g_config.enable_unlock);
+    LOGI("unlock_install_hooks: awake_offset=0x%lx init_billing_offset=0x%lx on_owned_none_offset=0x%lx on_purchase_failed_offset=0x%lx",
+         (unsigned long)g_config.billing_manager_awake_offset,
+         (unsigned long)g_config.billing_manager_initialize_billing_offset,
+         (unsigned long)g_config.billing_manager_on_owned_none_offset,
+         (unsigned long)g_config.billing_manager_on_purchase_failed_offset);
+
+    if (g_hooks_installed) {
+        LOGI("Unlock hooks already installed, skipping");
+        return true;
+    }
 
     if (!g_config.enable_unlock) {
         LOGI("Unlock feature is disabled in config");
@@ -132,7 +211,9 @@ bool unlock_install_hooks(const unlock_hook_config_t *config) {
         if (result) {
             LOGI("Successfully hooked BillingManager.Awake()");
         } else {
-            LOGE("Failed to hook BillingManager.Awake()");
+            int err = shadowhook_get_errno();
+            LOGE("Failed to hook BillingManager.Awake(): errno=%d (%s)",
+                 err, shadowhook_to_errmsg(err));
         }
     } else {
         LOGW("BillingManager.Awake() offset is 0, skipping");
@@ -152,7 +233,9 @@ bool unlock_install_hooks(const unlock_hook_config_t *config) {
         if (result) {
             LOGI("Successfully hooked BillingManager.InitializeBilling()");
         } else {
-            LOGE("Failed to hook BillingManager.InitializeBilling()");
+            int err = shadowhook_get_errno();
+            LOGE("Failed to hook BillingManager.InitializeBilling(): errno=%d (%s)",
+                 err, shadowhook_to_errmsg(err));
         }
     }
 
@@ -170,7 +253,9 @@ bool unlock_install_hooks(const unlock_hook_config_t *config) {
         if (result) {
             LOGI("Successfully hooked BillingManager.OnOwnedNone()");
         } else {
-            LOGE("Failed to hook BillingManager.OnOwnedNone()");
+            int err = shadowhook_get_errno();
+            LOGE("Failed to hook BillingManager.OnOwnedNone(): errno=%d (%s)",
+                 err, shadowhook_to_errmsg(err));
         }
     }
 
@@ -188,11 +273,14 @@ bool unlock_install_hooks(const unlock_hook_config_t *config) {
         if (result) {
             LOGI("Successfully hooked BillingManager.OnPurchaseFailed()");
         } else {
-            LOGE("Failed to hook BillingManager.OnPurchaseFailed()");
+            int err = shadowhook_get_errno();
+            LOGE("Failed to hook BillingManager.OnPurchaseFailed(): errno=%d (%s)",
+                 err, shadowhook_to_errmsg(err));
         }
     }
 
     LOGI("Unlock hooks installation complete");
+    g_hooks_installed = 1;
     return true;
 }
 

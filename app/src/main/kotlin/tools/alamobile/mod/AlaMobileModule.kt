@@ -24,6 +24,25 @@ class AlaMobileModule : XposedModule() {
         const val TAG = "AlaMobileTool"
 
         /**
+         * XposedInterface 实例引用，供非 XposedModule 子类（如 BillingHook）调用
+         * xposedInterface.log() 写日志到 NPatch 日志文件。
+         * 在 onPackageLoaded 时设置。
+         */
+        var xposedInterface: io.github.libxposed.api.XposedInterface? = null
+            private set
+
+        /**
+         * 通过 XposedInterface 写日志到 NPatch 日志文件（Android/media/.../npatch/log/）。
+         * XposedInterface.log() 直接调 XposedBridge.log() → XposedLogPrinter → 写文件，
+         * 不走 XLog 白名单过滤，所以即使用户 tag 不是 "NPatch" 也能写入。
+         * 同时 fallback 到 android.util.Log 确保 logcat 也能看到。
+         */
+        fun logX(priority: Int, tag: String, msg: String) {
+            xposedInterface?.log(priority, tag, msg)
+            android.util.Log.println(priority, tag, msg)
+        }
+
+        /**
          * 进程级"模块已被框架加载"标记的 property key。
          *
          * ConfigActivity 与 AlaMobileModule 跑在同一模块进程，java.lang.System
@@ -69,7 +88,7 @@ class AlaMobileModule : XposedModule() {
     }
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
-        Log.i(TAG, "Module loaded in process ${param.processName}")
+        logX(Log.INFO, TAG, "Module loaded in process ${param.processName}")
         markActivated()
     }
 
@@ -89,33 +108,56 @@ class AlaMobileModule : XposedModule() {
     }
 
     override fun onPackageLoaded(param: PackageLoadedParam) {
-        Log.i(TAG, "Package loaded: ${param.packageName}")
+        logX(Log.INFO, TAG, "Package loaded: ${param.packageName}")
+        xposedInterface = this
+        logX(Log.INFO, TAG, "xposedInterface set: $this")
 
         // Install Java hooks for billing bypass
         try {
             BillingHook.install(this, param)
-            Log.i(TAG, "Java hooks installed successfully")
+            logX(Log.INFO, TAG, "Java hooks installed successfully")
         } catch (e: Throwable) {
-            Log.e(TAG, "Failed to install Java hooks: ${e.message}")
+            logX(Log.ERROR, TAG, "Failed to install Java hooks: ${e.message}")
         }
     }
 
     override fun onPackageReady(param: PackageReadyParam) {
-        Log.i(TAG, "Package ready: ${param.packageName}, isFirstPackage=${param.isFirstPackage}")
+        logX(Log.INFO, TAG, "Package ready: ${param.packageName}, isFirstPackage=${param.isFirstPackage}")
         if (!param.isFirstPackage) {
-            Log.w(TAG, "Not the first package, continuing anyway")
+            logX(Log.WARN, TAG, "Not the first package, continuing anyway")
         }
 
         var context = getAppContext()
-        Log.i(TAG, "Initial context: $context")
+        logX(Log.INFO, TAG, "Initial context: $context")
         if (context == null) {
             Thread.sleep(500)
             context = getAppContext()
-            Log.i(TAG, "Delayed context: $context")
+            logX(Log.INFO, TAG, "Delayed context: $context")
+        }
+
+        // 诊断：检查设备 GMS 状态（onPackageReady 时 context 才可用）
+        if (context != null) {
+            try {
+                val pm = context.packageManager
+                try {
+                    pm.getPackageInfo("com.android.vending", 0)
+                    logX(Log.INFO, TAG, "DIAG: Google Play Store installed (com.android.vending)")
+                } catch (e: android.content.pm.PackageManager.NameNotFoundException) {
+                    logX(Log.WARN, TAG, "DIAG: Google Play Store NOT installed")
+                }
+                try {
+                    pm.getPackageInfo("com.google.android.gms", 0)
+                    logX(Log.INFO, TAG, "DIAG: Google Play Services installed (com.google.android.gms)")
+                } catch (e: android.content.pm.PackageManager.NameNotFoundException) {
+                    logX(Log.WARN, TAG, "DIAG: Google Play Services NOT installed")
+                }
+            } catch (e: Throwable) {
+                logX(Log.WARN, TAG, "DIAG: GMS check failed: ${e.message}")
+            }
         }
 
         if (context != null && !isSupportedVersion(context)) {
-            Log.w(TAG, "Unsupported game version, attempting hooks anyway for debugging")
+            logX(Log.WARN, TAG, "Unsupported game version, attempting hooks anyway for debugging")
         }
 
         try {
@@ -124,9 +166,9 @@ class AlaMobileModule : XposedModule() {
                     .setMode(ShadowHook.Mode.UNIQUE)
                     .build()
             )
-            Log.i(TAG, "ShadowHook initialized (UNIQUE mode)")
+            logX(Log.INFO, TAG, "ShadowHook initialized (UNIQUE mode)")
         } catch (e: Throwable) {
-            Log.e(TAG, "Failed to initialize ShadowHook: ${e.message}")
+            logX(Log.ERROR, TAG, "Failed to initialize ShadowHook: ${e.message}")
             return
         }
 
@@ -141,13 +183,13 @@ class AlaMobileModule : XposedModule() {
                 val prefs = getRemotePreferences(tools.alamobile.mod.App.PREF_GROUP)
                 val json = prefs.getString(tools.alamobile.mod.App.KEY_CONFIG_JSON, null)
                 if (json != null) {
-                    Log.i(TAG, "getRemotePreferences ok, len=${json.length}")
+                    logX(Log.INFO, TAG, "getRemotePreferences ok, len=${json.length}")
                 } else {
-                    Log.w(TAG, "getRemotePreferences: key not found in daemon db")
+                    logX(Log.WARN, TAG, "getRemotePreferences: key not found in daemon db")
                 }
                 json
             } catch (e: Throwable) {
-                Log.w(TAG, "getRemotePreferences failed: ${e.message}")
+                logX(Log.WARN, TAG, "getRemotePreferences failed: ${e.message}")
                 null
             }
         }
@@ -172,19 +214,19 @@ class AlaMobileModule : XposedModule() {
                     filter,
                     ContextCompat.RECEIVER_EXPORTED
                 )
-                Log.i(TAG, "ConfigReceiver registered")
+                logX(Log.INFO, TAG, "ConfigReceiver registered")
             } catch (e: Throwable) {
-                Log.e(TAG, "Failed to register ConfigReceiver: ${e.message}")
+                logX(Log.ERROR, TAG, "Failed to register ConfigReceiver: ${e.message}")
             }
         }
 
         val settings = if (context != null) {
             try {
                 val s = ModConfig.readFromTargetProcess(context)
-                Log.i(TAG, "onPackageReady read config: pedalMode=${s.pedalMode} showOverlay=${s.showOverlay}")
+                logX(Log.INFO, TAG, "onPackageReady read config: pedalMode=${s.pedalMode} showOverlay=${s.showOverlay} enableUnlock=${s.enableUnlock} enableManualShift=${s.enableManualShift}")
                 s
             } catch (e: Throwable) {
-                Log.e(TAG, "Failed to read config, using defaults", e)
+                logX(Log.ERROR, TAG, "Failed to read config, using defaults: ${e.message}")
                 null
             }
         } else null
@@ -199,6 +241,37 @@ class AlaMobileModule : XposedModule() {
         val disableAutoGear = enableManualShift
         val enableUnlock = settings?.enableUnlock ?: false
 
+        // 早期安装 unlock hooks——不等 15 秒延迟。
+        // BillingManager.Awake() 在 Unity 场景加载时（启动后 ~2s）就触发，
+        // 15s 延迟的 native init 会错过它。这里读到配置后立即装 unlock hooks，
+        // 让 hook_awake 能赶上 Awake，主动调 OnAlreadyOwned("unlock_alamobile") 完成解锁。
+        // pedal/drs hooks 仍走 15s 延迟路径（writer 线程需要 game controller 已存在）。
+        if (enableUnlock) {
+            try {
+                val ctx = getAppContext()
+                if (ctx != null) {
+                    NativeBridge.forceLoad(ctx)
+                }
+                NativeBridge.initUnlock(
+                    enableUnlock = true,
+                    billingManagerAwake = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_AWAKE,
+                    billingManagerInitializeBilling = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_INITIALIZE_BILLING,
+                    billingManagerOnOwnedNone = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_ON_OWNED_NONE,
+                    billingManagerOnPurchaseFailed = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_ON_PURCHASE_FAILED,
+                    billingManagerSetUnlocked = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_SET_UNLOCKED,
+                    billingManagerOnAlreadyOwned = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_ON_ALREADY_OWNED,
+                    billingManagerIsUnlockedField = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_IS_UNLOCKED_FIELD,
+                    billingManagerHasStoreConnectionField = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_HAS_STORE_CONNECTION_FIELD,
+                    billingManagerHasCompletedOwnershipCheckField = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_HAS_COMPLETED_OWNERSHIP_CHECK_FIELD
+                )
+                logX(Log.INFO, TAG, "Early unlock hooks installed (before 15s delay)")
+            } catch (e: Throwable) {
+                logX(Log.ERROR, TAG, "Early unlock hooks failed: ${e.message}")
+            }
+        } else {
+            logX(Log.INFO, TAG, "enableUnlock=false, skipping early unlock hooks")
+        }
+
         val mainHandler = Handler(Looper.getMainLooper())
         mainHandler.postDelayed({
             // 双 ClassLoader 守卫：LSPosed 在共存版上注入两次模块，第一个
@@ -207,19 +280,19 @@ class AlaMobileModule : XposedModule() {
             // 1) 重复装 overlay（两个 PedalOverlayView 同时写 IPC 文件）
             // 2) 第二个 .so 副本装 hook 失败但启动第二个 writer 线程
             if (isNativeInstalled()) {
-                Log.i(TAG, "Native already installed by another ClassLoader, skipping overlay+hooks")
+                logX(Log.INFO, TAG, "Native already installed by another ClassLoader, skipping overlay+hooks")
                 return@postDelayed
             }
             val ctx = getAppContext()
-            Log.i(TAG, "Delayed context: $ctx")
+            logX(Log.INFO, TAG, "Delayed context: $ctx")
 
             if (ctx != null && showOverlay) {
                 try {
                     val overlayManager = OverlayManager(ctx)
                     overlayManager.showOverlays()
-                    Log.i(TAG, "Overlay shown")
+                    logX(Log.INFO, TAG, "Overlay shown")
                 } catch (e: Throwable) {
-                    Log.e(TAG, "Failed to show overlay: ${e.message}")
+                    logX(Log.ERROR, TAG, "Failed to show overlay: ${e.message}")
                 }
             }
 
@@ -239,9 +312,9 @@ class AlaMobileModule : XposedModule() {
                 // native 真正装好之后才立标记 —— 在此之前不拦，确保
                 // 第一个 ClassLoader 自己的 onPackageReady 流程不被自己拦掉
                 markNativeInstalled()
-                Log.i(TAG, "Native hooks installed (isAvailable=${NativeBridge.isAvailable})")
+                logX(Log.INFO, TAG, "Native hooks installed (isAvailable=${NativeBridge.isAvailable})")
             } catch (e: Throwable) {
-                Log.e(TAG, "Failed to install native hooks: ${e.message}")
+                logX(Log.ERROR, TAG, "Failed to install native hooks: ${e.message}")
             }
         }, 15000)
     }
