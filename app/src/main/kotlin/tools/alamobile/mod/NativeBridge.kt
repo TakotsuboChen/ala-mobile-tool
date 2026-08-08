@@ -44,16 +44,37 @@ object NativeBridge {
      * Call this from BOTH AlaMobileModule.onPackageReady (LspModuleClassLoader)
      * AND OverlayManager (VectorModuleClassLoader) to ensure the JNI methods
      * are bound in every ClassLoader that uses NativeBridge.
+     *
+     * context==null 兜底：NPatch 早期 onPackageReady 时 context 常为 null，
+     * 但 System.loadLibrary 在 NPatch 的隔离 ClassLoader 下可能失败
+     *（vivo/OriginOS 上实测失败）。这时需要 forceLoad，但 forceLoad 原本
+     * 依赖 Context 拿模块 APK 路径。改为先从 ClassLoader 反射拿 APK 路径
+     *（NPatch 的 PathClassLoader 的 dex path 里含模块 APK 绝对路径），
+     * 不依赖 Context。
      */
     @JvmStatic
-    fun forceLoad(context: Context) {
+    fun forceLoad(context: Context?) {
         if (isAvailable) return
 
         try {
             Log.i(TAG, "forceLoad: extracting libala-core.so for classloader: ${NativeBridge::class.java.classLoader}")
 
-            val apkPath = context.packageManager.getApplicationInfo(MODULE_PKG, 0).sourceDir
-            val tempLib = File(context.cacheDir, "libala-core-${System.currentTimeMillis()}.so")
+            // 优先用 Context 拿模块 APK 路径（最可靠）。
+            // Context 不可用时（NPatch 早期 onPackageReady context=null），
+            // 从 ClassLoader 反射拿 APK 路径——NPatch 用 PathClassLoader 加载模块，
+            // 其 dex path 含模块 APK 绝对路径。
+            val apkPath = if (context != null) {
+                context.packageManager.getApplicationInfo(MODULE_PKG, 0).sourceDir
+            } else {
+                findModuleApkPathFromClassLoader() ?: run {
+                    Log.e(TAG, "forceLoad: cannot find module APK path (context=null and ClassLoader reflection failed)")
+                    return
+                }
+            }
+            Log.i(TAG, "forceLoad: module APK path = $apkPath")
+
+            val tempLib = File(context?.cacheDir ?: File(System.getProperty("java.io.tmpdir", "/data/local/tmp")),
+                "libala-core-${System.currentTimeMillis()}.so")
 
             ZipFile(apkPath).use { zip ->
                 val entry = zip.getEntry("lib/arm64-v8a/lib${LIB_NAME}.so")
@@ -72,6 +93,67 @@ object NativeBridge {
             Log.i(TAG, "forceLoad successful: ${tempLib.absolutePath}")
         } catch (e: Throwable) {
             Log.e(TAG, "forceLoad failed: ${e.message}", e)
+        }
+    }
+
+    /**
+     * 从 ClassLoader 反射拿模块 APK 路径。
+     * NPatch 用 PathClassLoader（继承 BaseDexClassLoader）加载模块，
+     * 其 pathList.dexElements[].path 含 APK 绝对路径。
+     * 找到含 "tools.alamobile.mod" 的路径即为模块 APK。
+     */
+    private fun findModuleApkPathFromClassLoader(): String? {
+        return try {
+            val cl = NativeBridge::class.java.classLoader ?: return null
+            // BaseDexClassLoader.pathList (DexPathList)
+            val pathListField = cl.javaClass.superclass?.getDeclaredField("pathList")
+                ?: cl.javaClass.getDeclaredField("pathList")
+            pathListField.isAccessible = true
+            val pathList = pathListField.get(cl) ?: return null
+            // DexPathList.dexElements (Element[])
+            val dexElementsField = pathList.javaClass.getDeclaredField("dexElements")
+            dexElementsField.isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            val elements = dexElementsField.get(pathList) as? Array<Any> ?: return null
+            for (element in elements) {
+                // Element.dexFile (DexFile) or Element.path (String)
+                val pathField = try {
+                    element.javaClass.getDeclaredField("path")
+                } catch (_: NoSuchFieldException) {
+                    null
+                }
+                if (pathField != null) {
+                    pathField.isAccessible = true
+                    val path = pathField.get(element) as? String
+                    if (path != null && path.contains(MODULE_PKG)) {
+                        return path
+                    }
+                }
+                // Fallback: Element.dexFile.fileName
+                val dexFileField = try {
+                    element.javaClass.getDeclaredField("dexFile")
+                } catch (_: NoSuchFieldException) {
+                    null
+                }
+                if (dexFileField != null) {
+                    dexFileField.isAccessible = true
+                    val dexFile = dexFileField.get(element) ?: continue
+                    val fileNameField = try {
+                        dexFile.javaClass.getDeclaredField("mFileName")
+                    } catch (_: NoSuchFieldException) {
+                        dexFile.javaClass.getDeclaredField("fileName")
+                    }
+                    fileNameField.isAccessible = true
+                    val fileName = fileNameField.get(dexFile) as? String
+                    if (fileName != null && fileName.contains(MODULE_PKG)) {
+                        return fileName
+                    }
+                }
+            }
+            null
+        } catch (e: Throwable) {
+            Log.w(TAG, "findModuleApkPathFromClassLoader failed: ${e.message}")
+            null
         }
     }
 
@@ -95,6 +177,7 @@ object NativeBridge {
         playerControlsUpdateOffset: Long,
         drsToggle: Long,
         billingManagerAwake: Long,
+        billingManagerGetInstance: Long,
         billingManagerInitializeBilling: Long,
         billingManagerOnOwnedNone: Long,
         billingManagerOnPurchaseFailed: Long,
@@ -111,12 +194,13 @@ object NativeBridge {
 
     /**
      * 独立的 unlock hooks 早期安装——在 onPackageReady 早期调用，
-     * 不等 15 秒延迟，让 hook_awake 能赶上 BillingManager.Awake()。
+     * 不等 15 秒延迟，让 hook_awake/hook_get_instance 能赶上 BillingManager 早期调用。
      */
     @JvmStatic
     external fun initUnlock(
         enableUnlock: Boolean,
         billingManagerAwake: Long,
+        billingManagerGetInstance: Long,
         billingManagerInitializeBilling: Long,
         billingManagerOnOwnedNone: Long,
         billingManagerOnPurchaseFailed: Long,
@@ -147,6 +231,15 @@ object NativeBridge {
 
     @JvmStatic
     external fun setDRSActive(active: Boolean)
+
+    /**
+     * 主动触发一次强制解锁，不依赖 hook 触发时机。
+     * 在 15s 延迟路径中作为 one-shot 调用：通过 get_Instance() 获取 BillingManager
+     * 单例指针，直接调 SetUnlocked(true) 解锁 + OnAlreadyOwned 辅助。
+     * 返回 true 表示解锁执行成功，false 表示拿不到实例（可能 BillingManager 尚未初始化）。
+     */
+    @JvmStatic
+    external fun forceUnlockNow(): Boolean
 
     @JvmStatic
     fun setThrottleSafe(value: Float) {
@@ -208,6 +301,7 @@ object NativeBridge {
             OffsetTable.IRDS_PLAYER_CONTROLS_UPDATE,
             OffsetTable.IRDS_CAR_CONTROLL_INPUT_DRS_TOGGLE,
             OffsetTable.BILLING_MANAGER_AWAKE,
+            OffsetTable.BILLING_MANAGER_GET_INSTANCE,
             OffsetTable.BILLING_MANAGER_INITIALIZE_BILLING,
             OffsetTable.BILLING_MANAGER_ON_OWNED_NONE,
             OffsetTable.BILLING_MANAGER_ON_PURCHASE_FAILED,

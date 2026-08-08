@@ -32,6 +32,7 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
                                            jlong player_controls_update,
                                            jlong drs_toggle,
                                            jlong billing_manager_awake,
+                                           jlong billing_manager_get_instance,
                                            jlong billing_manager_initialize_billing,
                                            jlong billing_manager_on_owned_none,
                                            jlong billing_manager_on_purchase_failed,
@@ -82,15 +83,18 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
     }
 
     // 15s 延迟路径的 unlock hooks：只装一次（如果 early init 没装的话）。
-    // on_already_owned offset 在这里传 0——early initUnlock 已设过。
+    // 这里传完整的 GetInstance / OnAlreadyOwned offset —— early initUnlock
+    // 可能因 libil2cpp.so 未加载而失败，15s 路径必须能独立完成安装。
+    // g_hooks_installed 守卫保证不会重复装。
     unlock_hook_config_t unlock_cfg = {
         .enable_unlock = (bool) enable_unlock,
         .billing_manager_awake_offset = (uintptr_t) billing_manager_awake,
+        .billing_manager_get_instance_offset = (uintptr_t) billing_manager_get_instance,
         .billing_manager_initialize_billing_offset = (uintptr_t) billing_manager_initialize_billing,
         .billing_manager_on_owned_none_offset = (uintptr_t) billing_manager_on_owned_none,
         .billing_manager_on_purchase_failed_offset = (uintptr_t) billing_manager_on_purchase_failed,
         .billing_manager_set_unlocked_offset = (uintptr_t) billing_manager_set_unlocked,
-        .billing_manager_on_already_owned_offset = 0,
+        .billing_manager_on_already_owned_offset = (uintptr_t) billing_manager_on_already_owned,
         .billing_manager_is_unlocked_field_offset = (uintptr_t) billing_manager_is_unlocked_field,
         .billing_manager_has_store_connection_field_offset = (uintptr_t) billing_manager_has_store_connection_field,
         .billing_manager_has_completed_ownership_check_field_offset = (uintptr_t) billing_manager_has_completed_ownership_check_field,
@@ -112,12 +116,13 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
 }
 
 // 独立的 unlock hooks 安装入口——在 onPackageReady 早期调用，
-// 不等 15 秒延迟，让 hook_awake 能赶上 BillingManager.Awake()（场景加载 ~2s 触发）。
+// 不等 15 秒延迟，让 hook_awake/hook_get_instance 能赶上 BillingManager 早期调用。
 // pedal hooks 仍走原来的 15s 延迟路径（writer 线程需要游戏 controller 已存在）。
 JNIEXPORT void JNICALL
 Java_tools_alamobile_mod_NativeBridge_initUnlock(JNIEnv *env, jclass clazz,
                                                   jboolean enable_unlock,
                                                   jlong billing_manager_awake,
+                                                  jlong billing_manager_get_instance,
                                                   jlong billing_manager_initialize_billing,
                                                   jlong billing_manager_on_owned_none,
                                                   jlong billing_manager_on_purchase_failed,
@@ -132,6 +137,7 @@ Java_tools_alamobile_mod_NativeBridge_initUnlock(JNIEnv *env, jclass clazz,
     unlock_hook_config_t unlock_cfg = {
         .enable_unlock = (bool) enable_unlock,
         .billing_manager_awake_offset = (uintptr_t) billing_manager_awake,
+        .billing_manager_get_instance_offset = (uintptr_t) billing_manager_get_instance,
         .billing_manager_initialize_billing_offset = (uintptr_t) billing_manager_initialize_billing,
         .billing_manager_on_owned_none_offset = (uintptr_t) billing_manager_on_owned_none,
         .billing_manager_on_purchase_failed_offset = (uintptr_t) billing_manager_on_purchase_failed,
@@ -143,6 +149,12 @@ Java_tools_alamobile_mod_NativeBridge_initUnlock(JNIEnv *env, jclass clazz,
     };
 
     LOGI("initUnlock: enable_unlock=%d (early install before 15s delay)", enable_unlock);
+    // 提前把 OnAlreadyOwned / GetInstance offset 记到 g_config，
+    // force_unlock_via_on_already_owned 在 hook_awake 里调用时能找到。
+    LOGI("initUnlock: awake=0x%lx get_instance=0x%lx on_already_owned=0x%lx",
+         (unsigned long) billing_manager_awake,
+         (unsigned long) billing_manager_get_instance,
+         (unsigned long) billing_manager_on_already_owned);
 
     if (!unlock_install_hooks(&unlock_cfg)) {
         LOGE("Failed to install unlock hooks (early)");
@@ -192,4 +204,13 @@ Java_tools_alamobile_mod_NativeBridge_setDRSActive(JNIEnv *env, jclass clazz, jb
     (void) env;
     (void) clazz;
     drs_set_active((int) active);
+}
+
+// 主动触发一次强制解锁（不依赖 hook 触发时机）。
+// 在 15s 延迟路径中调用：get_Instance → SetUnlocked(true) → OnAlreadyOwned。
+JNIEXPORT jboolean JNICALL
+Java_tools_alamobile_mod_NativeBridge_forceUnlockNow(JNIEnv *env, jclass clazz) {
+    (void) env;
+    (void) clazz;
+    return unlock_force_now() ? JNI_TRUE : JNI_FALSE;
 }

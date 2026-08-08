@@ -112,12 +112,20 @@ class AlaMobileModule : XposedModule() {
         xposedInterface = this
         logX(Log.INFO, TAG, "xposedInterface set: $this")
 
-        // Install Java hooks for billing bypass
-        try {
-            BillingHook.install(this, param)
-            logX(Log.INFO, TAG, "Java hooks installed successfully")
-        } catch (e: Throwable) {
-            logX(Log.ERROR, TAG, "Failed to install Java hooks: ${e.message}")
+        // ⚠️⚠️ vivo/OriginOS/Android 16 闪退修复：onPackageLoaded 也在
+        // createOrUpdateClassLoaderLocked 内部同步调用（比 onPackageReady 更早）。
+        // 在这里跑 BillingHook.install（Class.forName + xposedInterface.hook）
+        // 会干扰 Resources 初始化 → makeApplicationInner NPE 闪退。
+        // 修复：也延迟到 next main loop。BillingBridge 的 Java hook 是辅助路径
+        //（native SetUnlocked 才是主路径），延迟几毫秒不影响功能。
+        logX(Log.INFO, TAG, "NPatch: deferring BillingHook.install to next main loop")
+        Handler(Looper.getMainLooper()).post {
+            try {
+                BillingHook.install(this, param)
+                logX(Log.INFO, TAG, "Java hooks installed successfully (deferred)")
+            } catch (e: Throwable) {
+                logX(Log.ERROR, TAG, "Failed to install Java hooks: ${e.message}")
+            }
         }
     }
 
@@ -127,12 +135,33 @@ class AlaMobileModule : XposedModule() {
             logX(Log.WARN, TAG, "Not the first package, continuing anyway")
         }
 
+        // ⚠️⚠️ vivo/OriginOS/Android 16 闪退修复：onPackageReady 在
+        // createOrUpdateClassLoaderLocked 内部同步调用（handleBindApplication 路径）。
+        // 此时 LoadedApk 的 Resources 尚未初始化。如果在 onPackageReady 里做任何
+        // 重操作（ShadowHook.init、forceLoad、JNI 调用、甚至 Context 访问），
+        // 会干扰 Resources 创建链路 → makeApplicationInner 时
+        // Resources.getAssets() NPE 闪退。
+        // 修复：onPackageReady 里只做最轻量操作（logX + Handler.post），
+        // 所有重操作全部延迟到主线程下一个循环（handleBindApplication 先完成）。
+        //
+        // 不在这里调 getAppContext() —— context==null 在 vivo 上是正常的（Resources
+        // 还没好），Thread.sleep(500) 也在 main thread，会阻塞 handleBindApplication。
+        // context 的获取移到 deferred block 里。
+        logX(Log.INFO, TAG, "NPatch: deferring all native init + config to next main loop")
+
+        Handler(Looper.getMainLooper()).post {
+            // === 以下所有代码都在 next main loop 执行，handleBindApplication 已完成 ===
+            doPackageReadyDeferred(param)
+        }
+    }
+
+    private fun doPackageReadyDeferred(param: PackageReadyParam) {
         var context = getAppContext()
-        logX(Log.INFO, TAG, "Initial context: $context")
+        logX(Log.INFO, TAG, "Deferred context: $context")
         if (context == null) {
             Thread.sleep(500)
             context = getAppContext()
-            logX(Log.INFO, TAG, "Delayed context: $context")
+            logX(Log.INFO, TAG, "Delayed deferred context: $context")
         }
 
         // 诊断：检查设备 GMS 状态（onPackageReady 时 context 才可用）
@@ -160,13 +189,16 @@ class AlaMobileModule : XposedModule() {
             logX(Log.WARN, TAG, "Unsupported game version, attempting hooks anyway for debugging")
         }
 
+        // ShadowHook + forceLoad + initUnlock 全部在这里同步执行
+        //（已通过 Handler.post 从 onPackageReady 延迟到 next main loop，
+        // handleBindApplication 已完成，Resources 已就绪）。
         try {
             ShadowHook.init(
                 ShadowHook.ConfigBuilder()
                     .setMode(ShadowHook.Mode.UNIQUE)
                     .build()
             )
-            logX(Log.INFO, TAG, "ShadowHook initialized (UNIQUE mode)")
+            logX(Log.INFO, TAG, "ShadowHook initialized (UNIQUE mode, deferred)")
         } catch (e: Throwable) {
             logX(Log.ERROR, TAG, "Failed to initialize ShadowHook: ${e.message}")
             return
@@ -239,32 +271,43 @@ class AlaMobileModule : XposedModule() {
         // 当前 enableManualShift 默认 false，所以 disableAutoGear=false，游戏自动换挡保持原样。
         val enableManualShift = settings?.enableManualShift ?: false
         val disableAutoGear = enableManualShift
-        val enableUnlock = settings?.enableUnlock ?: false
+        // ⚠️ enableUnlock 兜底：settings==null（context 还没可用，NPatch 下 onPackageReady
+        // 早期常 context=null）时默认 true，不默认 false。
+        // 根因：NPatch 启动慢，context 要 15s 才可用，但 BillingManager.Awake() 在 ~2s
+        // 触发。如果默认 false，早期 unlock hooks 被跳过，hook_awake 赶不上 Awake，
+        // native 主动注入 OnAlreadyOwned 的窗口被错过。vivo 等设备上游戏不主动调
+        // Java checkOwned，只有 native 主动注入能解锁——错过 Awake = 解锁失败。
+        // 配套 ModConfig.readFromTargetProcess 的 remoteJson==null fallback（强制
+        // enableUnlock=true），两条路径一致：配置读不到时默认开 unlock。
+        // 用户若真不想解锁，关掉开关 + 游戏在跑时改配置让广播写 local 即可覆盖
+        // （广播路径 settings 非空，enableUnlock 按用户值走）。
+        val enableUnlock = settings?.enableUnlock ?: true
 
-        // 早期安装 unlock hooks——不等 15 秒延迟。
-        // BillingManager.Awake() 在 Unity 场景加载时（启动后 ~2s）就触发，
-        // 15s 延迟的 native init 会错过它。这里读到配置后立即装 unlock hooks，
-        // 让 hook_awake 能赶上 Awake，主动调 OnAlreadyOwned("unlock_alamobile") 完成解锁。
-        // pedal/drs hooks 仍走 15s 延迟路径（writer 线程需要 game controller 已存在）。
+        // forceLoad + initUnlock（deferred 后同步执行，ShadowHook 已 init）
+        logX(Log.INFO, TAG, "NPatch early unlock path: forceLoad + initUnlock (deferred)")
         if (enableUnlock) {
             try {
-                val ctx = getAppContext()
-                if (ctx != null) {
-                    NativeBridge.forceLoad(ctx)
+                if (!NativeBridge.isAvailable) {
+                    NativeBridge.forceLoad(getAppContext())
                 }
-                NativeBridge.initUnlock(
-                    enableUnlock = true,
-                    billingManagerAwake = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_AWAKE,
-                    billingManagerInitializeBilling = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_INITIALIZE_BILLING,
-                    billingManagerOnOwnedNone = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_ON_OWNED_NONE,
-                    billingManagerOnPurchaseFailed = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_ON_PURCHASE_FAILED,
-                    billingManagerSetUnlocked = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_SET_UNLOCKED,
-                    billingManagerOnAlreadyOwned = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_ON_ALREADY_OWNED,
-                    billingManagerIsUnlockedField = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_IS_UNLOCKED_FIELD,
-                    billingManagerHasStoreConnectionField = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_HAS_STORE_CONNECTION_FIELD,
-                    billingManagerHasCompletedOwnershipCheckField = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_HAS_COMPLETED_OWNERSHIP_CHECK_FIELD
-                )
-                logX(Log.INFO, TAG, "Early unlock hooks installed (before 15s delay)")
+                if (NativeBridge.isAvailable) {
+                    NativeBridge.initUnlock(
+                        enableUnlock = true,
+                        billingManagerAwake = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_AWAKE,
+                        billingManagerGetInstance = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_GET_INSTANCE,
+                        billingManagerInitializeBilling = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_INITIALIZE_BILLING,
+                        billingManagerOnOwnedNone = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_ON_OWNED_NONE,
+                        billingManagerOnPurchaseFailed = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_ON_PURCHASE_FAILED,
+                        billingManagerSetUnlocked = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_SET_UNLOCKED,
+                        billingManagerOnAlreadyOwned = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_ON_ALREADY_OWNED,
+                        billingManagerIsUnlockedField = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_IS_UNLOCKED_FIELD,
+                        billingManagerHasStoreConnectionField = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_HAS_STORE_CONNECTION_FIELD,
+                        billingManagerHasCompletedOwnershipCheckField = tools.alamobile.mod.offsets.OffsetTable.BILLING_MANAGER_HAS_COMPLETED_OWNERSHIP_CHECK_FIELD
+                    )
+                    logX(Log.INFO, TAG, "Early unlock hooks installed (deferred, contextWasNull=${getAppContext() == null}, nativeAvail=${NativeBridge.isAvailable})")
+                } else {
+                    logX(Log.ERROR, TAG, "Early unlock: NativeBridge not available after forceLoad")
+                }
             } catch (e: Throwable) {
                 logX(Log.ERROR, TAG, "Early unlock hooks failed: ${e.message}")
             }
@@ -303,12 +346,24 @@ class AlaMobileModule : XposedModule() {
                     NativeBridge.forceLoad(ctx)
                 }
 
-                NativeBridge.initWithOffsets(
-                    enableControlReplacement = enableControlReplacement,
-                    enableAutoDRS = enableAutoDrs,
-                    disableAutoGear = disableAutoGear,
-                    enableUnlock = enableUnlock
-                )
+                // ⚠️ 15s 延迟路径：one-shot 强制解锁兜底。
+                // 在早期 unlock hooks 路径（hook_awake 赶不上 Awake）
+                // 失败时，这里直接调 BillingManager.get_Instance() 获取
+                // 单例，调 SetUnlocked(true) 解锁。不依赖 hook 触发时机。
+                // 先试 unlock hooks 安装（如果早期没装上的话），再试 forceUnlockNow。
+                if (NativeBridge.isAvailable) {
+                    NativeBridge.initWithOffsets(
+                        enableControlReplacement = enableControlReplacement,
+                        enableAutoDRS = enableAutoDrs,
+                        disableAutoGear = disableAutoGear,
+                        enableUnlock = enableUnlock
+                    )
+                    // one-shot 强制解锁兜底，无论 hook 是否装上
+                    val unlocked = NativeBridge.forceUnlockNow()
+                    logX(Log.INFO, TAG, "15s delay: forceUnlockNow returned $unlocked")
+                } else {
+                    logX(Log.WARN, TAG, "NativeBridge not available, skipping 15s init and unlock")
+                }
                 // native 真正装好之后才立标记 —— 在此之前不拦，确保
                 // 第一个 ClassLoader 自己的 onPackageReady 流程不被自己拦掉
                 markNativeInstalled()
