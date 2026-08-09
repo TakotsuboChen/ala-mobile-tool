@@ -22,12 +22,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.DisplaySettings
+import androidx.compose.material.icons.rounded.DonutSmall
+import androidx.compose.material.icons.rounded.Egg
 import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Straighten
 import androidx.compose.material.icons.rounded.SwapVert
-import androidx.compose.material.icons.rounded.Traffic
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -101,14 +102,27 @@ fun ConfigurePage(
                                 onSave()
                             }
                         )
+                        // 原生牵引力控制（TC）开关。默认开启。借"游戏手柄已连接"
+                        // 机制，强制玩家车 tclEnable 生效——只作用玩家车，不破坏
+                        // 陀螺仪/触摸转向，也根治 M18 的 AI 误控。
                         SwitchRow(
-                            title = "自动 DRS（开发中）",
-                            summary = "在 DRS 区域自动开启 DRS",
-                            icon = Icons.Rounded.Traffic,
-                            checked = uiState.enableAutoDrs.value,
-                            enabled = false,
+                            title = "牵引力控制",
+                            summary = "启用原生牵引力控制（TC）",
+                            icon = Icons.Rounded.DonutSmall,
+                            checked = uiState.enableTc.value,
                             onCheckedChange = {
-                                uiState.enableAutoDrs.value = it
+                                uiState.enableTc.value = it
+                                onSave()
+                            }
+                        )
+                        // 原生防抱死（ABS）开关。默认开启。
+                        SwitchRow(
+                            title = "防抱死",
+                            summary = "启用原生防抱死（ABS）",
+                            icon = Icons.Rounded.Egg,
+                            checked = uiState.enableAbs.value,
+                            onCheckedChange = {
+                                uiState.enableAbs.value = it
                                 onSave()
                             }
                         )
@@ -224,11 +238,10 @@ fun ConfigurePage(
                             }
                         }
                         SwitchRow(
-                            title = "手动换挡（开发中）",
+                            title = "手动换挡",
                             summary = "启用换挡悬浮窗并关闭游戏自动换挡",
                             icon = Icons.Rounded.Bolt,
                             checked = uiState.enableManualShift.value,
-                            enabled = false,
                             onCheckedChange = {
                                 uiState.enableManualShift.value = it
                                 onSave()

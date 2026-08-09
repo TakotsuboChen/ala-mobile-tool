@@ -48,6 +48,13 @@ object ModConfig {
     const val KEY_DISABLE_AUTO_GEAR = "disable_auto_gear"
     const val KEY_ENABLE_MANUAL_SHIFT = "enable_manual_shift"
     const val KEY_ENABLE_UNLOCK = "enable_unlock"
+    // 原生牵引力控制（TC）/ 防抱死（ABS）。默认开启。
+    // 借"游戏手柄已连接"机制：非手柄模式下游戏默认关 TC/ABS，
+    // 模块强制玩家车 tclEnable/absEnable 打开即可原生生效，且只作用玩家车
+    //（IRDSPlayerControls 组件只挂玩家车）——不破坏陀螺仪/触摸转向，也顺手
+    // 根治 M18 的 AI 误控（原生输入链路天然只处理玩家车）。
+    const val KEY_ENABLE_TC = "enable_tc"
+    const val KEY_ENABLE_ABS = "enable_abs"
 
     // Pedal mapping
     const val KEY_PEDAL_MODE = "pedal_mode"
@@ -142,6 +149,9 @@ object ModConfig {
         const val DISABLE_AUTO_GEAR = false
         const val ENABLE_MANUAL_SHIFT = false
         const val ENABLE_UNLOCK = false
+        // 原生 TC/ABS 默认开启。
+        const val ENABLE_TC = true
+        const val ENABLE_ABS = true
         val PEDAL_MODE = PedalMode.SINGLE
         const val PEDAL_DEADZONE = 0.05f
         const val PEDAL_TRANSITION = 0.5f
@@ -231,6 +241,14 @@ object ModConfig {
                     KEY_ENABLE_UNLOCK,
                     Defaults.ENABLE_UNLOCK
                 ),
+                enableTc = json.optBoolean(
+                    KEY_ENABLE_TC,
+                    Defaults.ENABLE_TC
+                ),
+                enableAbs = json.optBoolean(
+                    KEY_ENABLE_ABS,
+                    Defaults.ENABLE_ABS
+                ),
                 pedalDeadzone = json.optDouble(
                     KEY_PEDAL_DEADZONE,
                     Defaults.PEDAL_DEADZONE.toDouble()
@@ -285,6 +303,8 @@ object ModConfig {
             put(KEY_DISABLE_AUTO_GEAR, settings.disableAutoGear)
             put(KEY_ENABLE_MANUAL_SHIFT, settings.enableManualShift)
             put(KEY_ENABLE_UNLOCK, settings.enableUnlock)
+            put(KEY_ENABLE_TC, settings.enableTc)
+            put(KEY_ENABLE_ABS, settings.enableAbs)
             put(KEY_PEDAL_DEADZONE, settings.pedalDeadzone.toDouble())
             put(KEY_PEDAL_TRANSITION, settings.pedalTransition.toDouble())
             put(KEY_BRAKE_TRANSITION, settings.brakeTransition.toDouble())
@@ -513,6 +533,8 @@ object ModConfig {
                 disableAutoGear = j.optBoolean(KEY_DISABLE_AUTO_GEAR, Defaults.DISABLE_AUTO_GEAR),
                 enableManualShift = j.optBoolean(KEY_ENABLE_MANUAL_SHIFT, Defaults.ENABLE_MANUAL_SHIFT),
                 enableUnlock = j.optBoolean(KEY_ENABLE_UNLOCK, Defaults.ENABLE_UNLOCK),
+                enableTc = j.optBoolean(KEY_ENABLE_TC, Defaults.ENABLE_TC),
+                enableAbs = j.optBoolean(KEY_ENABLE_ABS, Defaults.ENABLE_ABS),
                 pedalDeadzone = j.optDouble(KEY_PEDAL_DEADZONE, Defaults.PEDAL_DEADZONE.toDouble()).toFloat(),
                 pedalTransition = j.optDouble(KEY_PEDAL_TRANSITION, Defaults.PEDAL_TRANSITION.toDouble()).toFloat(),
                 brakeTransition = j.optDouble(KEY_BRAKE_TRANSITION, Defaults.BRAKE_TRANSITION.toDouble()).toFloat(),
@@ -583,6 +605,8 @@ object ModConfig {
             disableAutoGear = Defaults.DISABLE_AUTO_GEAR,
             enableManualShift = Defaults.ENABLE_MANUAL_SHIFT,
             enableUnlock = Defaults.ENABLE_UNLOCK,
+            enableTc = Defaults.ENABLE_TC,
+            enableAbs = Defaults.ENABLE_ABS,
             pedalDeadzone = Defaults.PEDAL_DEADZONE,
             pedalTransition = Defaults.PEDAL_TRANSITION,
             brakeTransition = Defaults.BRAKE_TRANSITION,
@@ -605,6 +629,8 @@ object ModConfig {
         val disableAutoGear: Boolean,
         val enableManualShift: Boolean,
         val enableUnlock: Boolean,
+        val enableTc: Boolean = Defaults.ENABLE_TC,
+        val enableAbs: Boolean = Defaults.ENABLE_ABS,
         val pedalDeadzone: Float,
         val pedalTransition: Float,
         val brakeTransition: Float,

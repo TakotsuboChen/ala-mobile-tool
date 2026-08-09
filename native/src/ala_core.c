@@ -29,6 +29,9 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
                                            jlong actual_throttle_field, jlong actual_brake_field,
                                            jlong clutch_field, jlong gear_field,
                                            jlong drivetrain_fixed_update, jlong drivetrain_automatic_field,
+                                           jlong drivetrain_do_gear_shifting,
+                                           jlong traction_filter,
+                                           jlong handle_abs,
                                            jlong player_controls_update,
                                            jlong drs_toggle,
                                            jlong billing_manager_awake,
@@ -43,7 +46,8 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
                                            jlong billing_manager_has_completed_ownership_check_field,
                                            jboolean enable_controls, jboolean enable_drs,
                                            jboolean disable_auto_gear,
-                                           jboolean enable_unlock) {
+                                           jboolean enable_unlock,
+                                           jboolean enable_tc, jboolean enable_abs) {
     (void) env;
     (void) clazz;
     (void) clutch_field;
@@ -51,6 +55,8 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
 
     pedal_hook_config_t pedal_cfg = {
         .enable_control_replacement = (bool) enable_controls,
+        .enable_tc = (bool) enable_tc,
+        .enable_abs = (bool) enable_abs,
         .set_throttle_offset = (uintptr_t) set_throttle,
         .set_brake_offset = (uintptr_t) set_brake,
         .shift_up_offset = (uintptr_t) shift_up,
@@ -64,6 +70,9 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
         .drivetrain_offset = 0x98,
         .drivetrain_automatic_field_offset = drivetrain_automatic_field,
         .drivetrain_fixed_update_offset = (uintptr_t) drivetrain_fixed_update,
+        .drivetrain_do_gear_shifting_offset = (uintptr_t) drivetrain_do_gear_shifting,
+        .traction_filter_offset = (uintptr_t) traction_filter,
+        .handle_abs_offset = (uintptr_t) handle_abs,
         .player_controls_update_offset = (uintptr_t) player_controls_update
     };
 
@@ -204,6 +213,14 @@ Java_tools_alamobile_mod_NativeBridge_setDRSActive(JNIEnv *env, jclass clazz, jb
     (void) env;
     (void) clazz;
     drs_set_active((int) active);
+}
+
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_setTcAbs(JNIEnv *env, jclass clazz,
+                                                jboolean enable_tc, jboolean enable_abs) {
+    (void) env;
+    (void) clazz;
+    pedal_set_tc_abs((int) enable_tc, (int) enable_abs);
 }
 
 // 主动触发一次强制解锁（不依赖 hook 触发时机）。
