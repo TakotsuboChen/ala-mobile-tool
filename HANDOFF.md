@@ -1,78 +1,55 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-08-11T02:45:00+08:00 · Git HEAD: 最近提交 `b9bb03a`
+生成时间: 2026-08-11T03:30:16+08:00 · Git HEAD: 最近提交 `062bd05`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: `main` @ `b9bb03a` (2026-08-11)
-- 漂移检查: `git rev-parse HEAD` 是否仍 = `b9bb03a`；变了说明快照可能过期。
+- 锚点: `main` @ `062bd05` (2026-08-11)
+- 漂移检查: `git rev-parse HEAD` 是否仍 = `062bd05`；变了说明快照可能过期。
 - 工作区: 本交接结束时为 clean（所有改动已 commit + push）。
-- 先读: `CLAUDE.md` M22 条目 + 本文件。
+- 先读: `CLAUDE.md` M23 条目 + 本文件。
 
 ## 1. 当前目标
-M22 配置不生效修复 + 解锁弹窗根治已完成。**下一步是找到 ABS 真正实现位置 + 重做手动换挡 + 发 Beta 3。**
+M23 两个任务：替换主菜单音乐（已完成并真机验证 ✓）+ **NPatch 下游戏不运行时改配置不生效（待修复）**。
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **分支 `main` 已 push 到 origin**——`git log --oneline -3` 显示 `b9bb03a` (docs) + `1c7d21b` (fix) + `554cc2e` (docs)。
-- [V] **build + lint 全绿**——`./gradlew :app:assembleDebug :app:lint` → `BUILD SUCCESSFUL`（50 tasks: 11 executed, 39 up-to-date，exit 0）。
-- [V] **配置不生效已修复**——`App.onServiceBind` 新增 `flushLocalConfigToRemote`，service 异步绑上时把 filesDir 配置补写到 remote prefs。真机验证：杀游戏→改配置→启动游戏→配置生效。
-- [V] **解锁弹窗已根治**——`unlock_hook.c` preserve 模式：`enableUnlock=false` 时 hook Awake 预设 IsUnlocked=true + 挡 OnOwnedNone（阻止 SetUnlocked(false) 重置）+ 挡 OnPurchaseFailed。真机验证：连续启动 4 次，第一次弹窗（首次解锁），2-4 次直接进入解锁状态无弹窗。
-- [V] **enableUnlock 强制 fallback 已移除**——`readFromTargetProcess` 不再在 remote 不可用时强制 `enableUnlock=true`；`AlaMobileModule` 15s 路径 `forceUnlockNow` 守卫 `enableUnlock`。真机验证：解锁开关关闭时不解锁、不弹窗。
-
-### build 输出（本次交接 run 真实输出）
-```
-$ ./gradlew :app:assembleDebug :app:lint
-BUILD SUCCESSFUL in 30s
-50 actionable tasks: 11 executed, 39 up-to-date
-EXIT=0
-```
+- [V] **分支 `main` 已 push 到 origin**——`git log --oneline -3` 显示 `062bd05` (docs M23) + `1147209` (feat music) + `8a66041` (fix 描述)。
+- [V] **build 全绿**——`./gradlew :app:assembleDebug` → `BUILD SUCCESSFUL`（39 tasks: 8 executed, 31 up-to-date，exit 0）。lint 本次未单独跑。
+- [V] **音乐替换已真机验证**——用户确认"音乐工作完好"。APK installed（381QYFCN22B9A / MEIZU 20 / Android 16）。MP3 已打包进 `res/raw/f1_music.mp3`（2185567 字节，`unzip -l` 确认在 APK 内）。
+- [V] **LSPosed 下配置不生效已解决**——M22 remote prefs + flush 修复，真机验证"游戏不运行时改配置→启动生效"。
+- [V] **NPatch 下配置不生效仍存在**——用户本次报告：LSPosed 生效，NPatch 不生效。**根因未定位，待修复**。
 
 ## 3. 决策与理由
-- **`flushLocalConfigToRemote` 在 `onServiceBind` 调用** [V]——filesDir 始终是最新值（`ModConfig.write` 每次都写），service 异步绑上时统一 flush，不依赖写时 service 是否就绪。否决：在 `ModConfig.write` 里轮询等 service（阻塞 UI 线程）、在 `ConfigActivity.onCreate` 里延迟重写（时机不可控）。
-- **preserve 模式挡 `OnOwnedNone`** [V]——`OnOwnedNone` 不只显示 ATTENTION 弹窗，它内部还调 `SetUnlocked(false)` 把预设的 `IsUnlocked=true` 清掉。只挡弹窗不挡方法调用 = 预设被清 = `OnAlreadyOwned` 来时检测 false→true 变化 = 仍弹窗。必须完全吞掉方法调用。否决：只 hook Awake 不挡 OnOwnedNone（第一次测试验证：三次启动都弹窗，was=0 证明 IsUnlocked 被 OnOwnedNone 清掉了）。
-- **移除 `enableUnlock` 强制 fallback** [V]——M19 的强制 fallback 是为 NPatch 无 daemon 设计，但 config flush 修复后 remote 不再断链。强制 fallback 导致用户关了开关仍被强制解锁 + 弹窗，体验不可接受。`AlaMobileModule` 里 `settings==null` 时 `enableUnlock` 仍默认 true（零配置首次启动兜底），与"remote 读不到但 local 有值"区分对待。
-- **preserve 模式不 hook GetInstance/InitializeBilling** [V]——正版用户需要游戏自己走完 billing 流程（OnBillingConnected → OnAlreadyOwned → SetUnlocked）。只挡负面弹窗 + 预设 IsUnlocked=true，不干扰游戏正常 billing 逻辑。
+- **音乐替换用 native hook 主菜单心跳 + Java MediaPlayer** [V]——`handleMusicVolume.Update()`（RVA 0x1A45100）只在主菜单场景每帧调用，作为"主菜单心跳"信号；`AudioSource.set_volume()`（RVA 0x324246C）静音游戏原生音乐；Java `MusicPlayer` 提取内置 MP3 → MediaPlayer 循环 → 每 1s 轮询 `isInMainMenu()`。否决：hook `AudioSource.Play()` 替换 clip（需创建 IL2CPP AudioClip，复杂）+ hook `SplashscreenManager.Awake`（只启动画面一次，不覆盖主菜单）。
+- **MP3 从 ClassLoader 提取而非 R 资源** [V]——`BitmapFactory.decodeResource` 在游戏进程返 null（游戏 Resources 不识模块 R），`PackageManager.getResourcesForApplication` 抛 NameNotFoundException。用 `ClassLoader.getResourceAsStream("res/raw/f1_music.mp3")` 绕过包可见性（BaseDexClassLoader 把 APK 当 zip）。
+- **保存 MP3 放 cacheDir 而非 internalFilesDir** [V]——游戏进程对游戏 cacheDir 有写权限，MediaPlayer.setDataSource 需要真实文件路径。
 
 ## 4. 失败的尝试 — 不要再试
-- **只 hook Awake 预设 IsUnlocked=true 不挡 OnOwnedNone** [V]——`OnOwnedNone` 内部调 `SetUnlocked(false)` 把预设的 true 清掉，`OnAlreadyOwned` 来时检测 false→true 变化 → 仍弹"Fresh unlock"窗。native 日志 `Awake(preserve): Set IsUnlocked=true (was=0)` 三次都触发，但三次都弹窗证明 IsUnlocked 被后续 OnOwnedNone 清掉了。必须同时挡 OnOwnedNone。
-- **（前向搬运）** 写 `tclEnable=0` 关 TC、写 `absEnable=0` 关 ABS、hook HandleABS、hook DoGearShifting 整段跳过、FixedUpdate 写 `automatic=false`、`OnAlreadyOwned` 手写 IL2CPP string、`dlopen("libil2cpp.so")`、`forceUnlockNow` 15s 调 `get_Instance()`、只 defer `onPackageReady` 不 defer `onPackageLoaded`、ShadowHook SHARED 模式、`carPilot`(0x68) 作玩家判据、`System.getProperty(MODULE_LOADED_FLAG)` 作激活判定、`openRemoteFile` 读模块 filesDir、legacy `XSharedPreferences`、模块进程写公共 `/sdcard/`、ContentProvider 跨进程、`createPackageContext`、`by lazy` 只改缓存、`applyCurve` 作用单字段、BRAKE 从底向上画水位式、M12 OverlayEditView 传 settings.*Position 作 defaultPosition、SINGLE/DUAL 共用 pedal_position 字段、手写 ImageVector.Builder + PathBuilder 转换 SVG、Inkscape object-stroke-to-path 把 stroke 转 fill、Gearbox 单 path evenOdd、Gearbox 单 path NonZero + 反向缠绕、ABS "ABS" 文字 fill/stroke 渲染、仅凭 `App.xposedService != null` 判激活——均不再试。
+- **（前向搬运 M22）** 只 hook Awake 预设 IsUnlocked=true 不挡 OnOwnedNone、`tclEnable=0` 关 TC、`absEnable=0` 关 ABS、hook HandleABS、hook DoGearShifting 整段跳过、FixedUpdate 写 `automatic=false`、`OnAlreadyOwned` 手写 IL2CPP string、`dlopen("libil2cpp.so")`、`forceUnlockNow` 15s 调 `get_Instance()`、只 defer `onPackageReady` 不 defer `onPackageLoaded`、ShadowHook SHARED 模式、`carPilot`(0x68) 作玩家判据、`System.getProperty(MODULE_LOADED_FLAG)` 作激活判定、`openRemoteFile` 读模块 filesDir、legacy `XSharedPreferences`、模块进程写公共 `/sdcard/`、ContentProvider 跨进程、`createPackageContext`、`by lazy` 只改缓存、`applyCurve` 作用单字段、BRAKE 从底向上画水位式、M12 OverlayEditView 传 settings.*Position 作 defaultPosition、SINGLE/DUAL 共用 pedal_position 字段、手写 ImageVector.Builder + PathBuilder 转换 SVG、Inkscape object-stroke-to-path 把 stroke 转 fill、Gearbox 单 path evenOdd、Gearbox 单 path NonZero + 反向缠绕、ABS "ABS" 文字 fill/stroke 渲染、仅凭 `App.xposedService != null` 判激活、`openRemoteFile` 读 LSPosed daemon 目录当模块 filesDir——均不再试。
 
 ## 5. 已知坑
-- **⚠️ HandleABS 是死代码** [V]——全 so 无 `bl 0x1a5763c` 调用。ABS 真正实现位置未知。需更深入反汇编。
-- **⚠️ DoGearShifting 不能整段跳过** [V]——游戏起步需要 DoGearShifting 内的离合器结合/挂挡逻辑。
+- **⚠️ NPatch 无 daemon 无管理器，config-sync 断链** [?]——NPatch embedded/local 模式（patcher 打包模块进游戏）无 daemon、无 `top.nkbe.npatch` 管理器 ContentProvider。`getRemotePreferences` 和 `bindNpatchRemoteService` 都不可用。`ModConfig.write` 只写模块 filesDir + 广播；游戏没运行时广播被系统丢弃 → 下次启动 `readFromTargetProcess` 读不到 remote prefs（无 daemon），本地 externalFilesDir 也读不到（模块 filesDir 与游戏文件隔离）。**这是本次待修问题的根因假设，未验证。**
+- **⚠️ HandleABS 是死代码** [V]——全 so 无 `bl 0x1a5763c` 调用。ABS 真正实现位置未知。
+- **⚠️ DoGearShifting 不能整段跳过** [V]——游戏起步需要其离合器结合/挂挡逻辑。
 - **⚠️ FixedUpdate 每帧覆盖 automatic** [V]——`0x1a5de94: strb w9,[x19,#0xbc]`。
 - **⚠️ 游戏每帧覆盖 tclEnable/absEnable** [V]——logcat `before=1 after=1`。
-- **⚠️ Inkscape text-to-path 产出 centerline 而非 outline** [V]——system-ui 字体的 text-to-path 产出单线 centerline path（无 z），不是闭合轮廓。fill/stroke 渲染都不理想。小字体图标不要用 Inkscape text-to-path。
-- **⚠️ ImageVector evenOdd 对重叠子路径产生花瓣空洞** [V]——齿轮圆+齿矩形 2 层重叠 = 偶数 = 挖空。齿轮类图标不要用 evenOdd。
-- **⚠️ ImageVector NonZero 反向缠绕孔洞可能不可见** [V]——理论 winding=0 挖空，实际渲染全黑。不要依赖 arc sweep 方向做反向缠绕挖洞。
-- **LSPosed 首次安装推 binder 但不等于已启用** [V]——LSPosed 检测到已安装 xposed 模块 APK 时，模块进程首次创建推 daemon binder（即使 Manager 未启用）。必须用 `getScope()` 验证。
-- **daemon binder 仅首次安装推一次** [V]——清后台后进程重启，daemon 不再重复推 binder。这解释了"第一次已激活、第二次未激活"。
-- **OnOwnedNone 内部调 SetUnlocked(false) 重置 IsUnlocked** [V]——M22 preserve 模式发现：只挡弹窗不挡方法调用 = 预设的 IsUnlocked=true 被清掉。必须完全吞掉 OnOwnedNone 方法调用。
-- **油门＞0 时 AI 车被误控** [?]——M18 遗留，本次未单独验证。
+- **油门＞0 时 AI 车被误控** [?]——M18 遗留，未在本会话验证。
 - **横屏 `displayMetrics.heightPixels` 返回短边** [V]。
-- **versionCode 用 CLAUDE.md M8 表格锚点反推** [V]——Beta 2=`100220`→Beta 3=`100230`。
+- **versionCode 用 CLAUDE.md M8 表格锚点反推** [V]——Beta 3=`100230`。
 - **ConfigActivity 进程不被 LSPosed 注入** [V]。
-- **miuix 默认 primary 是蓝不是绿** [V]——`0xFF3482FF`。
-- **Android 13+ registerReceiver 需 flag** [V]。
 - **PedalOverlayView 构造拷 settings 快照** [V]——配置变更必须重建 view。
-- **applyCurve exponent 方向** [V]——<1 是 ease-out，拟真用 0.66。
 - **ConfigProvider.kt 已废弃** [?]——待清理。
 - **共存版双 ClassLoader** [?]——`markNativeInstalled()` 守卫拦第二个。
-- **NPatch `references/` 克隆的 Gradle 文件干扰主项目 build** [V]——已删 settings.gradle.kts + build.gradle.kts + gradle/。
-- **Inkscape flatten 工具链在 /tmp 临时安装** [V]——Inkscape apt 安装持久，svgo/svgpathtools 在 /tmp（重启丢失）。如需再次 flatten SVG 需重装。
+- **ClassLoader.getResourceAsStream 在隔离 ClassLoader 下可能读不到 raw** [?]——音乐替换真机已验证走的是主路径，未确认备选路径是否触发。
 
 ## 6. 下一步（有序）
-1. **找到 ABS 真正实现位置**——HandleABS 是死代码，需反汇编研究：搜全 so 对 `absTriggered`(0xC8) 的写入点、对 `absEnable`(0xC4) 的所有 ldrb 读取点，或查 IRDSSimplePhysics.FixedUpdate 刹车段是否含 ABS。
-2. **重做手动换挡关自动换挡**——DoGearShifting 不能整段跳过。需反汇编确认"自动升降挡"与"起步挂挡"的区别，可能只需禁自动升降挡部分。
-3. **恢复 ABS/手动换挡开关**——找到正确实现后，取消 `ConfigurePage.kt` 中的 `/* ... */` 注释。
-4. **验证 AI 车误控是否已根治**——`proxy_player_controls_update` 天然只跑玩家车，需真机多人模式验证。
-5. **清理诊断日志 + HandleABS hook**——HandleABS hook 无用可删。
-6. **发 Beta 3**——versionCode `100230`，versionName `1.0.0 Beta 3`。三文件同步 + CI workflow `prerelease: true` + tag `v1.0.0-Beta-3`。
-7. **可选：清理 ConfigProvider.kt**——已废弃，broadcast superseded。
+1. **修复 NPatch 配置不生效**——根因假设：NPatch embedded/local 无 daemon，`getRemotePreferences`/`bindNpatchRemoteService` 不可用，配置只写模块 filesDir + 广播，游戏不运行时广播丢失。需研究：NPatch 是否有可用的跨进程配置机制（如 patcher 注入的 shared dir、或 `openRemoteFile` 在 NPatch 下的路径、或让 `ModConfig.write` 同时写一个游戏进程可读的公共位置）。**先抓 NPatch 的 logcat 确认 `readFromTargetProcess` 走哪条分支（remote 空 / local 空 / 哪种 fallback），再定方案。**
+2. **验证 NPatch 下音乐替换是否也受影响**——音乐开关走的也是 `enableMusicReplace` 配置链路，若 NPatch 配置读不到则音乐开关同样不生效。需一并确认。
+3. **清理诊断日志 + HandleABS hook**——HandleABS hook 无用可删。
+4. **发 Beta 3**——versionCode `100230`，versionName `1.0.0 Beta 3`。三文件同步 + CI workflow `prerelease: true` + tag `v1.0.0-Beta-3`。**等 NPatch 配置修复完再发。**
+5. **可选：清理 ConfigProvider.kt**——已废弃。
 
 ## 7. 留给用户的开放问题
-- ABS 真正实现位置在哪？HandleABS 是死代码，`absEnable` 字段不被内联 ABS 读取。是否在 Unity WheelCollider 引擎层（无法 IL2CPP hook）？还是在别的 IL2CPP 类里？
-- 手动换挡关自动换挡：DoGearShifting 内"自动升降挡"与"起步挂挡"如何区分？能否只禁前者？
+- NPatch embedded/local 模式（无 daemon 无管理器）下，模块配置如何跨进程同步到游戏进程？是否有官方机制？
 - M18 AI 车误控是否已由 `proxy_player_controls_update` 天然玩家车过滤根治？需真机多人验证。
-- Gearbox 最新方案（两齿轮 45° 对角线环+齿帽分离）效果如何？手动换挡开关已注释，图标暂时不显示。恢复开关时需用户确认。
-- Inkscape flatten 工具链的 svgo/svgpathtools 在 /tmp，重启后丢失。是否需要持久化安装？
+- 音乐替换的 ClassLoader.getResourceAsStream 备选路径是否触发过？（真机日志 `MusicPlayer:` 可确认）
