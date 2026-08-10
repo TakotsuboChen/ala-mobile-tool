@@ -16,6 +16,7 @@ import tools.alamobile.mod.overlay.OverlayPosition
  */
 object ModConfig {
 
+    private const val TAG = "AlaMobileTool"
     private const val FILE_NAME = "ala_tool_config.json"
     private const val MODULE_PACKAGE = "tools.alamobile.mod"
 
@@ -424,78 +425,113 @@ object ModConfig {
             if (reader != null) {
                 val content = reader()
                 android.util.Log.i(
-                    "AlaMobileTool",
+                    TAG,
                     "readFromTargetProcess: remote prefs ${if (content != null) "ok len=${content.length}" else "null (key not in daemon db)"}"
                 )
                 content
             } else null
         } catch (e: Throwable) {
-            android.util.Log.w("AlaMobileTool", "readFromTargetProcess: remote prefs failed, falling back to local", e)
+            android.util.Log.w(TAG, "readFromTargetProcess: remote prefs failed, falling back to local", e)
             null
         }
 
+        // 如 Remote Preferences 已有数据，直接走 remote 路径（LSPosed daemon 或 NPatch
+        // 管理器 ContentProvider 写入的），这是最权威的路径。
+        if (remoteJson != null) {
+            val dir = context.getExternalFilesDir(null)
+            val localJson = if (dir != null) {
+                val file = File(dir, FILE_NAME)
+                if (file.exists()) {
+                    try { file.readText() } catch (e: Throwable) { null }
+                } else null
+            } else null
+            val merged = mergePositionFromLocal(remoteJson, localJson)
+            val settings = fromJson(merged)
+            android.util.Log.i(
+                TAG,
+                "Config via remote prefs (merged local position): pedalMode=${settings.pedalMode} " +
+                    "remotePreview=${remoteJson.take(80).replace('\n', ' ')}"
+            )
+            return settings
+        }
+
+        // Remote Preferences 不可用时（NPatch local 模式无 daemon），尝试从模块进程的
+        // ConfigProvider ContentProvider 读取模块 filesDir 的最新配置。
+        // NPatch local 模式下，游戏进程的 PackageManager 能看到模块包（NPatch loader
+        // 绕过了 Android 11+ 包可见性限制），ConfigProvider 已 exported=true，可访问。
+        // LSPosed 模式下此调用会抛 IllegalArgumentException（Unknown authority）或
+        // SecurityException（包不可见），静默回退到本地文件路径。
+        val moduleConfigJson = try {
+            val uri = android.net.Uri.parse("content://tools.alamobile.mod.config")
+            val result = context.contentResolver.call(uri, "read_config", null, null)
+            val json = result?.getString("json")
+            if (json != null && json.isNotEmpty()) {
+                android.util.Log.i(TAG, "readFromTargetProcess: ConfigProvider ok, len=${json.length}")
+                json
+            } else {
+                android.util.Log.w(TAG, "readFromTargetProcess: ConfigProvider returned empty/null")
+                null
+            }
+        } catch (e: Throwable) {
+            android.util.Log.i(TAG, "readFromTargetProcess: ConfigProvider not reachable (expected in LSPosed mode): ${e.message?.take(80)}")
+            null
+        }
+
+        // 有模块 ConfigProvider 数据：用模块配置（非 position 字段）+ 本地 position 合并。
+        // 这修复了 NPatch local 模式下"游戏不运行时改配置→启动游戏读旧值"的问题。
+        if (moduleConfigJson != null) {
+            // 本地 externalFilesDir JSON：收 position 字段（拖拽时 saveOverlayPosition 写）。
+            val dir = context.getExternalFilesDir(null)
+            val localJson = if (dir != null) {
+                val file = File(dir, FILE_NAME)
+                if (file.exists()) {
+                    try { file.readText() } catch (e: Throwable) { null }
+                } else null
+            } else null
+            val merged = mergePositionFromLocal(moduleConfigJson, localJson)
+            val settings = fromJson(merged)
+            android.util.Log.i(
+                TAG,
+                "Config via module ConfigProvider (merged local position): pedalMode=${settings.pedalMode} "
+            )
+            return settings
+        }
+
         // 本地 externalFilesDir JSON：ConfigReceiver 收广播后写，且拖拽 position
-        // 存这里。无论 Remote Preferences 成功与否，position 都必须从本地读——daemon
+        // 存这里。游戏运行时广播方案仍可靠，作为兜底。
+        // 无论 Remote Preferences 成功与否，position 都必须从本地读——daemon
         // 的 JSON 不含 position（ConfigActivity 不管 position）。
         val dir = context.getExternalFilesDir(null) ?: run {
-            android.util.Log.w("AlaMobileTool", "readFromTargetProcess: externalFilesDir null")
-            return if (remoteJson != null) {
-                // 有 remote 配置但拿不到本地 position 目录——用 remote 配置 + 默认 position。
-                withPositionDefaults(fromJson(remoteJson))
-            } else defaultSettings()
+            android.util.Log.w(TAG, "readFromTargetProcess: externalFilesDir null, using defaults")
+            return defaultSettings()
         }
         val file = File(dir, FILE_NAME)
         android.util.Log.i(
-            "AlaMobileTool",
+            TAG,
             "readFromTargetProcess: local path=${file.absolutePath} exists=${file.exists()} " +
                 "lastModified=${if (file.exists()) java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date(file.lastModified())) else "n/a"} " +
                 "now=${java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())}"
         )
 
-        // 读取本地 JSON 用于合并 position（可能也含非 position 字段，作为 remote 不可用时的兜底）。
         val localJson = if (file.exists()) {
             try { file.readText() } catch (e: Throwable) {
-                android.util.Log.w("AlaMobileTool", "readFromTargetProcess: local read failed", e)
+                android.util.Log.w(TAG, "readFromTargetProcess: local read failed", e)
                 null
             }
         } else null
 
-        // remote 优先：用 remote 的非 position 字段 + local 的 position 字段。
-        // remote 不可用时回退 local 整体（现有行为），再回退默认。
-        //
-        // ⚠️ enableUnlock 兜底已移除（原 M19 设计：remote 不可用时强制 true）。
-        // 原因：用户关掉解锁开关后，如果 remote 恰好读不到（游戏不运行时改配置
-        // → 启动游戏 remote 刚绑上还没 flush 完，或 NPatch 无 daemon），fallback
-        // 强制 enableUnlock=true → 解锁 hook 触发 → 弹"解锁成功"弹窗。用户关了
-        // 开关还被强制解锁，体验不可接受。
-        // 现在尊重 local/默认值里的 enableUnlock：用户关了就不解锁，开了就解锁。
-        // NPatch embedded/local 无 daemon 场景的解锁兜底改由 AlaMobileModule 里
-        // settings==null 时默认 true 处理（那里是"配置完全读不到"而非"remote 读不到"）。
-        return when {
-            remoteJson != null -> {
-                val merged = mergePositionFromLocal(remoteJson, localJson)
-                val settings = fromJson(merged)
-                android.util.Log.i(
-                    "AlaMobileTool",
-                    "Config via remote prefs (merged local position): pedalMode=${settings.pedalMode} " +
-                        "remotePreview=${remoteJson.take(80).replace('\n', ' ')}"
-                )
-                settings
-            }
-            localJson != null -> {
-                val settings = fromJson(localJson)
-                android.util.Log.i(
-                    "AlaMobileTool",
-                    "Config via local fallback (remote unavailable): pedalMode=${settings.pedalMode} " +
-                        "localPreview=${localJson.take(80).replace('\n', ' ')}"
-                )
-                settings
-            }
-            else -> {
-                android.util.Log.i("AlaMobileTool", "No config (remote+local both empty), using defaults")
-                defaultSettings()
-            }
+        if (localJson != null) {
+            val settings = fromJson(localJson)
+            android.util.Log.i(
+                TAG,
+                "Config via local fallback (remote+provider unavailable): pedalMode=${settings.pedalMode} " +
+                    "localPreview=${localJson.take(80).replace('\n', ' ')}"
+            )
+            return settings
         }
+
+        android.util.Log.i(TAG, "No config (remote+provider+local all empty), using defaults")
+        return defaultSettings()
     }
 
     /**
@@ -521,6 +557,7 @@ object ModConfig {
     }
 
     /** 把 Settings 的 position 字段重置为默认（本地目录拿不到 position 时用）。 */
+    @Suppress("unused")
     private fun withPositionDefaults(s: Settings): Settings = s.copy(
         pedalPosition = Defaults.PEDAL_POSITION,
         gearPosition = Defaults.GEAR_POSITION,
