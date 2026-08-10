@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Ala Mobile Tool</string>
-    <string name="module_description">LSPosed module for Ala Mobile Formula 1</string>
+    <string name="module_description">Ala Mobile 体验增强模块</string>
 </resources>
