@@ -32,7 +32,10 @@ static void *g_shift_up_stub = NULL;
 static void *g_shift_down_stub = NULL;
 static void *g_fixed_update_stub = NULL;
 static void *g_drivetrain_fixed_update_stub = NULL;
+static void *g_drivetrain_do_gear_shifting_stub = NULL;
 static void *g_player_controls_update_stub = NULL;
+static void *g_traction_filter_stub = NULL;
+static void *g_handle_abs_stub = NULL;
 
 static void *g_throttle_orig = NULL;
 static void *g_brake_orig = NULL;
@@ -40,7 +43,10 @@ static void *g_shift_up_orig = NULL;
 static void *g_shift_down_orig = NULL;
 static void *g_fixed_update_orig = NULL;
 static void *g_drivetrain_fixed_update_orig = NULL;
+static void *g_drivetrain_do_gear_shifting_orig = NULL;
 static void *g_player_controls_update_orig = NULL;
+static void *g_traction_filter_orig = NULL;
+static void *g_handle_abs_orig = NULL;
 
 static volatile int g_hooks_installed = 0;
 
@@ -256,6 +262,15 @@ static void proxy_fixed_update(void *this) {
         if (drivetrain != 0) {
             g_player_drivetrain = drivetrain;
         }
+
+        // ★ ABS 被编译器内联到 carController 里，HandleABS 方法从不被调用，
+        // 所以 hook HandleABS 入口没用。但内联的 ABS 逻辑读 absEnable(0xC4)
+        // 门控——在这里（FixedUpdate 入口，carController 之前）设 absEnable=0，
+        // 内联的 ABS 检查就会跳过。比 hook 内联代码可靠得多。
+        if (!g_config.enable_abs) {
+            write_bool_field(this, 0xC4, false);
+        }
+
         // Ensure our inputs are present before the physics tick reads them.
         apply_inputs_to_controller(this);
     }
@@ -273,15 +288,30 @@ static void proxy_fixed_update(void *this) {
 static void proxy_drivetrain_fixed_update(void *this) {
     typedef void (*orig_t)(void *);
 
-    if (g_disable_auto_gear && this != NULL) {
-        uintptr_t self = (uintptr_t) this;
-        if (self == g_player_drivetrain) {
-            write_bool_field(this, g_config.drivetrain_automatic_field_offset, false);
-        }
+    // 记录玩家车 drivetrain（DoGearShifting hook 用它过滤非玩家车）。
+    // 注：不在 FixedUpdate 写 automatic——FixedUpdate 每帧开头会用
+    // 设置值覆盖 automatic，写在这里会被立刻冲掉。真正禁自动换挡由
+    // proxy_drivetrain_do_gear_shifting 在 DoGearShifting 入口层完成。
+    if (this != NULL && is_player_controller(this)) {
+        g_player_drivetrain = (uintptr_t) this;
     }
 
     if (g_drivetrain_fixed_update_orig != NULL) {
         ((orig_t) g_drivetrain_fixed_update_orig)(this);
+    }
+}
+
+// IRDSDrivetrain::DoGearShifting — 自动换挡入口（FixedUpdate 每帧调用）。
+// ⚠️ 暂时禁用此 hook（回退到只靠 proxy_drivetrain_fixed_update 写 automatic=false）。
+// 原因：设 overrideClutchManagement(0x15C)=1 + automatic(0xBC)=1 会让
+// DoGearShifting 开头直接 return，但游戏起步需要 DoGearShifting 里
+// 的逻辑来结合离合器/挂挡，整段跳过导致车出不了 P 房（一直 1 挡蠕动）。
+// 手动换挡关自动换挡的正确方式待反汇编确认后重做。
+static void proxy_drivetrain_do_gear_shifting(void *this) {
+    // 暂不干预——直接调 orig，恢复游戏原逻辑。
+    typedef void (*orig_t)(void *);
+    if (g_drivetrain_do_gear_shifting_orig != NULL) {
+        ((orig_t) g_drivetrain_do_gear_shifting_orig)(this);
     }
 }
 
@@ -290,18 +320,64 @@ static void proxy_drivetrain_fixed_update(void *this) {
 // 从 this+0x60 读 carInputs（IRDSCarControllInput*），刷新 g_last_controller。
 // 这解决了"重新开始"后旧实例失效、g_last_controller 停在野指针的问题：
 // 新场景的 IRDSPlayerControls.Update 立即把 g_last_controller 刷新到新实例。
+//
+// 同时：强制关闭 TC/ABS——非手柄模式下游戏默认开启辅助（打滑/抱死被抑制），
+// 用户要的是"更专业"的无辅助操作。这里当模块开关关闭时，强制玩家车
+// tclEnable(0xC6)/absEnable(0xC4)=false，真正关掉游戏自带的 TC/ABS。
+// 开关开启（默认）时**不干预**，让游戏维持默认（通常开启）。
+// 只作用玩家车（IRDSPlayerControls 组件只挂玩家车，天然身份过滤），
+// AI 车辅助不受影响。
 static void proxy_player_controls_update(void *this) {
     if (this != NULL) {
         g_player_controls = this;  // 记住 IRDSPlayerControls 实例
         void *car_inputs = *(void **) ((uintptr_t) this + 0x60);
         if (car_inputs != NULL) {
             g_last_controller = car_inputs;
+
+            // ★ ABS 被内联到 carController，hook HandleABS 方法没用。
+            // 在 FixedUpdate 入口写 absEnable=0 更可靠（carController 紧随其后读），
+            // 但 PlayerControls.Update 每帧也会被调，这里作为双重保险再写一次。
+            if (!g_config.enable_abs && is_player_controller(car_inputs)) {
+                write_bool_field(car_inputs, 0xC4, false);
+            }
         }
     }
 
     typedef void (*orig_t)(void *);
     if (g_player_controls_update_orig != NULL) {
         ((orig_t) g_player_controls_update_orig)(this);
+    }
+}
+
+// IRDSCarControllInput::TractionFilter(float accel) — TC 入口。
+// 签名: float TractionFilter(void *this, float accel)
+// 返回削减后的 accel。当模块 TC 开关关闭时，直接返回原始 accel（不削减），
+// 绕过游戏自带 TC。比写字段更可靠——不依赖 tclEnable 是否被游戏覆盖。
+// 只作用玩家车（is_player_controller 过滤）。
+static float proxy_traction_filter(void *this, float accel) {
+    if (!g_config.enable_tc && this != NULL && is_player_controller(this)) {
+        // TC 关闭：直接返回原始 accel，不调 orig（跳过 TC 削减）
+        return accel;
+    }
+    typedef float (*orig_t)(void *, float);
+    if (g_traction_filter_orig != NULL) {
+        return ((orig_t) g_traction_filter_orig)(this, accel);
+    }
+    return accel;
+}
+
+// IRDSCarControllInput::HandleABS() — ABS 入口。
+// 签名: void HandleABS(void *this)
+// 当模块 ABS 开关关闭时，直接返回（不调 orig），跳过游戏自带 ABS。
+// 只作用玩家车。
+static void proxy_handle_abs(void *this) {
+    if (!g_config.enable_abs && this != NULL && is_player_controller(this)) {
+        // ABS 关闭：跳过整个 HandleABS
+        return;
+    }
+    typedef void (*orig_t)(void *);
+    if (g_handle_abs_orig != NULL) {
+        ((orig_t) g_handle_abs_orig)(this);
     }
 }
 
@@ -441,6 +517,51 @@ bool pedal_install_hooks(const pedal_hook_config_t *config) {
         }
     }
 
+    if (g_config.drivetrain_do_gear_shifting_offset != 0) {
+        uintptr_t target = base + g_config.drivetrain_do_gear_shifting_offset;
+        g_drivetrain_do_gear_shifting_stub = shadowhook_hook_sym_addr(
+                (void *) target,
+                (void *) proxy_drivetrain_do_gear_shifting,
+                (void **) &g_drivetrain_do_gear_shifting_orig);
+        if (g_drivetrain_do_gear_shifting_stub == NULL) {
+            int err = shadowhook_get_errno();
+            LOGE("shadowhook_hook_sym_addr(DoGearShifting) failed: %d (%s)",
+                 err, shadowhook_to_errmsg(err));
+        } else {
+            LOGI("Hooked DoGearShifting at 0x%" PRIxPTR, target);
+        }
+    }
+
+    if (g_config.traction_filter_offset != 0) {
+        uintptr_t target = base + g_config.traction_filter_offset;
+        g_traction_filter_stub = shadowhook_hook_sym_addr(
+                (void *) target,
+                (void *) proxy_traction_filter,
+                (void **) &g_traction_filter_orig);
+        if (g_traction_filter_stub == NULL) {
+            int err = shadowhook_get_errno();
+            LOGE("shadowhook_hook_sym_addr(TractionFilter) failed: %d (%s)",
+                 err, shadowhook_to_errmsg(err));
+        } else {
+            LOGI("Hooked TractionFilter at 0x%" PRIxPTR, target);
+        }
+    }
+
+    if (g_config.handle_abs_offset != 0) {
+        uintptr_t target = base + g_config.handle_abs_offset;
+        g_handle_abs_stub = shadowhook_hook_sym_addr(
+                (void *) target,
+                (void *) proxy_handle_abs,
+                (void **) &g_handle_abs_orig);
+        if (g_handle_abs_stub == NULL) {
+            int err = shadowhook_get_errno();
+            LOGE("shadowhook_hook_sym_addr(HandleABS) failed: %d (%s)",
+                 err, shadowhook_to_errmsg(err));
+        } else {
+            LOGI("Hooked HandleABS at 0x%" PRIxPTR, target);
+        }
+    }
+
     if (g_config.player_controls_update_offset != 0) {
         uintptr_t target = base + g_config.player_controls_update_offset;
         g_player_controls_update_stub = shadowhook_hook_sym_addr(
@@ -498,6 +619,21 @@ void pedal_uninstall_hooks(void) {
         g_drivetrain_fixed_update_stub = NULL;
         g_drivetrain_fixed_update_orig = NULL;
     }
+    if (g_drivetrain_do_gear_shifting_stub != NULL) {
+        shadowhook_unhook(g_drivetrain_do_gear_shifting_stub);
+        g_drivetrain_do_gear_shifting_stub = NULL;
+        g_drivetrain_do_gear_shifting_orig = NULL;
+    }
+    if (g_traction_filter_stub != NULL) {
+        shadowhook_unhook(g_traction_filter_stub);
+        g_traction_filter_stub = NULL;
+        g_traction_filter_orig = NULL;
+    }
+    if (g_handle_abs_stub != NULL) {
+        shadowhook_unhook(g_handle_abs_stub);
+        g_handle_abs_stub = NULL;
+        g_handle_abs_orig = NULL;
+    }
     if (g_player_controls_update_stub != NULL) {
         shadowhook_unhook(g_player_controls_update_stub);
         g_player_controls_update_stub = NULL;
@@ -534,6 +670,12 @@ void pedal_shift_down(void) {
 
 void pedal_set_disable_auto_gear(int disable) {
     g_disable_auto_gear = disable ? 1 : 0;
+}
+
+void pedal_set_tc_abs(int enable_tc, int enable_abs) {
+    g_config.enable_tc = enable_tc ? true : false;
+    g_config.enable_abs = enable_abs ? true : false;
+    LOGI("pedal_set_tc_abs: enable_tc=%d enable_abs=%d", enable_tc, enable_abs);
 }
 
 void pedal_set_throttle_value(float value) {

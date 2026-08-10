@@ -255,7 +255,7 @@ class AlaMobileModule : XposedModule() {
         val settings = if (context != null) {
             try {
                 val s = ModConfig.readFromTargetProcess(context)
-                logX(Log.INFO, TAG, "onPackageReady read config: pedalMode=${s.pedalMode} showOverlay=${s.showOverlay} enableUnlock=${s.enableUnlock} enableManualShift=${s.enableManualShift}")
+                logX(Log.INFO, TAG, "onPackageReady read config: pedalMode=${s.pedalMode} showOverlay=${s.showOverlay} enableUnlock=${s.enableUnlock} enableManualShift=${s.enableManualShift} enableTc=${s.enableTc} enableAbs=${s.enableAbs}")
                 s
             } catch (e: Throwable) {
                 logX(Log.ERROR, TAG, "Failed to read config, using defaults: ${e.message}")
@@ -271,6 +271,10 @@ class AlaMobileModule : XposedModule() {
         // 当前 enableManualShift 默认 false，所以 disableAutoGear=false，游戏自动换挡保持原样。
         val enableManualShift = settings?.enableManualShift ?: false
         val disableAutoGear = enableManualShift
+        // 原生 TC/ABS 开关，默认 true。native 层据此打开玩家车的
+        // tclEnable/absEnable，让游戏自带 TC/ABS 在非手柄模式下也生效。
+        val enableTc = settings?.enableTc ?: true
+        val enableAbs = settings?.enableAbs ?: true
         // ⚠️ enableUnlock 兜底：settings==null（context 还没可用，NPatch 下 onPackageReady
         // 早期常 context=null）时默认 true，不默认 false。
         // 根因：NPatch 启动慢，context 要 15s 才可用，但 BillingManager.Awake() 在 ~2s
@@ -356,7 +360,9 @@ class AlaMobileModule : XposedModule() {
                         enableControlReplacement = enableControlReplacement,
                         enableAutoDRS = enableAutoDrs,
                         disableAutoGear = disableAutoGear,
-                        enableUnlock = enableUnlock
+                        enableUnlock = enableUnlock,
+                        enableTc = enableTc,
+                        enableAbs = enableAbs
                     )
                     // one-shot 强制解锁兜底，无论 hook 是否装上
                     val unlocked = NativeBridge.forceUnlockNow()

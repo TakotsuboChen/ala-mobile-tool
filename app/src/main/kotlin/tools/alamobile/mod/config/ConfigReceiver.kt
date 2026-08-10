@@ -87,6 +87,16 @@ class ConfigReceiver : BroadcastReceiver() {
             // 光写文件不够，必须重建 view 才能让新配置流进去。post 到主线程
             // 保证 UI 操作（removeView/addView）在主线程执行。
             OverlayManager.notifyConfigChanged()
+
+            // 实时同步 TC/ABS 开关到 native g_config——ConfigActivity（模块进程）
+            // 改了 TC/ABS 后，广播到达游戏进程，这里立刻调 native 更新 g_config，
+            // proxy_player_controls_update 下一帧就用新值写 tclEnable/absEnable。
+            val enableTc = incoming.optBoolean("enable_tc", true)
+            val enableAbs = incoming.optBoolean("enable_abs", true)
+            if (tools.alamobile.mod.NativeBridge.isAvailable) {
+                tools.alamobile.mod.NativeBridge.setTcAbs(enableTc, enableAbs)
+                Log.i(TAG, "ConfigReceiver: setTcAbs enableTc=$enableTc enableAbs=$enableAbs")
+            }
         } catch (e: Throwable) {
             Log.e(TAG, "ConfigReceiver: write failed", e)
         }

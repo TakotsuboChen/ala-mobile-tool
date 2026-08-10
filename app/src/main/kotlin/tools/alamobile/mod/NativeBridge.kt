@@ -174,6 +174,9 @@ object NativeBridge {
         drivetrainGearField: Long,
         drivetrainFixedUpdateOffset: Long,
         drivetrainAutomaticField: Long,
+        drivetrainDoGearShiftingOffset: Long,
+        tractionFilterOffset: Long,
+        handleAbsOffset: Long,
         playerControlsUpdateOffset: Long,
         drsToggle: Long,
         billingManagerAwake: Long,
@@ -189,7 +192,9 @@ object NativeBridge {
         enableControlReplacement: Boolean,
         enableAutoDRS: Boolean,
         disableAutoGear: Boolean,
-        enableUnlock: Boolean
+        enableUnlock: Boolean,
+        enableTc: Boolean,
+        enableAbs: Boolean
     )
 
     /**
@@ -231,6 +236,9 @@ object NativeBridge {
 
     @JvmStatic
     external fun setDRSActive(active: Boolean)
+
+    @JvmStatic
+    external fun setTcAbs(enableTc: Boolean, enableAbs: Boolean)
 
     /**
      * 主动触发一次强制解锁，不依赖 hook 触发时机。
@@ -276,7 +284,9 @@ object NativeBridge {
         enableControlReplacement: Boolean,
         enableAutoDRS: Boolean,
         disableAutoGear: Boolean = false,
-        enableUnlock: Boolean = false
+        enableUnlock: Boolean = false,
+        enableTc: Boolean = true,
+        enableAbs: Boolean = true
     ) {
         if (!isAvailable) {
             Log.w(TAG, "Native library not available, skipping initWithOffsets")
@@ -298,6 +308,9 @@ object NativeBridge {
             OffsetTable.IRDS_DRIVETRAIN_CURRENT_GEAR_FIELD,
             OffsetTable.IRDS_DRIVETRAIN_FIXED_UPDATE,
             OffsetTable.IRDS_DRIVETRAIN_AUTOMATIC_FIELD,
+            OffsetTable.IRDS_DRIVETRAIN_DO_GEAR_SHIFTING,
+            OffsetTable.IRDS_CAR_CONTROLL_INPUT_TRACTION_FILTER,
+            OffsetTable.IRDS_CAR_CONTROLL_INPUT_HANDLE_ABS,
             OffsetTable.IRDS_PLAYER_CONTROLS_UPDATE,
             OffsetTable.IRDS_CAR_CONTROLL_INPUT_DRS_TOGGLE,
             OffsetTable.BILLING_MANAGER_AWAKE,
@@ -313,7 +326,9 @@ object NativeBridge {
             enableControlReplacement,
             enableAutoDRS,
             disableAutoGear,
-            enableUnlock
+            enableUnlock,
+            enableTc,
+            enableAbs
         )
     }
 }

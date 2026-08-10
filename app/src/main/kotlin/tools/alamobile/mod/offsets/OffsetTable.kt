@@ -35,6 +35,17 @@ object OffsetTable {
     const val IRDS_DRIVETRAIN_SHIFT_UP: Long = 0x1A5F16CL
     const val IRDS_DRIVETRAIN_SHIFT_DOWN: Long = 0x1A5F2F0L
     const val IRDS_DRIVETRAIN_FIXED_UPDATE: Long = 0x1A5DDD8L
+    // DoGearShifting — 自动换挡的唯一入口（FixedUpdate 每帧调用）。
+    // hook 它并在 orig 前设 overrideClutchManagement(0x15C)=1 + automatic(0xBC)=1，
+    // 让 DoGearShifting 开头 direct return，真正禁用自动换挡。
+    // 现有 proxy_drivetrain_fixed_update 写 automatic 会被 FixedUpdate 每帧覆盖，
+    // 所以必须在 DoGearShifting 层拦截。
+    const val IRDS_DRIVETRAIN_DO_GEAR_SHIFTING: Long = 0x1A5E734L
+
+    // TractionFilter / HandleABS — TC/ABS 入口方法。直接 hook 这两个方法，
+    // 在入口处根据模块开关决定是否跳过，比写字段更可靠（不受游戏每帧覆盖影响）。
+    const val IRDS_CAR_CONTROLL_INPUT_TRACTION_FILTER: Long = 0x1A570C8L
+    const val IRDS_CAR_CONTROLL_INPUT_HANDLE_ABS: Long = 0x1A5763CL
 
     // IRDSDrivetrain instance fields
     const val IRDS_DRIVETRAIN_CURRENT_GEAR_FIELD: Long = 0xC0L
