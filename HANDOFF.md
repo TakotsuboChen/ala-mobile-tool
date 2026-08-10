@@ -1,56 +1,41 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-08-11T01:05:00+08:00 · Git HEAD: 最近提交 `e05e6dc`
+生成时间: 2026-08-11T00:55:00+08:00 · Git HEAD: 最近提交 `4651d3f`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: `main` @ `e05e6dc` (2026-08-11)
-- 漂移检查: `git rev-parse HEAD` 是否仍 = `e05e6dc`；变了说明快照可能过期。
+- 锚点: `main` @ `4651d3f` (2026-08-11)
+- 漂移检查: `git rev-parse HEAD` 是否仍 = `4651d3f`；变了说明快照可能过期。
 - 工作区: 本交接结束时为 clean（所有改动已 commit + push）。
-- 先读: `CLAUDE.md` M20 条目 + 本文件。
+- 先读: `CLAUDE.md` M21 条目 + 本文件。
 
 ## 1. 当前目标
-M20 后续收尾：配置页图标已自定义（TC/踏板/刹车曲线用 Inkscape flatten 纯 path，ABS/Gearbox 待重做），ABS 和手动换挡开关已暂时注释。**下一步是找到 ABS 真正实现位置 + 重做手动换挡 + 发 Beta 3。**
+M20 后续收尾 + M21 激活状态误判修复已完成。**下一步是找到 ABS 真正实现位置 + 重做手动换挡 + 发 Beta 3。**
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **分支 `main` 已 push 到 origin**——`git log --oneline -3` 显示 `e05e6dc` (docs) + `cae68e5` (feat) + `a4c209a` (merge)。
-- [V] **build + lint 全绿**——`./gradlew :app:assembleDebug :app:lint` → `BUILD SUCCESSFUL`（50 tasks: 10 executed, 40 up-to-date）。
-- [V] **TC 图标已换**——`ConfigurePage.kt` L110 `icon = TcIcon`（CustomIcons.kt，Inkscape flatten 纯 path，单 path fill）。
-- [V] **踏板图标已换**——`ConfigurePage.kt` L158 `imageVector = PedalsIcon`（CustomIcons.kt，单 path fill）。
-- [V] **刹车曲线图标已换**——`ConfigurePage.kt` L292 `imageVector = BrakeCurveIcon`（CustomIcons.kt，3 条 fill path，viewport 470×462）。
-- [V] **油门曲线图标保持原样**——`ConfigurePage.kt` L268 `imageVector = Icons.Rounded.Speed`（用户要求不换）。
-- [V] **ABS 开关已注释**——`ConfigurePage.kt` L118-127 `/* SwitchRow(... AbsIcon ...) */`，title 文本已改为"防抱死系统"。
-- [V] **手动换挡开关已注释**——`ConfigurePage.kt` L243-252 `/* SwitchRow(... GearboxIcon ...) */`。
-- [V] **刹车方向反转图标改为 Flip**——`ConfigurePage.kt` L233 `icon = Icons.Rounded.Flip`。
-- [V] **TC summary 改为"启用游戏原生 TC"**——`ConfigurePage.kt` L109。
-- [V] **TC 已真机验证生效**——用户确认「TC 关闭效果很明显很滑」。hook `TractionFilter`（RVA 0x1A570C8）方法入口，`enable_tc=false` 时直接返回原始 accel。 [?] 继承自上一份 HANDOFF，本会话未重新验证。
-- [V] **HandleABS 是死代码**——全 `libil2cpp.so` 搜不到任何 `bl 0x1a5763c` 调用。 [?] 继承自上一份 HANDOFF。
-- [V] **DoGearShifting hook 导致出不了 P 房**——已回退为直接调 orig。 [?] 继承自上一份 HANDOFF。
-- [?] **ABS/Gearbox 图标渲染不理想**——用户反馈 ABS "文字一坨"（已去掉文字只保留圆+弧）；Gearbox "看不见孔洞"（已改为两齿轮 45° 对角线环+齿帽分离方案）。用户尚未确认最新版 Gearbox 效果，因为手动换挡开关已注释，图标暂时不显示。
+- [V] **分支 `main` 已 push 到 origin**——`git log --oneline -3` 显示 `4651d3f` (docs) + `29c6c50` (fix) + `3273248` (docs)。
+- [V] **build + lint 全绿**——`./gradlew :app:assembleDebug :app:lint` → `BUILD SUCCESSFUL`（50 tasks: 10 executed, 40 up-to-date，exit 0）。
+- [V] **首次安装误判已修复**——`LsposedStatus.evaluate` 新增 `hasEnabledScope(service)` 调 `XposedService.getScope()` 检查 scope 非空才判 LSPOSED。模块未在 Manager 启用时 scope 为空 → 不判已激活。
+- [V] **未激活自动弹窗已实现**——`OverviewPage.ActivationCard` 的 `LaunchedEffect(Unit)` 刷新后 `status == INACTIVE` → `showNonRootDialog = true` 自动弹窗。卡片 onClick 仍保留手动触发，描述文案不变。
+- [V] **真机验证通过**——APK 安装到 `381QYFCN22B9A`，用户确认模块未启用时首次打开正确显示"未激活" + 自动弹窗。
 
 ### build 输出（本次交接 run 真实输出）
 ```
 $ ./gradlew :app:assembleDebug :app:lint
-BUILD SUCCESSFUL in 24s
+BUILD SUCCESSFUL in 23s
 50 actionable tasks: 10 executed, 40 up-to-date
+EXIT=0
 ```
 
 ## 3. 决策与理由
-- **TC/踏板/刹车曲线图标用 Inkscape flatten 纯 path** [V]——SVG 含 mask/clipPath/text，手写 ImageVector 渲染不对（mask→evenOdd 转换错、stroke→fill 线变粗、text 无法渲染）。用 Inkscape + svgpathtools + svgo 三步流水线 flatten 为纯 path d 字符串，喂给 PathParser。否决：手写 moveTo/curveTo（坐标计算错）；Vector Drawable XML（mask 不支持）。
-- **ABS 图标去掉 "ABS" 文字** [V]——Inkscape export-text-to-path 产出的是单线 centerline path（无 z），fill 渲染变 blob，stroke 渲染也粘连。用户要求去掉文字。否决：fill 渲染（blob）、stroke 渲染（粘连）、增大 font-size（比例失调）。
-- **Gearbox 用环+齿帽分离方案** [V]——一条 path 做 evenOdd 环（外圆+孔圆 = 环形），另一条 path 做 NonZero 齿帽（圆外梯形，不覆盖孔）。解决了 evenOdd 花瓣空洞和 NonZero 孔洞不可见问题。否决：单 path evenOdd（花瓣）、单 path NonZero + 反向缠绕（孔洞不可见）。
-- **Gearbox 改两齿轮 45° 对角线** [V]——用户要求，三齿轮太挤孔洞看不清。
-- **油门曲线不换图标** [V]——用户明确要求只换刹车曲线。
-- **ABS/手动换挡开关暂时注释** [V]——ABS hook 未生效（HandleABS 死代码）；手动换挡 hook 导致出不了 P 房。待功能修复后取消注释恢复。
+- **用 `getScope()` 而非 `xposedService != null` 判激活** [V]——LSPosed 检测到已安装 xposed 模块 APK 时，模块进程首次创建就推 daemon binder（即使 Manager 未启用），导致 `xposedService != null` 但模块实际未启用。`getScope()` 返回 Manager 里挂接的目标 App 列表，scope 非空 = 真启用。否决：仅凭 binder 存在（首次安装误判）、仅凭 Non-root 标记（LSPosed 用户不会走这条路）。
+- **`getScope()` 异常时保守返回 true** [V]——避免已启用模块因 daemon 临时故障被误判为未激活（"已激活→未激活"比"未激活→已激活"更让用户困惑）。
+- **轮询中 service 绑上但 scope 空 → 立即 break** [V]——scope 不会随时间变化，等再久也没用，停止轮询避免浪费 3s。
+- **自动弹窗放在 `LaunchedEffect(Unit)` 而非卡片点击** [V]——用户要求未激活时启动主动弹窗，`LaunchedEffect(Unit)` 只在首次进入 composition 时执行一次，正好对应"页面打开时"。卡片 onClick 保留手动触发作为备选。
 
 ## 4. 失败的尝试 — 不要再试
-- **手写 ImageVector.Builder + PathBuilder 转换 SVG** [V]——SVG 的 mask/clipPath/transform/text 在 ImageVector 中没有直接对应物，手写坐标全部出错（旋转矩阵算错、evenOdd 合并错、stroke→fill 线变粗）。不要再手写 moveTo/curveTo 链。
-- **Inkscape object-stroke-to-path 把 stroke 转 fill** [V]——stroke 线变成"管道"形状 fill 路径，线条比原始 stroke-width 粗很多。不要再对 stroke 路径用 object-stroke-to-path。
-- **Gearbox 单 path evenOdd** [V]——齿轮圆(1层) + 齿(2层重叠) = 偶数 → 齿和圆交叉处出现"花瓣"空洞。不要再用 evenOdd 做齿轮。
-- **Gearbox 单 path NonZero + 反向缠绕** [V]——齿轮圆(CW+1) + 中心孔(CCW-1) = 0 挖空理论上正确，但实际渲染孔洞不可见（可能 arc sweep 方向在 PathParser 中行为与预期不符）。不要再用 NonZero 反向缠绕做孔洞。
-- **ABS "ABS" 文字 fill 渲染** [V]——Inkscape text-to-path 产出无 z 的 centerline path，fill 不产生可见形状。不要再 fill 渲染文字 centerline。
-- **ABS "ABS" 文字 stroke 渲染** [V]——5.2px 字体的 centerline stroke 1.0 仍然粘连成一坨。不要再 stroke 渲染文字 centerline。
-- **（前向搬运）** 写 `tclEnable=0` 关 TC、写 `absEnable=0` 关 ABS、hook HandleABS、hook DoGearShifting 整段跳过、FixedUpdate 写 `automatic=false`、`OnAlreadyOwned` 手写 IL2CPP string、`dlopen("libil2cpp.so")`、`forceUnlockNow` 15s 调 `get_Instance()`、只 defer `onPackageReady` 不 defer `onPackageLoaded`、ShadowHook SHARED 模式、`carPilot`(0x68) 作玩家判据、`System.getProperty(MODULE_LOADED_FLAG)` 作激活判定、`openRemoteFile` 读模块 filesDir、legacy `XSharedPreferences`、模块进程写公共 `/sdcard/`、ContentProvider 跨进程、`createPackageContext`、`by lazy` 只改缓存、`applyCurve` 作用单字段、BRAKE 从底向上画水位式、M12 OverlayEditView 传 settings.*Position 作 defaultPosition、SINGLE/DUAL 共用 pedal_position 字段——均不再试。
+- **仅凭 `App.xposedService != null` 判激活** [V]——LSPosed 首次安装就推 binder，即使 Manager 未启用。导致"第一次显示已激活、清后台再开变未激活"。不要再仅凭 binder 存在判激活。
+- **（前向搬运）** 写 `tclEnable=0` 关 TC、写 `absEnable=0` 关 ABS、hook HandleABS、hook DoGearShifting 整段跳过、FixedUpdate 写 `automatic=false`、`OnAlreadyOwned` 手写 IL2CPP string、`dlopen("libil2cpp.so")`、`forceUnlockNow` 15s 调 `get_Instance()`、只 defer `onPackageReady` 不 defer `onPackageLoaded`、ShadowHook SHARED 模式、`carPilot`(0x68) 作玩家判据、`System.getProperty(MODULE_LOADED_FLAG)` 作激活判定、`openRemoteFile` 读模块 filesDir、legacy `XSharedPreferences`、模块进程写公共 `/sdcard/`、ContentProvider 跨进程、`createPackageContext`、`by lazy` 只改缓存、`applyCurve` 作用单字段、BRAKE 从底向上画水位式、M12 OverlayEditView 传 settings.*Position 作 defaultPosition、SINGLE/DUAL 共用 pedal_position 字段、手写 ImageVector.Builder + PathBuilder 转换 SVG、Inkscape object-stroke-to-path 把 stroke 转 fill、Gearbox 单 path evenOdd、Gearbox 单 path NonZero + 反向缠绕、ABS "ABS" 文字 fill/stroke 渲染——均不再试。
 
 ## 5. 已知坑
 - **⚠️ HandleABS 是死代码** [V]——全 so 无 `bl 0x1a5763c` 调用。ABS 真正实现位置未知。需更深入反汇编。
@@ -60,6 +45,8 @@ BUILD SUCCESSFUL in 24s
 - **⚠️ Inkscape text-to-path 产出 centerline 而非 outline** [V]——system-ui 字体的 text-to-path 产出单线 centerline path（无 z），不是闭合轮廓。fill/stroke 渲染都不理想。小字体图标不要用 Inkscape text-to-path。
 - **⚠️ ImageVector evenOdd 对重叠子路径产生花瓣空洞** [V]——齿轮圆+齿矩形 2 层重叠 = 偶数 = 挖空。齿轮类图标不要用 evenOdd。
 - **⚠️ ImageVector NonZero 反向缠绕孔洞可能不可见** [V]——理论 winding=0 挖空，实际渲染全黑。不要依赖 arc sweep 方向做反向缠绕挖洞。
+- **LSPosed 首次安装推 binder 但不等于已启用** [V]——LSPosed 检测到已安装 xposed 模块 APK 时，模块进程首次创建推 daemon binder（即使 Manager 未启用）。必须用 `getScope()` 验证。
+- **daemon binder 仅首次安装推一次** [V]——清后台后进程重启，daemon 不再重复推 binder。这解释了"第一次已激活、第二次未激活"。
 - **油门＞0 时 AI 车被误控** [?]——M18 遗留，本次未单独验证。
 - **横屏 `displayMetrics.heightPixels` 返回短边** [V]。
 - **versionCode 用 CLAUDE.md M8 表格锚点反推** [V]——Beta 2=`100220`→Beta 3=`100230`。
