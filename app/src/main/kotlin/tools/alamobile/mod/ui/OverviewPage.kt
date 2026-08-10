@@ -119,8 +119,13 @@ private fun ActivationCard() {
     val isDark = isSystemInDarkTheme()
 
     // 进入页面时刷新一次（不轮询）：覆盖弹窗选完后的回写、或从设置页清除标记回来。
+    // 刷新后若仍为未激活，自动弹出 Non-root 确认弹窗（无需用户手动点击卡片）。
+    // 卡片 onClick 仍保留手动触发弹窗的能力（描述文案不变）。
     LaunchedEffect(Unit) {
         status = LsposedStatus.evaluate(context, awaitService = false)
+        if (status == LsposedStatus.Status.INACTIVE) {
+            showNonRootDialog = true
+        }
     }
 
     // 配色照搬 KernelSU HomeMiuix 的 StatusCard：已激活用绿色调强调底

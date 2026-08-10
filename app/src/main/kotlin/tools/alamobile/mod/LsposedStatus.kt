@@ -7,12 +7,21 @@ import android.util.Log
  * 模块激活状态判定。
  *
  * 判定基准（用户确认："Manager 当前启用"语义）：
- * - **LSPosed 真激活** = LSPosed daemon 已绑定到本进程。daemon binder 只在
- *   LSPosed Manager（root 框架）启用本模块时由框架经 `XposedProvider.call("SendBinder")`
- *   触发；用户在 Manager 里关掉模块 → 不触发 → `App.xposedService == null`。
+ * - **LSPosed 真激活** = LSPosed daemon 已绑定到本进程 **且** `getScope()` 非空。
+ *   daemon binder 在模块 APK 被检测到时由框架经 `XposedProvider.call("SendBinder")`
+ *   推给模块进程——**即使模块未在 Manager 里启用**，binder 也会到来。
+ *   所以仅凭 `App.xposedService != null` 不足以判定"已启用"，必须再用
+ *   [XposedService.getScope] 确认 Manager 里挂接了至少一个目标 App。
+ *   scope 非空 = Manager 当前启用；scope 为空 = 仅安装未启用。
  *   这个信号随 Manager 启用态实时变化，不需要进程重启，也不依赖 onModuleLoaded
  *   时机（onModuleLoaded 只在目标 App 进程调，ConfigActivity 进程永不调——
  *   旧的 System.getProperty 路径对 ConfigActivity 根本不可达，已废弃）。
+ *
+ *   **首次安装陷阱**：LSPosed 在检测到新安装的 xposed 模块 APK 时，会在模块进程
+ *   首次创建时推 binder 过来（即使用户还没在 Manager 启用），这是"第一次启动显示
+ *   已激活"的根因。清后台后进程重启，daemon 不再重复推 binder（仅首次安装推一次），
+ *   `xposedService` 回到 null → 第二次启动变"未激活"。加 scope 检查后，首次启动时
+ *   scope 为空（还没在 Manager 启用）→ 正确显示"未激活"，不再出现首次误判。
  * - **Non-root 框架**（LSPatch/NPatch/FPA）：不装 LSPosed Manager，不绑 daemon，
  *   `App.xposedService == null` → 落到手动手动确认路径。用户在弹窗里选"是"后
  *   写 `nonroot_confirmed` 标记（daemon 没绑时写本地 filesDir）。
@@ -41,24 +50,43 @@ object LsposedStatus {
     /**
      * 判定当前激活状态。
      *
+     * **关键区分**：`App.xposedService != null` 只代表"LSPosed daemon 可达"——
+     * LSPosed 在检测到已安装的 xposed 模块 APK 时，会在模块进程首次创建时推一个
+     * binder 过来，即使模块未在 Manager 里启用。这导致"刚安装、未启用"时
+     * `xposedService` 非空 → 误判为已激活。
+     *
+     * 真正判定"模块已启用"的信号是 [XposedService.getScope]：它返回模块在 Manager
+     * 里被启用挂接的目标 App 列表。scope 为空 = 模块未启用 = 应显示未激活。
+     * 清后台后进程重启，daemon 不再重复推 binder（仅首次安装推一次），
+     * `xposedService` 回到 null —— 这解释了"第一次显示已激活、第二次显示未激活"。
+     *
      * @param context ConfigActivity 的 context（模块进程）
      * @param awaitService 是否轮询等待 daemon 绑定（处理 XposedServiceHelper 异步
      *   绑定晚于读检测的情况）。首次进入页面时传 true，后续手动刷新传 false。
      */
     fun evaluate(context: Context, awaitService: Boolean = false): Status {
-        // 1) LSPosed daemon 绑定 = Manager 当前启用本模块。
+        // 1) LSPosed daemon 绑定 + scope 非空 = Manager 当前启用本模块。
         //    App.xposedService 由 App.onServiceBind 赋值，只在框架触发 binder 时调到。
         //    异步绑定可能晚于首次读检测——轮询等待最多 ~3s。
-        if (App.xposedService != null) {
-            clearNonRootConfirmed(context)
-            return Status.LSPOSED
-        }
-        if (awaitService) {
+        val service = App.xposedService
+        if (service != null) {
+            if (hasEnabledScope(service)) {
+                clearNonRootConfirmed(context)
+                return Status.LSPOSED
+            }
+            // service 绑上了但 scope 为空 → 模块已安装但未在 Manager 启用。
+            // 不清 Non-root 标记（用户可能之前确认过 Non-root），不判为已激活。
+        } else if (awaitService) {
             val deadline = System.currentTimeMillis() + 3000
             while (System.currentTimeMillis() < deadline) {
-                if (App.xposedService != null) {
-                    clearNonRootConfirmed(context)
-                    return Status.LSPOSED
+                val s = App.xposedService
+                if (s != null) {
+                    if (hasEnabledScope(s)) {
+                        clearNonRootConfirmed(context)
+                        return Status.LSPOSED
+                    }
+                    // service 绑上了但 scope 为空 —— 等再久也不会变，停止轮询。
+                    break
                 }
                 try { Thread.sleep(100) } catch (_: InterruptedException) { break }
             }
@@ -70,6 +98,25 @@ object LsposedStatus {
         }
 
         return Status.INACTIVE
+    }
+
+    /**
+     * 检查模块是否在框架 Manager 里被启用（scope 非空）。
+     *
+     * [XposedService.getScope] 返回模块被启用挂接的目标 App 包名列表。
+     * scope 为空 = 模块已安装/已被框架识别，但未在 Manager 里启用任何目标 App。
+     *
+     * 异常处理：如果 getScope() 因 daemon 临时故障失败，保守返回 true——
+     * 避免已启用模块因 daemon 抖动被误判为未激活（"已激活→未激活"比
+     * "未激活→已激活"更让用户困惑）。
+     */
+    private fun hasEnabledScope(service: io.github.libxposed.service.XposedService): Boolean {
+        return try {
+            service.getScope().isNotEmpty()
+        } catch (e: Throwable) {
+            Log.w(TAG, "hasEnabledScope: getScope() failed, assuming enabled", e)
+            true
+        }
     }
 
     /** 用户在弹窗里选"是"（用了 Non-root 框架）→ 写持久标记。 */
