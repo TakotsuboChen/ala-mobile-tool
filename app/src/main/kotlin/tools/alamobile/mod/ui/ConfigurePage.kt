@@ -20,13 +20,13 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bolt
-import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.DisplaySettings
 import androidx.compose.material.icons.rounded.DonutSmall
 import androidx.compose.material.icons.rounded.Egg
 import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Flip
 import androidx.compose.material.icons.rounded.Straighten
 import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.runtime.Composable
@@ -107,8 +107,8 @@ fun ConfigurePage(
                         // 陀螺仪/触摸转向，也根治 M18 的 AI 误控。
                         SwitchRow(
                             title = "牵引力控制",
-                            summary = "启用原生牵引力控制（TC）",
-                            icon = Icons.Rounded.DonutSmall,
+                            summary = "启用游戏原生 TC",
+                            icon = TcIcon,
                             checked = uiState.enableTc.value,
                             onCheckedChange = {
                                 uiState.enableTc.value = it
@@ -116,16 +116,19 @@ fun ConfigurePage(
                             }
                         )
                         // 原生防抱死（ABS）开关。默认开启。
+                        // 暂时注释：ABS hook 未生效（HandleABS 是死代码），待找到正确的 ABS 入口点后恢复。
+                        /*
                         SwitchRow(
-                            title = "防抱死",
+                            title = "防抱死系统",
                             summary = "启用原生防抱死（ABS）",
-                            icon = Icons.Rounded.Egg,
+                            icon = AbsIcon,
                             checked = uiState.enableAbs.value,
                             onCheckedChange = {
                                 uiState.enableAbs.value = it
                                 onSave()
                             }
                         )
+                        */
                     }
 
                     SmallTitle(
@@ -155,7 +158,7 @@ fun ConfigurePage(
                             insideMargin = PaddingValues(vertical = 12.dp, horizontal = 16.dp),
                             startAction = {
                                 Icon(
-                                    imageVector = Icons.Rounded.Menu,
+                                    imageVector = PedalsIcon,
                                     contentDescription = null,
                                     modifier = Modifier.padding(end = 6.dp),
                                     tint = MiuixTheme.colorScheme.onBackground
@@ -228,7 +231,7 @@ fun ConfigurePage(
                                 SwitchRow(
                                     title = "刹车踏板方向反转",
                                     summary = "开启后刹车行程变为由上往下",
-                                    icon = Icons.Rounded.SwapVert,
+                                    icon = Icons.Rounded.Flip,
                                     checked = uiState.brakeInvert.value,
                                     onCheckedChange = {
                                         uiState.brakeInvert.value = it
@@ -237,16 +240,20 @@ fun ConfigurePage(
                                 )
                             }
                         }
+                        // 手动换挡开关。
+                        // 暂时注释：DoGearShifting hook 导致车出不了 P 房，待重新实现后恢复。
+                        /*
                         SwitchRow(
                             title = "手动换挡",
                             summary = "启用换挡悬浮窗并关闭游戏自动换挡",
-                            icon = Icons.Rounded.Bolt,
+                            icon = GearboxIcon,
                             checked = uiState.enableManualShift.value,
                             onCheckedChange = {
                                 uiState.enableManualShift.value = it
                                 onSave()
                             }
                         )
+                        */
                     }
 
                     SmallTitle(
@@ -285,7 +292,7 @@ fun ConfigurePage(
                             insideMargin = PaddingValues(vertical = 12.dp, horizontal = 16.dp),
                             startAction = {
                                 Icon(
-                                    imageVector = Icons.Rounded.Speed,
+                                    imageVector = BrakeCurveIcon,
                                     contentDescription = null,
                                     modifier = Modifier.padding(end = 6.dp),
                                     tint = MiuixTheme.colorScheme.onBackground
