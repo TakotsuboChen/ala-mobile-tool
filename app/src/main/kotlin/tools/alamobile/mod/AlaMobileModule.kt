@@ -364,9 +364,15 @@ class AlaMobileModule : XposedModule() {
                         enableTc = enableTc,
                         enableAbs = enableAbs
                     )
-                    // one-shot 强制解锁兜底，无论 hook 是否装上
-                    val unlocked = NativeBridge.forceUnlockNow()
-                    logX(Log.INFO, TAG, "15s delay: forceUnlockNow returned $unlocked")
+                    // one-shot 强制解锁兜底：只在用户开了解锁开关时调。
+                    // enableUnlock=false 时跳过——用户明确不想解锁，不能强制。
+                    //（之前这里无条件调 forceUnlockNow，导致开关关了仍弹窗。）
+                    if (enableUnlock) {
+                        val unlocked = NativeBridge.forceUnlockNow()
+                        logX(Log.INFO, TAG, "15s delay: forceUnlockNow returned $unlocked")
+                    } else {
+                        logX(Log.INFO, TAG, "15s delay: enableUnlock=false, skipping forceUnlockNow")
+                    }
                 } else {
                     logX(Log.WARN, TAG, "NativeBridge not available, skipping 15s init and unlock")
                 }

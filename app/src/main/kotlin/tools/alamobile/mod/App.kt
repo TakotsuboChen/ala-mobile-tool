@@ -120,6 +120,10 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
                     .apply { isAccessible = true }
                     .invoke(null, binder)
                 Log.i(TAG, "App: NPatch remote service bound via $NPATCH_REMOTE_AUTHORITY")
+                // NPatch 绑上后同样 flush filesDir → remote（与 LSPosed 路径
+                // onServiceBind 对称）。NPatch 无 daemon 异步推 binder，bindNpatchRemoteService
+                // 是主动一次性调用；成功后 onServiceBind 会被 onBinderReceived 触发，
+                // 那里会调 flushLocalConfigToRemote，所以这里不需要重复调。
             } catch (e: Throwable) {
                 Log.i(TAG, "App: NPatch remote service bind failed (likely LSPosed or embedded mode): ${e.message}")
             }
@@ -163,6 +167,42 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
     override fun onServiceBind(service: XposedService) {
         xposedService = service
         Log.i(TAG, "App: XposedService bound (LSPosed daemon path)")
+        // service 绑上时把 filesDir 里的最新配置 flush 到 remote prefs。
+        //
+        // 兜底场景：用户在 ConfigActivity 改配置时 xposedService 还没绑上
+        //（XposedServiceHelper 异步绑定延迟，或 LSPosed daemon 推 binder 时机
+        // 不确定），ModConfig.write 只写了 filesDir + 广播，remote 没写。等
+        // service 异步绑上时，这里把 filesDir 的最新配置补写到 remote——
+        // 游戏不运行时改的配置就不会丢失。
+        //
+        // filesDir 的 JSON 始终是最新值（ModConfig.write 每次都写 filesDir），
+        // 重复 flush 无害：RemotePreferences.doCommit 只在有 diff 时推。
+        flushLocalConfigToRemote(service)
+    }
+
+    /**
+     * 把模块 filesDir 的 [FILE_NAME] 配置 JSON flush 到 remote prefs。
+     *
+     * 只在 [onServiceBind] 时调——service 刚绑上，是"之前 xposedService 为
+     * null 时漏写的 remote 配置"的补写时机。filesDir 不存在（用户从没改过
+     * 配置）时 no-op。
+     */
+    private fun flushLocalConfigToRemote(service: XposedService) {
+        try {
+            val file = java.io.File(filesDir, "ala_tool_config.json")
+            if (!file.exists()) {
+                Log.i(TAG, "App: flushLocalConfigToRemote — no local config, nothing to flush")
+                return
+            }
+            val json = file.readText()
+            service.getRemotePreferences(PREF_GROUP)
+                .edit()
+                .putString(KEY_CONFIG_JSON, json)
+                .apply()
+            Log.i(TAG, "App: flushed local config to remote prefs (${json.length} bytes)")
+        } catch (e: Throwable) {
+            Log.w(TAG, "App: flushLocalConfigToRemote failed", e)
+        }
     }
 
     override fun onServiceDied(service: XposedService) {

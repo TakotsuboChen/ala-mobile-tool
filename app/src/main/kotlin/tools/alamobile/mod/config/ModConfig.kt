@@ -453,18 +453,14 @@ object ModConfig {
         // remote 优先：用 remote 的非 position 字段 + local 的 position 字段。
         // remote 不可用时回退 local 整体（现有行为），再回退默认。
         //
-        // ⚠️ enableUnlock 兜底：当 remote 不可用（remoteJson == null）时，强制
-        // enableUnlock=true，无论 local 里是什么值。覆盖 NPatch 无管理器 /
-        // 管理器未注册模块 / LSPosed daemon 不可达等"配置同步断链"场景：
-        // - 用户在 ConfigActivity 开了"解锁付费内容"开关，但 ConfigActivity 写的
-        //   remote prefs 在这些场景下游戏进程读不到（无 daemon / Provider 不可见）。
-        // - 唯一能让 local 有 enableUnlock=true 的路径是定向广播（ConfigReceiver
-        //   收到才写），但广播要求游戏在跑 —— 用户先开开关再启动游戏时 local 仍是
-        //   默认 false，早期 unlock hooks 被跳过，vivo 解锁失败。
-        // - 强制 true 让早期 unlock hooks + native OnAlreadyOwned 主动注入在配置
-        //   同步断链时仍能跑。用户若真不想解锁，关掉开关 + 游戏在跑时改配置让
-        //   广播写 local 即可覆盖（但绝大多数 NPatch 用户就是要解锁）。
-        //   见 HANDOFF §5 "NPatch 方案下游戏不在后台修改配置不生效"。
+        // ⚠️ enableUnlock 兜底已移除（原 M19 设计：remote 不可用时强制 true）。
+        // 原因：用户关掉解锁开关后，如果 remote 恰好读不到（游戏不运行时改配置
+        // → 启动游戏 remote 刚绑上还没 flush 完，或 NPatch 无 daemon），fallback
+        // 强制 enableUnlock=true → 解锁 hook 触发 → 弹"解锁成功"弹窗。用户关了
+        // 开关还被强制解锁，体验不可接受。
+        // 现在尊重 local/默认值里的 enableUnlock：用户关了就不解锁，开了就解锁。
+        // NPatch embedded/local 无 daemon 场景的解锁兜底改由 AlaMobileModule 里
+        // settings==null 时默认 true 处理（那里是"配置完全读不到"而非"remote 读不到"）。
         return when {
             remoteJson != null -> {
                 val merged = mergePositionFromLocal(remoteJson, localJson)
@@ -477,17 +473,17 @@ object ModConfig {
                 settings
             }
             localJson != null -> {
-                val settings = fromJson(localJson).copy(enableUnlock = true)
+                val settings = fromJson(localJson)
                 android.util.Log.i(
                     "AlaMobileTool",
-                    "Config via local fallback (enableUnlock forced=true, remote unavailable): pedalMode=${settings.pedalMode} " +
+                    "Config via local fallback (remote unavailable): pedalMode=${settings.pedalMode} " +
                         "localPreview=${localJson.take(80).replace('\n', ' ')}"
                 )
                 settings
             }
             else -> {
-                android.util.Log.i("AlaMobileTool", "No config (remote+local both empty), using defaults with enableUnlock forced=true")
-                defaultSettings().copy(enableUnlock = true)
+                android.util.Log.i("AlaMobileTool", "No config (remote+local both empty), using defaults")
+                defaultSettings()
             }
         }
     }

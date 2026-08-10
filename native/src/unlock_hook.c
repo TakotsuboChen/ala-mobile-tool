@@ -127,6 +127,47 @@ static volatile int g_hooks_installed = 0;
 // 避免重复调 OnAlreadyOwned（Unity 侧可能崩或重复弹窗）。
 static volatile int g_force_unlock_done = 0;
 
+// 跨启动的"已解锁过"持久化标记。
+// 问题：每次启动 hook_awake 都调 SetUnlocked(true) → OnUnlockedChanged →
+// 弹"解锁成功"弹窗。用户每次改配置启动游戏都看到弹窗，体验差。
+// 修复：第一次解锁后写标记文件到游戏 internalFilesDir，之后启动检查
+// 标记存在就只设字段不调 SetUnlocked/OnAlreadyOwned → 不弹窗。
+// 用户清数据/换设备 → 标记丢失 → 再弹一次（合理的"第一次"行为）。
+static char g_unlock_flag_path[256] = {0};
+
+static void resolve_unlock_flag_path(void) {
+    if (g_unlock_flag_path[0] != '\0') return;
+    char cmdline[256] = {0};
+    int fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return;
+    ssize_t n = read(fd, cmdline, sizeof(cmdline) - 1);
+    close(fd);
+    if (n <= 0) return;
+    cmdline[n] = '\0';
+    char *colon = strchr(cmdline, ':');
+    if (colon) *colon = '\0';
+    // 游戏进程对自己 /data/data/<pkg>/files/ 天然可写，不受 scoped storage 限制。
+    snprintf(g_unlock_flag_path, sizeof(g_unlock_flag_path),
+             "/data/data/%s/files/ala_unlock_done.flag", cmdline);
+}
+
+static bool has_unlocked_before(void) {
+    resolve_unlock_flag_path();
+    if (g_unlock_flag_path[0] == '\0') return false;
+    return access(g_unlock_flag_path, F_OK) == 0;
+}
+
+static void mark_unlocked_done(void) {
+    resolve_unlock_flag_path();
+    if (g_unlock_flag_path[0] == '\0') return;
+    int fd = open(g_unlock_flag_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd >= 0) {
+        write(fd, "1", 1);
+        close(fd);
+        LOGI("mark_unlocked_done: wrote flag to %s", g_unlock_flag_path);
+    }
+}
+
 // Use dl_iterate_phdr to get the actual load base of libil2cpp.so.
 // dlopen() returns an opaque soinfo* handle, NOT the load base address,
 // so we must not use it for offset calculations.
@@ -314,7 +355,7 @@ static void hook_awake(void *this_ptr) {
         return;
     }
 
-    // Set all unlock-related fields to true
+    // 始终设字段（幂等，重复设 true 无副作用）。
     bool *is_unlocked = (bool *)((uint8_t *)this_ptr + g_config.billing_manager_is_unlocked_field_offset);
     bool *has_store_connection = (bool *)((uint8_t *)this_ptr + g_config.billing_manager_has_store_connection_field_offset);
     bool *has_completed_check = (bool *)((uint8_t *)this_ptr + g_config.billing_manager_has_completed_ownership_check_field_offset);
@@ -325,14 +366,50 @@ static void hook_awake(void *this_ptr) {
 
     LOGI("Set BillingManager fields: IsUnlocked=true, HasStoreConnection=true, HasCompletedOwnershipCheck=true");
 
-    // 主动注入解锁：先调 SetUnlocked(true)（最直接，不需 string），
-    // 再调 OnAlreadyOwned("unlock_alamobile")（走 Unity 完整链，辅助）。
-    // 两条路径互补：SetUnlocked 直接设字段 + PlayerPrefs 持久化；
-    // OnAlreadyOwned 走 Unity 侧完整逻辑（OnUnlockedChanged 回调等）。
+    // 首次解锁才调 SetUnlocked + OnAlreadyOwned（触发 Unity 弹窗 + 持久化）。
+    // 已解锁过（标记文件存在）就只设字段，不调 Unity 侧逻辑 → 不弹窗。
+    // 标记文件在 /data/data/<pkg>/files/ala_unlock_done.flag，清数据会删。
+    if (has_unlocked_before()) {
+        LOGI("Already unlocked before, skipping SetUnlocked/OnAlreadyOwned (no popup)");
+        return;
+    }
+
+    LOGI("First-time unlock, calling SetUnlocked + OnAlreadyOwned (will show popup)");
     force_unlock_direct(this_ptr);
     force_unlock_via_on_already_owned(this_ptr);
+    mark_unlocked_done();
 
     // DO NOT call original Awake() - it will trigger InitializeBilling() which queries Google Play
+}
+
+// enableUnlock=false 时专用的 Awake hook：只设 IsUnlocked=true 防止游戏弹
+// "Fresh unlock" 窗，不调 SetUnlocked/OnAlreadyOwned（不注入解锁），让游戏
+// 自己走 billing 流程。正版用户 Google Play 会返回 OnAlreadyOwned，游戏自己
+// 调 SetUnlocked —— 但因为 Awake 里 IsUnlocked 已经是 true，SetUnlocked 内
+// 的 if (!IsUnlocked) 检查会跳过，不触发 OnUnlockedChanged → 不弹窗。
+static void hook_awake_preserve(void *this_ptr) {
+    if (!this_ptr) {
+        LOGE("Awake(preserve): this_ptr is NULL");
+        // 仍调原始 Awake，让游戏自己初始化 billing
+        if (orig_awake) orig_awake(this_ptr);
+        return;
+    }
+
+    // 设 IsUnlocked=true（防 Fresh unlock 弹窗）+ HasCompletedOwnershipCheck=true
+    //（告诉游戏"已查过所有权"，避免重复查询触发 OnUnlockedChanged）。
+    bool *is_unlocked = (bool *)((uint8_t *)this_ptr + g_config.billing_manager_is_unlocked_field_offset);
+    bool *has_completed_check = (bool *)((uint8_t *)this_ptr + g_config.billing_manager_has_completed_ownership_check_field_offset);
+
+    bool was_unlocked = *is_unlocked;
+    *is_unlocked = true;
+    *has_completed_check = true;
+
+    LOGI("Awake(preserve): Set IsUnlocked=true (was=%d), HasCompletedOwnershipCheck=true. Letting game billing flow run.", was_unlocked);
+
+    // 调原始 Awake——游戏自己连 Google Play 查询。正版用户会收到
+    // OnAlreadyOwned → SetUnlocked(true)，但 SetUnlocked 内部检查
+    // IsUnlocked 已是 true，不触发 OnUnlockedChanged → 不弹窗。
+    if (orig_awake) orig_awake(this_ptr);
 }
 
 // Hook for BillingManager.GetInstance() - 兜底注入点。
@@ -364,8 +441,17 @@ static void *hook_get_instance(void) {
 
     LOGI("GetInstance: Set fields IsUnlocked=true, HasStoreConnection=true, HasCompletedOwnershipCheck=true");
 
+    // 首次解锁才调 SetUnlocked + OnAlreadyOwned（触发 Unity 弹窗）。
+    // 已解锁过（标记文件存在）就只设字段 → 不弹窗。
+    if (has_unlocked_before()) {
+        LOGI("GetInstance: Already unlocked before, skipping SetUnlocked/OnAlreadyOwned (no popup)");
+        return instance;
+    }
+
+    LOGI("GetInstance: First-time unlock, calling SetUnlocked + OnAlreadyOwned (will show popup)");
     force_unlock_direct(instance);
     force_unlock_via_on_already_owned(instance);
+    mark_unlocked_done();
 
     return instance;
 }
@@ -386,6 +472,66 @@ static void hook_on_owned_none(void *this_ptr) {
 static void hook_on_purchase_failed(void *this_ptr) {
     LOGI("BillingManager.OnPurchaseFailed() hooked - blocking failure dialog");
     // Do nothing - prevent failure dialog from showing
+}
+
+// enableUnlock=false 专用：只 hook Awake 预设 IsUnlocked=true + 挡掉
+// OnOwnedNone/OnPurchaseFailed 的负面弹窗。让游戏自己走 billing 流程，
+// 但 OnAlreadyOwned 来时 IsUnlocked 已是 true → SetUnlocked(true) no-op → 不弹窗。
+// 不 hook GetInstance / InitializeBilling——正版用户需要这些正常运行。
+static void install_unlock_state_preserve_only(void) {
+    uintptr_t base = get_module_base("libil2cpp.so");
+    if (base == 0) {
+        LOGE("install_unlock_state_preserve_only: libil2cpp.so base not found");
+        return;
+    }
+
+    // Hook Awake: 预设 IsUnlocked=true，然后调原始 Awake 让游戏自己初始化。
+    if (g_config.billing_manager_awake_offset != 0) {
+        void *awake_addr = (void *)(base + g_config.billing_manager_awake_offset);
+        void *result = shadowhook_hook_sym_addr(
+            awake_addr, (void *)hook_awake_preserve, (void **)&orig_awake
+        );
+        if (result) {
+            LOGI("Preserve mode: hooked Awake() to pre-set IsUnlocked=true");
+        } else {
+            int err = shadowhook_get_errno();
+            LOGE("Preserve mode: failed to hook Awake(): errno=%d (%s)",
+                 err, shadowhook_to_errmsg(err));
+        }
+    }
+
+    // Hook OnOwnedNone: 挡掉"ATTENTION! Google Play 似乎不再显示此购买项目为已拥有"
+    // 弹窗。更关键的是：OnOwnedNone 内部会调 SetUnlocked(false) 把 IsUnlocked
+    // 重置成 false——如果不挡掉，预设的 true 会被清掉，OnAlreadyOwned 来时
+    // 检测到 false→true 变化 → "Fresh unlock" → 弹窗要求重启。
+    if (g_config.billing_manager_on_owned_none_offset != 0) {
+        void *addr = (void *)(base + g_config.billing_manager_on_owned_none_offset);
+        void *result = shadowhook_hook_sym_addr(
+            addr, (void *)hook_on_owned_none, (void **)&orig_on_owned_none
+        );
+        if (result) {
+            LOGI("Preserve mode: hooked OnOwnedNone() to block ATTENTION dialog + prevent IsUnlocked reset");
+        } else {
+            int err = shadowhook_get_errno();
+            LOGE("Preserve mode: failed to hook OnOwnedNone(): errno=%d (%s)",
+                 err, shadowhook_to_errmsg(err));
+        }
+    }
+
+    // Hook OnPurchaseFailed: 挡掉购买失败弹窗（正版用户不应看到）。
+    if (g_config.billing_manager_on_purchase_failed_offset != 0) {
+        void *addr = (void *)(base + g_config.billing_manager_on_purchase_failed_offset);
+        void *result = shadowhook_hook_sym_addr(
+            addr, (void *)hook_on_purchase_failed, (void **)&orig_on_purchase_failed
+        );
+        if (result) {
+            LOGI("Preserve mode: hooked OnPurchaseFailed() to block failure dialog");
+        } else {
+            int err = shadowhook_get_errno();
+            LOGE("Preserve mode: failed to hook OnPurchaseFailed(): errno=%d (%s)",
+                 err, shadowhook_to_errmsg(err));
+        }
+    }
 }
 
 bool unlock_install_hooks(const unlock_hook_config_t *config) {
@@ -412,6 +558,13 @@ bool unlock_install_hooks(const unlock_hook_config_t *config) {
 
     if (!g_config.enable_unlock) {
         LOGI("Unlock feature is disabled in config");
+        // 即使 unlock 关了也装 Awake hook——但只做"提前设 IsUnlocked=true"
+        // 防止正版用户每次冷启动都弹"Fresh unlock"窗。不调 SetUnlocked /
+        // OnAlreadyOwned（那是 unlock 模式的主动注入）。不 hook
+        // InitializeBilling / OnOwnedNone / OnPurchaseFailed——正版用户
+        // 需要游戏自己走完 billing 流程。
+        install_unlock_state_preserve_only();
+        g_hooks_installed = 1;
         return true;
     }
 
@@ -584,7 +737,7 @@ bool unlock_force_now(void) {
         return false;
     }
 
-    // 设字段
+    // 设字段（幂等）
     bool *is_unlocked = (bool *)((uint8_t *)instance + g_config.billing_manager_is_unlocked_field_offset);
     bool *has_store_connection = (bool *)((uint8_t *)instance + g_config.billing_manager_has_store_connection_field_offset);
     bool *has_completed_check = (bool *)((uint8_t *)instance + g_config.billing_manager_has_completed_ownership_check_field_offset);
@@ -592,6 +745,15 @@ bool unlock_force_now(void) {
     *has_store_connection = true;
     *has_completed_check = true;
     LOGI("unlock_force_now: Set fields IsUnlocked=true, HasStoreConnection=true, HasCompletedOwnershipCheck=true");
+
+    // 首次解锁才调 SetUnlocked + OnAlreadyOwned（触发 Unity 弹窗）。
+    // 已解锁过（标记文件存在）就只设字段 → 不弹窗。
+    if (has_unlocked_before()) {
+        LOGI("unlock_force_now: Already unlocked before, skipping SetUnlocked/OnAlreadyOwned (no popup)");
+        return true;
+    }
+
+    LOGI("unlock_force_now: First-time unlock, calling SetUnlocked + OnAlreadyOwned (will show popup)");
 
     // 调 SetUnlocked(true)
     uintptr_t set_unlocked_offset = g_config.billing_manager_set_unlocked_offset;
@@ -639,6 +801,8 @@ bool unlock_force_now(void) {
         on_already_owned(instance, product_id_str);
         LOGI("unlock_force_now: OnAlreadyOwned called successfully");
     }
+
+    mark_unlocked_done();
 
     return true;
 }
