@@ -27,6 +27,7 @@ import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Flip
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Straighten
 import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.runtime.Composable
@@ -129,6 +130,17 @@ fun ConfigurePage(
                             }
                         )
                         */
+                        // 主菜单音乐替换开关：把游戏主菜单音乐替换为 Hans Zimmer - F1。
+                        SwitchRow(
+                            title = "替换主菜单音乐",
+                            summary = "更改为 Hans Zimmer - F1",
+                            icon = Icons.Rounded.MusicNote,
+                            checked = uiState.enableMusicReplace.value,
+                            onCheckedChange = {
+                                uiState.enableMusicReplace.value = it
+                                onSave()
+                            }
+                        )
                     }
 
                     SmallTitle(

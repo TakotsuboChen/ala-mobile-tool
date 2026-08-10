@@ -194,7 +194,10 @@ object NativeBridge {
         disableAutoGear: Boolean,
         enableUnlock: Boolean,
         enableTc: Boolean,
-        enableAbs: Boolean
+        enableAbs: Boolean,
+        musicVolumeUpdate: Long,
+        musicVolumeStart: Long,
+        audioSourceSetVolume: Long
     )
 
     /**
@@ -239,6 +242,15 @@ object NativeBridge {
 
     @JvmStatic
     external fun setTcAbs(enableTc: Boolean, enableAbs: Boolean)
+
+    @JvmStatic
+    external fun setMusicReplace(enabled: Boolean)
+
+    @JvmStatic
+    external fun isMusicReplaceEnabled(): Boolean
+
+    @JvmStatic
+    external fun isInMainMenu(): Boolean
 
     /**
      * 主动触发一次强制解锁，不依赖 hook 触发时机。
@@ -286,7 +298,10 @@ object NativeBridge {
         disableAutoGear: Boolean = false,
         enableUnlock: Boolean = false,
         enableTc: Boolean = true,
-        enableAbs: Boolean = true
+        enableAbs: Boolean = true,
+        musicVolumeUpdate: Long = OffsetTable.HANDLE_MUSIC_VOLUME_UPDATE,
+        musicVolumeStart: Long = OffsetTable.HANDLE_MUSIC_VOLUME_START,
+        audioSourceSetVolume: Long = OffsetTable.AUDIO_SOURCE_SET_VOLUME
     ) {
         if (!isAvailable) {
             Log.w(TAG, "Native library not available, skipping initWithOffsets")
@@ -328,7 +343,10 @@ object NativeBridge {
             disableAutoGear,
             enableUnlock,
             enableTc,
-            enableAbs
+            enableAbs,
+            musicVolumeUpdate,
+            musicVolumeStart,
+            audioSourceSetVolume
         )
     }
 }

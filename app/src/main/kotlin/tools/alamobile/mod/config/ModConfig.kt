@@ -56,6 +56,9 @@ object ModConfig {
     const val KEY_ENABLE_TC = "enable_tc"
     const val KEY_ENABLE_ABS = "enable_abs"
 
+    // 主菜单音乐替换开关：替换为 Hans Zimmer - F1
+    const val KEY_ENABLE_MUSIC_REPLACE = "enable_music_replace"
+
     // Pedal mapping
     const val KEY_PEDAL_MODE = "pedal_mode"
     const val KEY_PEDAL_DEADZONE = "pedal_deadzone"
@@ -152,6 +155,8 @@ object ModConfig {
         // 原生 TC/ABS 默认开启。
         const val ENABLE_TC = true
         const val ENABLE_ABS = true
+        // 主菜单音乐替换默认关闭
+        const val ENABLE_MUSIC_REPLACE = false
         val PEDAL_MODE = PedalMode.SINGLE
         const val PEDAL_DEADZONE = 0.05f
         const val PEDAL_TRANSITION = 0.5f
@@ -249,6 +254,10 @@ object ModConfig {
                     KEY_ENABLE_ABS,
                     Defaults.ENABLE_ABS
                 ),
+                enableMusicReplace = json.optBoolean(
+                    KEY_ENABLE_MUSIC_REPLACE,
+                    Defaults.ENABLE_MUSIC_REPLACE
+                ),
                 pedalDeadzone = json.optDouble(
                     KEY_PEDAL_DEADZONE,
                     Defaults.PEDAL_DEADZONE.toDouble()
@@ -305,6 +314,7 @@ object ModConfig {
             put(KEY_ENABLE_UNLOCK, settings.enableUnlock)
             put(KEY_ENABLE_TC, settings.enableTc)
             put(KEY_ENABLE_ABS, settings.enableAbs)
+            put(KEY_ENABLE_MUSIC_REPLACE, settings.enableMusicReplace)
             put(KEY_PEDAL_DEADZONE, settings.pedalDeadzone.toDouble())
             put(KEY_PEDAL_TRANSITION, settings.pedalTransition.toDouble())
             put(KEY_BRAKE_TRANSITION, settings.brakeTransition.toDouble())
@@ -531,6 +541,7 @@ object ModConfig {
                 enableUnlock = j.optBoolean(KEY_ENABLE_UNLOCK, Defaults.ENABLE_UNLOCK),
                 enableTc = j.optBoolean(KEY_ENABLE_TC, Defaults.ENABLE_TC),
                 enableAbs = j.optBoolean(KEY_ENABLE_ABS, Defaults.ENABLE_ABS),
+                enableMusicReplace = j.optBoolean(KEY_ENABLE_MUSIC_REPLACE, Defaults.ENABLE_MUSIC_REPLACE),
                 pedalDeadzone = j.optDouble(KEY_PEDAL_DEADZONE, Defaults.PEDAL_DEADZONE.toDouble()).toFloat(),
                 pedalTransition = j.optDouble(KEY_PEDAL_TRANSITION, Defaults.PEDAL_TRANSITION.toDouble()).toFloat(),
                 brakeTransition = j.optDouble(KEY_BRAKE_TRANSITION, Defaults.BRAKE_TRANSITION.toDouble()).toFloat(),
@@ -603,6 +614,7 @@ object ModConfig {
             enableUnlock = Defaults.ENABLE_UNLOCK,
             enableTc = Defaults.ENABLE_TC,
             enableAbs = Defaults.ENABLE_ABS,
+            enableMusicReplace = Defaults.ENABLE_MUSIC_REPLACE,
             pedalDeadzone = Defaults.PEDAL_DEADZONE,
             pedalTransition = Defaults.PEDAL_TRANSITION,
             brakeTransition = Defaults.BRAKE_TRANSITION,
@@ -627,6 +639,7 @@ object ModConfig {
         val enableUnlock: Boolean,
         val enableTc: Boolean = Defaults.ENABLE_TC,
         val enableAbs: Boolean = Defaults.ENABLE_ABS,
+        val enableMusicReplace: Boolean = Defaults.ENABLE_MUSIC_REPLACE,
         val pedalDeadzone: Float,
         val pedalTransition: Float,
         val brakeTransition: Float,

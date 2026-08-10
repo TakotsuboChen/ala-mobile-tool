@@ -286,6 +286,8 @@ class AlaMobileModule : XposedModule() {
         // 用户若真不想解锁，关掉开关 + 游戏在跑时改配置让广播写 local 即可覆盖
         // （广播路径 settings 非空，enableUnlock 按用户值走）。
         val enableUnlock = settings?.enableUnlock ?: true
+        // 主菜单音乐替换开关，默认 false
+        val enableMusicReplace = settings?.enableMusicReplace ?: false
 
         // forceLoad + initUnlock（deferred 后同步执行，ShadowHook 已 init）
         logX(Log.INFO, TAG, "NPatch early unlock path: forceLoad + initUnlock (deferred)")
@@ -364,6 +366,18 @@ class AlaMobileModule : XposedModule() {
                         enableTc = enableTc,
                         enableAbs = enableAbs
                     )
+                    // 主菜单音乐替换：native hooks 装好后初始化播放器。
+                    // 提取 APK 内置 MP3 → 轮询主菜单状态 → 在主菜单播放。
+                    // 开关由广播/初始化同步。
+                    if (ctx != null) {
+                        try {
+                            MusicPlayer.init(ctx)
+                            MusicPlayer.setEnabled(enableMusicReplace)
+                            logX(Log.INFO, TAG, "MusicPlayer initialized, replaceEnabled=$enableMusicReplace")
+                        } catch (e: Throwable) {
+                            logX(Log.ERROR, TAG, "MusicPlayer init failed: ${e.message}")
+                        }
+                    }
                     // one-shot 强制解锁兜底：只在用户开了解锁开关时调。
                     // enableUnlock=false 时跳过——用户明确不想解锁，不能强制。
                     //（之前这里无条件调 forceUnlockNow，导致开关关了仍弹窗。）

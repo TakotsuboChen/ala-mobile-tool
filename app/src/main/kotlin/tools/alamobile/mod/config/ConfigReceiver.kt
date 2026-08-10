@@ -97,6 +97,12 @@ class ConfigReceiver : BroadcastReceiver() {
                 tools.alamobile.mod.NativeBridge.setTcAbs(enableTc, enableAbs)
                 Log.i(TAG, "ConfigReceiver: setTcAbs enableTc=$enableTc enableAbs=$enableAbs")
             }
+
+            // 实时同步音乐替换开关——用户从配置页切到游戏时即时生效。
+            // 需要 native 可用（mute 游戏音乐靠 native hook 静音 AudioSource）。
+            val enableMusicReplace = incoming.optBoolean("enable_music_replace", false)
+            tools.alamobile.mod.MusicPlayer.setEnabled(enableMusicReplace)
+            Log.i(TAG, "ConfigReceiver: MusicPlayer.setEnabled=$enableMusicReplace")
         } catch (e: Throwable) {
             Log.e(TAG, "ConfigReceiver: write failed", e)
         }

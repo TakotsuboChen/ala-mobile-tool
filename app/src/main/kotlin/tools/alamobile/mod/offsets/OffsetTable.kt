@@ -76,4 +76,10 @@ object OffsetTable {
     const val BILLING_MANAGER_IS_UNLOCKED_FIELD: Long = 0x20L
     const val BILLING_MANAGER_HAS_STORE_CONNECTION_FIELD: Long = 0x21L
     const val BILLING_MANAGER_HAS_COMPLETED_OWNERSHIP_CHECK_FIELD: Long = 0x22L
+
+    // Music / Main Menu (handleMusicVolume)
+    const val HANDLE_MUSIC_VOLUME_UPDATE: Long = 0x1A45100L
+    const val HANDLE_MUSIC_VOLUME_START: Long = 0x1A450A8L
+    // AudioSource.set_volume(float) — 用于静音游戏主菜单音乐
+    const val AUDIO_SOURCE_SET_VOLUME: Long = 0x324246CL
 }

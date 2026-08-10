@@ -6,6 +6,7 @@
 #include "pedal_hook.h"
 #include "drs_hook.h"
 #include "unlock_hook.h"
+#include "music_hook.h"
 
 #define LOG_TAG "AlaMobileTool"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -47,7 +48,10 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
                                            jboolean enable_controls, jboolean enable_drs,
                                            jboolean disable_auto_gear,
                                            jboolean enable_unlock,
-                                           jboolean enable_tc, jboolean enable_abs) {
+                                           jboolean enable_tc, jboolean enable_abs,
+                                           jlong music_volume_update,
+                                           jlong music_volume_start,
+                                           jlong audio_source_set_volume) {
     (void) env;
     (void) clazz;
     (void) clutch_field;
@@ -111,6 +115,17 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
 
     if (!unlock_install_hooks(&unlock_cfg)) {
         LOGE("Failed to install unlock hooks");
+    }
+
+    // 主菜单音乐替换 hooks：静音游戏主菜单音乐 + 提供主菜单心跳信号。
+    // 开关由 Java 端 JNI 动态设置，这里只装 hook 不强制开启。
+    music_hook_config_t music_cfg = {
+        .handle_music_volume_update_offset = (uintptr_t) music_volume_update,
+        .handle_music_volume_start_offset = (uintptr_t) music_volume_start,
+        .audio_source_set_volume_offset = (uintptr_t) audio_source_set_volume,
+    };
+    if (!music_install_hooks(&music_cfg)) {
+        LOGE("Failed to install music hooks");
     }
 
     g_state.controls_enabled = (bool) enable_controls;
@@ -230,4 +245,29 @@ Java_tools_alamobile_mod_NativeBridge_forceUnlockNow(JNIEnv *env, jclass clazz) 
     (void) env;
     (void) clazz;
     return unlock_force_now() ? JNI_TRUE : JNI_FALSE;
+}
+
+// 设置主菜单音乐替换开关（Java 端配置变更时调用）。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_setMusicReplace(JNIEnv *env, jclass clazz, jboolean enabled) {
+    (void) env;
+    (void) clazz;
+    music_set_replace_enabled((int) enabled);
+}
+
+// 查询主菜单音乐替换开关状态。
+JNIEXPORT jboolean JNICALL
+Java_tools_alamobile_mod_NativeBridge_isMusicReplaceEnabled(JNIEnv *env, jclass clazz) {
+    (void) env;
+    (void) clazz;
+    return music_is_replace_enabled() ? JNI_TRUE : JNI_FALSE;
+}
+
+// 查询是否仍在主菜单（最近一次 handleMusicVolume.Update() 心跳 < 2s）。
+// Java 端 timer 轮询此方法，用于决定播放/停止替换音乐。
+JNIEXPORT jboolean JNICALL
+Java_tools_alamobile_mod_NativeBridge_isInMainMenu(JNIEnv *env, jclass clazz) {
+    (void) env;
+    (void) clazz;
+    return music_is_in_main_menu() ? JNI_TRUE : JNI_FALSE;
 }
