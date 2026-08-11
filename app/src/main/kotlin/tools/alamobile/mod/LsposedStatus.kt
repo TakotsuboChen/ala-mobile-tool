@@ -6,30 +6,24 @@ import android.util.Log
 /**
  * 模块激活状态判定。
  *
- * 判定基准：**`onModuleLoaded` 是否在本进程内执行**（仅对目标进程有效）
- * 或 **daemon 已绑定且 scope 非空**（对 ConfigActivity 进程有效）。
- *
- * `onModuleLoaded` 只会在模块被框架注入的目标进程（游戏进程）里调用，在模块
- * 自己的 ConfigActivity 进程里**从不调用**——所以 `System.getProperty(
- * MODULE_LOADED_FLAG)` 在 ConfigActivity 里**永远为 false**，不能作为单一判定。
- *
- * 对于 ConfigActivity 进程，可用的信号是：
- * 1. `App.xposedService != null` —— LSPosed daemon 已绑定到本进程。但 daemon
- *    在检测到已安装的 xposed 模块 APK 时，即使模块**未在 Manager 启用**，也会
- *    在模块进程首次创建时推 binder 过来。所以仅凭 service 绑定不能判定"已启用"。
- * 2. `getScope().isNotEmpty()` —— 模块在 Manager 里配置过的 scope 列表，存在
- *    LSPosed daemon 的 SQLite 数据库里。**scope 和模块的启用/禁用状态独立存储**：
- *    用户关掉模块开关**不会清 scope**，`pm clear` 也清不掉 daemon DB 里的 scope。
- *    所以"`service != null && getScope().isNotEmpty()`"在禁用后第一次打开仍可能
- *    误判为已激活（scope 残留）。
- * 3. 两者组合：`service != null && getScope().isNotEmpty()` 是当前可用的最佳
- *    近似信号。scope 残留的误判仅发生在"清除数据 + 关闭模块开关 + 第一次打开"
- *    的特定场景，第二次打开（进程重启后 daemon 不再推 binder，service 为 null）
- *    就不会再误判。
+ * 判定基准（参照 AdClose `ServiceManager` 的 `onServiceBind` 即激活思路）：
+ * - **LSPosed（root）**：LSPosed daemon 只在模块**被启用**时向模块进程推 binder，
+ *   触发 `XposedServiceHelper.onBinderReceived` → `App.onServiceBind` →
+ *   `App.xposedService` 赋值。这是框架契约，比读 scope / running targets 可靠：
+ *   - 不用 `getScope()` —— scope 存 daemon SQLite，用户关开关**不会清**，`pm clear`
+ *     也清不掉，禁用后首次打开会残留误判（M27 曾踩）。
+ *   - 不用 `getRunningTargets()` —— 返回**当前正在注入**的目标进程，游戏没在跑时
+ *     为空数组，会把"开关开着但游戏没跑"误判成未激活（本会话新踩）。
+ *   - 用 `service.frameworkName == "LSPosed"` 区分框架即可。
+ * - **NPatch（非 root）**：无 daemon，`onServiceBind` 不会被触发；但
+ *   `App.bindNpatchRemoteService()` 会主动从 `content://top.nkbe.npatch.remote`
+ *   拿一个 API 101 的 service binder（`frameworkName == "NPatch"`）。这个 binder
+ *   **不算 LSPOSED** —— 用户没用 root LSPosed，落 Non-root 弹窗确认路径。
  *
  * 判定优先级：
  * 1. `hasModuleLoadedFlag()` —— 目标进程（游戏进程）路径，`onModuleLoaded` 执行过。
- * 2. `service != null && getScope().isNotEmpty()` —— ConfigActivity 进程路径。
+ * 2. `App.xposedService != null && frameworkName == "LSPosed"` —— ConfigActivity
+ *    进程路径，LSPosed daemon 真绑上了。
  * 3. `readNonRootConfirmed()` —— 用户在弹窗里确认了 Non-root 框架。
  * 4. 默认 `INACTIVE`。
  *
@@ -59,36 +53,42 @@ object LsposedStatus {
      * **判定优先级**：
      * 1. `hasModuleLoadedFlag()` —— 目标进程（游戏进程）路径：`onModuleLoaded`
      *    执行过，markActivated 设了进程级 property。模块被真正启用时才有。
-     * 2. `service != null && getScope().isNotEmpty()` —— ConfigActivity 进程路径：
-     *    `onModuleLoaded` 在 ConfigActivity 里**从不调用**（模块进程不被注入），
-     *    所以 property 永远为 false，必须用 daemon scope 判定。scope 存在 daemon
-     *    SQLite DB，与启用状态独立存储，禁用后首次打开可能残留误判（见 [evaluate]
-     *    的根因说明）。
+     * 2. `isLsposedService(App.xposedService)` —— ConfigActivity 进程路径：
+     *    LSPosed daemon 只在模块启用时推 binder，`App.onServiceBind` 赋值。
+     *    `frameworkName == "LSPosed"` 确认是真 LSPosed（排除 NPatch 的
+     *    API 101 binder）。
      * 3. `readNonRootConfirmed()` —— 用户在弹窗里确认了 Non-root 框架。
      * 4. 默认 `INACTIVE`。
      */
     fun evaluate(context: Context, awaitService: Boolean = false): Status {
         // 1) 目标进程路径：onModuleLoaded 执行过（游戏进程被真正注入）。
         if (hasModuleLoadedFlag()) {
+            Log.i(TAG, "evaluate: hasModuleLoadedFlag=true → LSPOSED")
             clearNonRootConfirmed(context)
             return Status.LSPOSED
         }
+        Log.i(TAG, "evaluate: hasModuleLoadedFlag=false, continue")
 
-        // 2) ConfigActivity 进程路径：daemon 已绑定 + scope 非空 = Manager 里启用。
-        //    App.xposedService 由 App.onServiceBind 赋值，只在框架触发 binder 时调到。
+        // 2) ConfigActivity 进程路径：LSPosed daemon 已绑定（frameworkName 确认真 LSPosed）。
+        //    App.xposedService 由 App.onServiceBind 赋值，只在 LSPosed daemon 推 binder 时调到。
         //    异步绑定可能晚于首次读检测——轮询等待最多 ~3s。
         val service = App.xposedService
+        Log.i(TAG, "evaluate: App.xposedService=${service} (awaitService=${awaitService})")
         if (service != null) {
-            if (hasEnabledScope(service)) {
+            if (isLsposedService(service)) {
+                Log.i(TAG, "evaluate: frameworkName=LSPosed → LSPOSED")
                 clearNonRootConfirmed(context)
                 return Status.LSPOSED
             }
+            Log.i(TAG, "evaluate: service is not LSPosed framework → fall through")
         } else if (awaitService) {
+            Log.i(TAG, "evaluate: service==null, starting awaitService poll (3s)")
             val deadline = System.currentTimeMillis() + 3000
             while (System.currentTimeMillis() < deadline) {
                 val s = App.xposedService
                 if (s != null) {
-                    if (hasEnabledScope(s)) {
+                    if (isLsposedService(s)) {
+                        Log.i(TAG, "evaluate: poll got LSPosed service → LSPOSED")
                         clearNonRootConfirmed(context)
                         return Status.LSPOSED
                     }
@@ -96,13 +96,16 @@ object LsposedStatus {
                 }
                 try { Thread.sleep(100) } catch (_: InterruptedException) { break }
             }
+            Log.i(TAG, "evaluate: awaitService poll finished, no LSPosed service")
         }
 
         // 3) Non-root 用户确认标记 —— 用户在弹窗里选了"是"。
         if (readNonRootConfirmed(context)) {
+            Log.i(TAG, "evaluate: nonroot_confirmed=true → NONROOT")
             return Status.NONROOT
         }
 
+        Log.i(TAG, "evaluate: no path matched → INACTIVE")
         return Status.INACTIVE
     }
 
@@ -111,60 +114,58 @@ object LsposedStatus {
         System.getProperty(AlaMobileModule.MODULE_LOADED_FLAG) == "true"
 
     /**
-     * 检查模块是否在框架 Manager 里被启用（scope 非空）。
+     * 判断绑定到的 service 是否来自**真正的 LSPosed（root）框架**。
      *
-     * [XposedService.getScope] 返回模块配置过的目标 App 包名列表。scope 为空 =
-     * 模块已安装/已被框架识别，但未配置任何目标 App。scope 非空通常意味着模块
-     * 被启用过（scope 是启用模块的必要配置）。
+     * 依据 `frameworkName`（框架自己上报的标识）：
+     * - 真 LSPosed daemon 返回 `"LSPosed"`。
+     * - NPatch 的 `XposedServiceBinder.getFrameworkName()` 返回 `"NPatch"`（API 101）。
      *
-     * 异常处理：如果 getScope() 因 daemon 临时故障失败，保守返回 true——
-     * 避免已启用模块因 daemon 抖动被误判为未激活（"已激活→未激活"比
-     * "未激活→已激活"更让用户困惑）。
+     * 用 frameworkName 而非 apiVersion / getScope / getRunningTargets 的原因：
+     * - `apiVersion`：NPatch 正式版只到 101，但未来升级可能到 102，靠版本号猜
+     *   框架不可靠。
+     * - `getScope()`：scope 存 daemon SQLite，关开关不清，NPatch 也会返回记忆的
+     *   scope → 误判 LSPOSED。
+     * - `getRunningTargets()`：返回**当前正在注入**的目标，游戏没在跑时为空数组，
+     *   会把"开关开着但游戏没跑"误判成未激活（本会话踩过）。
+     * - `frameworkName` 是框架直接上报的、语义明确的字段，最可靠。
+     *
+     * 异常处理：读 frameworkName 失败时保守返回 false——避免框架标识读不到时
+     * 误判为已激活（"未激活→已激活"比"已激活→未激活"更误导用户）。
      */
-    private fun hasEnabledScope(service: io.github.libxposed.service.XposedService): Boolean {
+    private fun isLsposedService(service: io.github.libxposed.service.XposedService): Boolean {
         return try {
-            service.getScope().isNotEmpty()
+            val name = service.frameworkName
+            Log.i(TAG, "isLsposedService: frameworkName=$name")
+            name == "LSPosed"
         } catch (e: Throwable) {
-            Log.w(TAG, "hasEnabledScope: getScope() failed, assuming enabled", e)
-            true
+            Log.w(TAG, "isLsposedService: getFrameworkName() failed, assuming not LSPosed", e)
+            false
         }
     }
 
-    /** 用户在弹窗里选"是"（用了 Non-root 框架）→ 写持久标记。 */
+    /**
+     * 用户在弹窗里选"是"（用了 Non-root 框架）→ 写持久标记。
+     *
+     * **只写模块进程 filesDir，不写 remote prefs** —— 原因：
+     * - `nonroot_confirmed` 是"每个安装会话"的本地状态，只在 ConfigActivity 进程
+     *   判断（同 EulaManager 的 EULA 标记策略）。
+     * - 若写 remote prefs（NPatch 管理器进程的 SharedPreferences），`pm clear`/
+     *   卸载重装**清不掉**该标记（它不在模块进程数据目录）→ 导致"清数据后仍显示
+     *   Non-root 已激活、不弹窗询问"（用户实测 bug）。
+     * - 只存 filesDir，`pm clear`/卸载重装自然清掉，语义正确。
+     */
     fun confirmNonRoot(context: Context) {
-        val service = App.xposedService
-        if (service != null) {
-            try {
-                service.getRemotePreferences(App.PREF_GROUP)
-                    .edit()
-                    .putString(App.KEY_NONROOT_CONFIRMED, "1")
-                    .apply()
-                Log.i(TAG, "confirmNonRoot: remote prefs updated")
-                return
-            } catch (e: Throwable) {
-                Log.w(TAG, "confirmNonRoot: remote prefs failed, trying local", e)
-            }
-        }
-        // 兜底：service 没绑上时写模块 filesDir（ConfigActivity 进程可写）。
         try {
             val file = java.io.File(context.filesDir, "nonroot_confirmed.flag")
             file.writeText("1")
+            Log.i(TAG, "confirmNonRoot: wrote local flag (filesDir)")
         } catch (e: Throwable) {
-            Log.w(TAG, "confirmNonRoot: local fallback failed", e)
+            Log.w(TAG, "confirmNonRoot: local flag write failed", e)
         }
     }
 
     /** 用户在弹窗里选"否" → 清掉 Non-root 标记，保持未激活。 */
     fun clearNonRootConfirmed(context: Context) {
-        val service = App.xposedService
-        if (service != null) {
-            try {
-                service.getRemotePreferences(App.PREF_GROUP)
-                    .edit()
-                    .remove(App.KEY_NONROOT_CONFIRMED)
-                    .apply()
-            } catch (_: Throwable) {}
-        }
         try {
             java.io.File(context.filesDir, "nonroot_confirmed.flag").delete()
         } catch (_: Throwable) {}
@@ -191,17 +192,9 @@ object LsposedStatus {
     }
 
     private fun readNonRootConfirmed(context: Context): Boolean {
-        val service = App.xposedService
-        if (service != null) {
-            try {
-                val v = service.getRemotePreferences(App.PREF_GROUP)
-                    .getString(App.KEY_NONROOT_CONFIRMED, null)
-                if (v == "1") return true
-            } catch (e: Throwable) {
-                Log.w(TAG, "readNonRootConfirmed: remote prefs failed", e)
-            }
-        }
-        // 兜底读本地。
+        // 只读模块 filesDir（与 confirmNonRoot 的写入位置对称）。不读 remote prefs：
+        // 旧版本可能残留 remote 标记（NPatch 管理器进程，pm clear 清不掉），
+        // 若读它会造成"清数据后仍显示 Non-root 已激活"（用户实测 bug）。
         return try {
             java.io.File(context.filesDir, "nonroot_confirmed.flag").exists() &&
                 java.io.File(context.filesDir, "nonroot_confirmed.flag").readText() == "1"
