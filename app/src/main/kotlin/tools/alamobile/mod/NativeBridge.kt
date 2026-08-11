@@ -75,7 +75,6 @@ object NativeBridge {
 
             val tempLib = File(context?.cacheDir ?: File(System.getProperty("java.io.tmpdir", "/data/local/tmp")),
                 "libala-core-${System.currentTimeMillis()}.so")
-
             ZipFile(apkPath).use { zip ->
                 val entry = zip.getEntry("lib/arm64-v8a/lib${LIB_NAME}.so")
                     ?: throw IllegalStateException("lib/arm64-v8a/lib${LIB_NAME}.so not found in APK")
@@ -102,6 +101,39 @@ object NativeBridge {
      * 其 pathList.dexElements[].path 含 APK 绝对路径。
      * 找到含 "tools.alamobile.mod" 的路径即为模块 APK。
      */
+    /**
+     * 解析模块 APK 的绝对路径。
+     *
+     * MusicPlayer 等组件需要从模块 APK 里直接读资源（raw/MP3），但游戏进程的
+     * ClassLoader.getResourceAsStream 在 LSPosed/NPatch 下常找不到 APK 里的 raw
+     * 资源（模块 ClassLoader 的 dexElements[].path 指向优化后的 dex 而非原 APK，
+     * zip 查找落空——M23 真机"静音不播放"根因），必须拿 APK 绝对路径后自己解压。
+     * 这与 forceLoad 提取 libala-core.so 是同一思路（M19 已实机验证）。
+     *
+     * 优先级：Context.getApplicationInfo（LSPosed 注入场景部分可用）→ ClassLoader
+     * 反射（NPatch/LSPosed 的 PathClassLoader dexElements[].path 含模块 APK 绝对
+     * 路径）→ 类 codeSource location（最后兜底，Android 上可能为 null）。
+     */
+    @JvmStatic
+    fun resolveModuleApkPath(context: Context?): String? {
+        if (context != null) {
+            try {
+                return context.packageManager.getApplicationInfo(MODULE_PKG, 0).sourceDir
+            } catch (_: Throwable) {
+                // Android 11+ 包可见性：游戏进程常查不到模块包，fallthrough 到反射
+            }
+        }
+        findModuleApkPathFromClassLoader()?.let { return it }
+        return try {
+            val location = NativeBridge::class.java.protectionDomain?.codeSource?.location
+                ?: return null
+            val file = File(location.toURI())
+            if (file.isFile && file.name.endsWith(".apk")) file.absolutePath else null
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
     private fun findModuleApkPathFromClassLoader(): String? {
         return try {
             val cl = NativeBridge::class.java.classLoader ?: return null

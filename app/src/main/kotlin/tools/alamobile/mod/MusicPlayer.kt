@@ -7,17 +7,24 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import java.io.File
+import java.util.zip.ZipFile
 
 /**
  * 主菜单音乐替换播放器。在游戏进程内运行，负责：
- * 1. 从模块 APK 的 raw 资源中提取 F1 MP3 到缓存目录
+ * 1. 从模块 APK 的 assets 资源中提取 F1 MP3 到缓存目录
  * 2. 轮询 [NativeBridge.isInMainMenu] 检测是否在主菜单
  * 3. 在主菜单时播放 MP3（循环），离开主菜单时暂停
  * 4. 通过 [NativeBridge.setMusicReplace] 同步 mute 游戏原生音乐
  *
- * MP3 提取方式：模块 APK 的 raw 资源可以通过模块 ClassLoader 的
- * getResourceAsStream("res/raw/f1_music.mp3") 访问——这是 Android
- * BaseDexClassLoader 的默认行为，不依赖 PackageManager 包可见性。
+ * MP3 提取方式：优先拿模块 APK 绝对路径后用 ZipFile 直接解压 assets/
+ * 条目（[NativeBridge.resolveModuleApkPath]）。游戏进程的 ClassLoader
+ * getResourceAsStream 在 LSPosed/NPatch 下常找不到资源——模块 ClassLoader 的
+ * dexElements[].path 指向优化后的 dex 而非原 APK（M23 真机"静音不播放"根因）；
+ * ClassLoader 路径仅作最后兜底。
+ *
+ * 为什么放 assets 而不是 res/raw：R8 资源缩减（isMinifyEnabled=true）会把
+ * res/raw 里的 mp3 重命名为短随机名（如 res/sL.mp3），导致按名字解压失败。
+ * assets/ 下的文件 R8 不重命名，ZipFile 按固定路径读取稳定可靠。
  *
  * 生命周期：AlaMobileModule.doPackageReadyDeferred 延迟 15s 后创建，
  * 随游戏进程存活。
@@ -26,7 +33,8 @@ class MusicPlayer private constructor(private val context: Context) {
 
     companion object {
         private const val TAG = "AlaMobileTool"
-        private const val RAW_RESOURCE_PATH = "res/raw/f1_music.mp3"
+        private const val APK_ENTRY_PATH = "assets/f1_music.mp3"
+        private const val RAW_RESOURCE_PATH = "assets/f1_music.mp3"
         private const val CACHE_FILE_NAME = "ala_f1_music.mp3"
         private const val POLL_INTERVAL_MS = 1000L
 
@@ -75,9 +83,29 @@ class MusicPlayer private constructor(private val context: Context) {
 
     /**
      * 从模块 APK 的 raw 资源中提取 MP3 到缓存目录。
-     * 使用 ClassLoader.getResourceAsStream 绕过包可见性限制。
+     * 优先用 APK 绝对路径 + ZipFile 解压（游戏进程下最可靠），
+     * ClassLoader.getResourceAsStream 作兜底。
      */
     private fun extractMusicFile() {
+        try {
+            // 优先：模块 APK 绝对路径 + ZipFile 直接解压 raw 条目。
+            // 游戏进程 ClassLoader 的 dexElements[].path 是优化后的 dex 路径，
+            // getResourceAsStream 找不到 APK 内的 raw 资源（M23 静音不播放根因）。
+            val apkPath = NativeBridge.resolveModuleApkPath(context)
+            if (apkPath != null) {
+                val entryFound = extractFromApk(apkPath)
+                if (entryFound) {
+                    Log.i(TAG, "MusicPlayer: extracted via APK path to ${musicFile?.absolutePath}")
+                    return
+                }
+                Log.w(TAG, "MusicPlayer: $APK_ENTRY_PATH not found in APK ($apkPath), trying ClassLoader")
+            } else {
+                Log.w(TAG, "MusicPlayer: cannot resolve module APK path, trying ClassLoader")
+            }
+        } catch (e: Throwable) {
+            Log.e(TAG, "MusicPlayer: APK extract failed, trying ClassLoader", e)
+        }
+        // 兜底：ClassLoader 资源流（部分环境下可用）
         try {
             val cl = NativeBridge::class.java.classLoader
             if (cl == null) {
@@ -87,19 +115,30 @@ class MusicPlayer private constructor(private val context: Context) {
             val inputStream = cl.getResourceAsStream(RAW_RESOURCE_PATH)
             if (inputStream == null) {
                 Log.w(TAG, "MusicPlayer: resource not found in ClassLoader ($RAW_RESOURCE_PATH)")
-                // 尝试备选路径（AAPT2 可能用不同路径）
-                val altStream = cl.getResourceAsStream("res/raw/f1_music.mp3")
-                if (altStream == null) {
-                    Log.w(TAG, "MusicPlayer: alternative path also not found")
-                    return
-                }
-                altStream.use { copyToCache(it) }
                 return
             }
             inputStream.use { copyToCache(it) }
-            Log.i(TAG, "MusicPlayer: extracted to ${musicFile?.absolutePath}")
+            Log.i(TAG, "MusicPlayer: extracted via ClassLoader to ${musicFile?.absolutePath}")
         } catch (e: Throwable) {
-            Log.e(TAG, "MusicPlayer: extract failed", e)
+            Log.e(TAG, "MusicPlayer: ClassLoader extract failed", e)
+        }
+    }
+
+    /** 从模块 APK 直接解压 raw/f1_music.mp3 到缓存。返回是否成功。 */
+    private fun extractFromApk(apkPath: String): Boolean {
+        return try {
+            val found = ZipFile(apkPath).use { zip ->
+                val entry = zip.getEntry(APK_ENTRY_PATH) ?: run {
+                    Log.w(TAG, "MusicPlayer: APK has no entry $APK_ENTRY_PATH (entries assets/: ${zip.entries().asSequence().filter { it.name.startsWith("assets") }.map { it.name }.toList()})")
+                    return false
+                }
+                zip.getInputStream(entry).use { copyToCache(it) }
+                true
+            }
+            found
+        } catch (e: Throwable) {
+            Log.e(TAG, "MusicPlayer: ZipFile open failed ($apkPath)", e)
+            false
         }
     }
 
@@ -126,6 +165,13 @@ class MusicPlayer private constructor(private val context: Context) {
 
     private fun poll() {
         try {
+            // 每次轮询都尝试补提取——M23 里 MusicPlayer.init 在 native 完全就绪前
+            // 跑，resolveModuleApkPath 的 Context 拿不到模块包（Android 11+ 可见性）
+            // 时可能失败。等游戏进主菜单（musicFile 仍 null）再重试，命中
+            // ConfigReceiver 改配置时 ClassLoader 已稳定、APK 路径可解析的场景。
+            if (musicFile == null && enabled) {
+                extractMusicFile()
+            }
             if (!enabled || musicFile == null) {
                 handler.postDelayed(pollRunnable, POLL_INTERVAL_MS)
                 return
