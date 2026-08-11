@@ -122,6 +122,7 @@ Apache-2.0
 
 ## 版本历史
 
+- **v1.0.0 Beta 3 开发中**：配置页 UI 视觉大改。底栏切 tab 动画改为 KernelSU 式 animateScrollBy（连点不卡不错乱）；下滑顶栏折叠、标题居中；顶栏/底栏加毛玻璃（blurRadius=12f，约为 KernelSU 一半）；新增 miuix-blur 依赖。真实设备已验证。
 - **v1.0.0 Beta 2** (2026-07-30)：踏板与配置体验大改。新增单/双踏板拓扑下拉、双踏板刹车优先仲裁与方向反转开关、长按重置出厂布局、SINGLE/DUAL 位置隔离持久化、配置即时生效（Remote Preferences 跨进程同步）；修复游戏自带方向键被模块 writer 持续清零导致的转向失灵；概览页激活卡片改为 KernelSU 风格对称配色，激活检测改用 LSPosed daemon 绑定状态，新增 GitHub/QQ 图标。
 - **v1.0.0 Beta 1** (2026-07-29)：共存版稳定性大修。修复双 ClassLoader 注入导致的重复 hook/双 writer 线程；废除非原子的文件 IPC 路径，统一走 JNI 直调；用 rawY + 配置值坐标绕开 pairip 壳的 relayout 漂移。CI 自动构建 + tag 触发 Pre-release。
 - **v1.0.0 Alpha 2** (2026-07-28)：UI 重构为 KernelSU 风格，修复多个编译错误，改进深色模式支持。
