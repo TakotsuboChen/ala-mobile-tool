@@ -45,6 +45,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
+import tools.alamobile.mod.EulaManager
 import tools.alamobile.mod.config.ModConfig
 import top.yukonga.miuix.kmp.basic.NavigationBar
 import top.yukonga.miuix.kmp.basic.NavigationBarItem
@@ -61,7 +62,8 @@ import kotlin.math.abs
  */
 @Composable
 fun ConfigMainScreen(
-    onFinish: () -> Unit = {}
+    onFinish: () -> Unit = {},
+    onEulaDismiss: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val settings = remember { ModConfig.read(context) }
@@ -119,10 +121,29 @@ fun ConfigMainScreen(
         saveHandler.postDelayed(runnable, 300)
     }
 
+    // EULA 弹窗状态：isAccepted 在 composition 内读取（CompositionLocal 作用域内），
+    // 由 ConfigActivity 决定是否启用。默认已接受（非空 onEulaDismiss 表示需要显示）。
+    var eulaAccepted by remember { mutableStateOf(onEulaDismiss == null) }
+
+    // 弹窗渲染在 Scaffold 内部（popupHost 由 miuix Scaffold 提供），保证 OverlayDialog 可见。
     ConfigMainScreenContent(
         uiState = uiState,
         onSave = saveNow,
-        onFinish = onFinish
+        onFinish = onFinish,
+        eulaAccepted = eulaAccepted,
+        eulaDialog = {
+            if (!eulaAccepted) {
+                EulaDialog(
+                    sections = EulaManager.EULA_SECTIONS,
+                    footer = EulaManager.EULA_FOOTER,
+                    onAccept = {
+                        EulaManager.accept(context)
+                        eulaAccepted = true
+                    },
+                    onExit = onFinish
+                )
+            }
+        }
     )
 }
 
@@ -130,7 +151,9 @@ fun ConfigMainScreen(
 private fun ConfigMainScreenContent(
     uiState: ConfigUiState,
     onSave: () -> Unit,
-    onFinish: () -> Unit
+    onFinish: () -> Unit,
+    eulaAccepted: Boolean,
+    eulaDialog: (@Composable () -> Unit)? = null
 ) {
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { Tab.entries.size })
     val pagerStateHolder = rememberMainPagerState(pagerState)
@@ -150,7 +173,14 @@ private fun ConfigMainScreenContent(
     CompositionLocalProvider(
         LocalMainPagerState provides pagerStateHolder
     ) {
-        Scaffold { innerPadding ->
+        Scaffold(
+            popupHost = {
+                // EULA 弹窗渲染在默认 miuixPopupHost 之前：这样 EULA 弹窗的 zIndex
+                // 天然高于激活弹窗，且点同意前不渲染激活弹窗（见下 eulaAccepted 门控）。
+                eulaDialog?.invoke()
+                top.yukonga.miuix.kmp.utils.MiuixPopupUtils.MiuixPopupHost()
+            }
+        ) { innerPadding ->
             Box(modifier = Modifier.fillMaxSize()) {
                 val pagerContent: @Composable (bottomPadding: Dp) -> Unit = { bottomPadding ->
                     Box(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
@@ -161,7 +191,10 @@ private fun ConfigMainScreenContent(
                             modifier = Modifier.fillMaxSize()
                         ) { page ->
                             when (Tab.entries[page]) {
-                                Tab.HOME -> OverviewPage(bottomBarHeight = bottomPadding)
+                                Tab.HOME -> OverviewPage(
+                                    bottomBarHeight = bottomPadding,
+                                    activationEnabled = eulaAccepted
+                                )
                                 Tab.CONFIGURE -> ConfigurePage(
                                     uiState = uiState,
                                     onSave = onSave,

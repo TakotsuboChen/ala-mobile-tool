@@ -71,7 +71,7 @@ import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
 @Composable
-fun OverviewPage(bottomBarHeight: Dp = 0.dp) {
+fun OverviewPage(bottomBarHeight: Dp = 0.dp, activationEnabled: Boolean = true) {
     val scrollBehavior = MiuixScrollBehavior()
     val enableBlur = LocalEnableBlur.current
     val backdrop = rememberBlurBackdrop(enableBlur)
@@ -112,7 +112,7 @@ fun OverviewPage(bottomBarHeight: Dp = 0.dp) {
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        ActivationCard()
+                        ActivationCard(activationEnabled = activationEnabled)
                         DeviceInfoCard()
                         LinksCard()
                         Spacer(modifier = Modifier.height(12.dp))
@@ -124,16 +124,17 @@ fun OverviewPage(bottomBarHeight: Dp = 0.dp) {
 }
 
 @Composable
-private fun ActivationCard() {
+private fun ActivationCard(activationEnabled: Boolean = true) {
     val context = LocalContext.current
     var status by remember { mutableStateOf(LsposedStatus.evaluate(context, awaitService = true)) }
     var showNonRootDialog by remember { mutableStateOf(false) }
     val isDark = isSystemInDarkTheme()
 
     // 进入页面时刷新一次（不轮询）：覆盖弹窗选完后的回写、或从设置页清除标记回来。
-    // 刷新后若仍为未激活，自动弹出 Non-root 确认弹窗（无需用户手动点击卡片）。
-    // 卡片 onClick 仍保留手动触发弹窗的能力（描述文案不变）。
-    LaunchedEffect(Unit) {
+    // 未接受 EULA（activationEnabled=false）时不刷新、不自动弹窗——
+    // 用户协议未同意前激活弹窗无意义，且不得覆盖在用户协议上方。
+    LaunchedEffect(activationEnabled) {
+        if (!activationEnabled) return@LaunchedEffect
         status = LsposedStatus.evaluate(context, awaitService = false)
         if (status == LsposedStatus.Status.INACTIVE) {
             showNonRootDialog = true
@@ -167,7 +168,8 @@ private fun ActivationCard() {
         colors = CardDefaults.defaultColors(color = cardColor),
         onClick = {
             // 未激活才弹窗（已激活的两种状态点击无操作）。
-            if (status == LsposedStatus.Status.INACTIVE) {
+            // 未接受 EULA 时点击也不弹（激活弹窗让位于用户协议）。
+            if (activationEnabled && status == LsposedStatus.Status.INACTIVE) {
                 showNonRootDialog = true
             }
         },

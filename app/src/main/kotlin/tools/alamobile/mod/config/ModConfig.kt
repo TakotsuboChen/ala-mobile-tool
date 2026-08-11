@@ -156,8 +156,8 @@ object ModConfig {
         // 原生 TC/ABS 默认开启。
         const val ENABLE_TC = true
         const val ENABLE_ABS = true
-        // 主菜单音乐替换默认关闭
-        const val ENABLE_MUSIC_REPLACE = false
+        // 主菜单音乐替换默认开启
+        const val ENABLE_MUSIC_REPLACE = true
         val PEDAL_MODE = PedalMode.SINGLE
         const val PEDAL_DEADZONE = 0.05f
         const val PEDAL_TRANSITION = 0.5f

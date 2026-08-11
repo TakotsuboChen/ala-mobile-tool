@@ -162,6 +162,7 @@ object LsposedStatus {
     /** "设置 → 清除激活标记"用：彻底清掉所有激活痕迹。 */
     fun clearAll(context: Context) {
         clearNonRootConfirmed(context)
+        EulaManager.clear(context)
         // 旧版本（property/daemon module_loaded 路径）残留清理，向后兼容。
         // 新方案下这两个标记已不再写，但用户可能从旧版升级，清掉避免迷惑。
         val service = App.xposedService

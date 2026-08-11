@@ -1,6 +1,8 @@
 package tools.alamobile.mod.ui
 
 import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,9 +20,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Article
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -29,6 +36,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import tools.alamobile.mod.EulaManager
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -54,6 +62,11 @@ fun SettingsPage(
     val backdrop = rememberBlurBackdrop(enableBlur)
     val blurActive = backdrop != null
     val barColor = if (blurActive) Color.Transparent else MiuixTheme.colorScheme.surface
+
+    // 「用户协议」点击后清除同意状态并当场弹协议。
+    // 弹窗渲染在 SettingsPage 自己的 miuix Scaffold 里（popupHost 提供 OverlayDialog 宿主），
+    // 不同意/按返回 → finish 退出 Activity（与首次启动协议弹窗行为一致）。
+    var showEulaReconfirm by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -128,19 +141,47 @@ fun SettingsPage(
                             }
                         )
                         ArrowRow(
-                            title = "关于",
-                            summary = "Ala Mobile Tool 模块信息",
+                            title = "用户协议",
+                            summary = "重新查看并确认用户协议",
                             icon = Icons.AutoMirrored.Rounded.Article,
                             onClick = {
-                                Toast.makeText(context, "Ala Mobile Tool v1.0.0-Alpha-1", Toast.LENGTH_SHORT).show()
+                                EulaManager.clear(context)
+                                showEulaReconfirm = true
+                            }
+                        )
+                        ArrowRow(
+                            title = "关于",
+                            summary = "Ala Mobile Tool 模块信息",
+                            icon = Icons.Rounded.Info,
+                            onClick = {
+                                Toast.makeText(
+                                    context,
+                                    "Ala Mobile Tool v${tools.alamobile.mod.BuildConfig.VERSION_NAME}",
+                                    Toast.LENGTH_SHORT
+                                ).show()
                             }
                         )
                     }
                 }
             }
         }
+        }
     }
-}
+
+    if (showEulaReconfirm) {
+        EulaDialog(
+            sections = EulaManager.EULA_SECTIONS,
+            footer = EulaManager.EULA_FOOTER,
+            onAccept = {
+                EulaManager.accept(context)
+                showEulaReconfirm = false
+            },
+            onExit = {
+                showEulaReconfirm = false
+                (context as? ComponentActivity)?.finish()
+            }
+        )
+    }
 }
 
 @Composable
@@ -187,9 +228,11 @@ private fun ArrowRow(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     onClick: () -> Unit
 ) {
+    // 整行可点击，左图标已传达语义，右侧不加装饰图标。
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable { onClick() }
             .padding(vertical = 12.dp, horizontal = 16.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -209,10 +252,5 @@ private fun ArrowRow(
                 Text(text = summary, fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
         }
-        Icon(
-            imageVector = Icons.AutoMirrored.Rounded.Article,
-            contentDescription = null,
-            tint = MiuixTheme.colorScheme.onBackground
-        )
     }
 }
