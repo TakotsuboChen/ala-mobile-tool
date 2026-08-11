@@ -300,8 +300,8 @@ tools/run-il2cpp-dumper.sh
 <details>
 <summary>展开查看</summary>
 
-**v1.0.0 Beta 3**（开发中）
-> 配置页 UI 视觉大改。底栏切 tab 动画改为 KernelSU 式 `animateScrollBy`（连点不卡不错乱）；下滑顶栏折叠、标题居中；顶栏/底栏加毛玻璃（blurRadius=12f）；新增 miuix-blur 依赖。真实设备已验证。
+**v1.0.0 Beta 3**（2026-08-12）
+> 配置页 UI 视觉大改。底栏切 tab 动画改为 KernelSU 式 `animateScrollBy`（连点不卡不错乱）；下滑顶栏折叠、标题居中；顶栏/底栏加毛玻璃（blurRadius=12f）；新增 miuix-blur 依赖。新增用户协议强制确认弹窗、配置页开关图标自定义、主菜单音乐替换（Hans Zimmer - F1，320kbps）、原生 TC 开关；修复 AI 车油门误控、LSPosed 激活判定误判（改 `frameworkName`）、NPatch 非 Root 配置跨进程同步、WSL2 Kotlin 编译卡死。真实设备已验证。
 
 **v1.0.0 Beta 2**（2026-07-30）
 > 踏板与配置体验大改。新增单/双踏板拓扑下拉、双踏板刹车优先仲裁与方向反转开关、长按重置出厂布局、SINGLE/DUAL 位置隔离持久化、配置即时生效（Remote Preferences 三路同步）；修复游戏自带方向键被 writer 持续清零导致的转向失灵；概览页激活卡片改为 KernelSU 风格对称配色，激活检测改用 LSPosed daemon 绑定状态。
