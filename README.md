@@ -99,8 +99,8 @@
 
 #### LSPosed 真激活检测
 - 概览页实时显示激活状态（已激活 / 未激活）
-- 双路径判定：游戏进程用 `onModuleLoaded` property，模块进程用 daemon binder + scope 组合
-- 自动弹窗确认 Non-root 框架（LSPatch/NPatch/FPA）
+- 判定依据 `service.frameworkName == "LSPosed"`：LSPosed daemon 只在模块启用时推 binder，绑定即激活（参照 AdClose `onServiceBind` 思路）
+- NPatch 等非 root 框架（`frameworkName == "NPatch"`，API 101）不算 LSPOSED，自动弹窗确认（LSPatch/NPatch/FPA）
 
 #### 现代 UI
 - KernelSU 风格三页布局（概览 / 配置 / 设置），支持深色模式
@@ -189,7 +189,7 @@
 |---|---|
 | 启用日志 | 记录模块运行日志 |
 | 导出并分享日志 | 导出日志文件（即将上线） |
-| 清除激活标记 | 删除 LSPosed / Non-root 激活状态缓存 |
+| 清除激活标记 | 删除 Non-root 确认标记与 EULA 标记（filesDir，pm clear 可清） |
 | 用户协议 | 重新查看并确认用户协议 |
 | 关于 | 版本信息 |
 
@@ -231,7 +231,7 @@ Ala Mobile Tool (LSPosed 模块 APK)
 ├── ConfigProvider          # 跨进程配置 IPC（ContentProvider）
 ├── ConfigReceiver          # 配置广播接收器
 ├── BillingHook             # Java 层内购解锁（Xposed hook）
-├── LsposedStatus           # 激活状态双路径判定
+├── LsposedStatus           # 激活状态判定（frameworkName 区分框架 + Non-root 弹窗确认）
 ├── EulaManager             # 用户协议管理
 ├── VersionGate             # 版本门控
 └── libala-core.so          # ShadowHook 原生引擎（arm64-v8a）
