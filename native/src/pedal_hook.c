@@ -22,6 +22,15 @@ static volatile int g_throttle_active = 0;
 static volatile int g_brake_active = 0;
 static volatile int g_disable_auto_gear = 0;
 
+// ★ 玩家车 controller 的单一可靠来源。
+// 只由 proxy_player_controls_update 设置（IRDSPlayerControls 只挂玩家车 GameObject）。
+// 其他所有 hook（proxy_set_throttle/proxy_set_brake/proxy_fixed_update）都跑在
+// 所有车的实例上，不再设置此变量，避免 AI 车误判污染。
+static volatile void *g_player_controller = NULL;
+
+// g_last_controller 保留为后向兼容（pedal_shift_up/pedal_shift_down/pedal_set_throttle_value
+// 等 JNI 入口仍用它），但不作为 writer 线程的输入源。
+// writer 线程写 g_player_controller。
 static volatile void *g_last_controller = NULL;
 static volatile void *g_player_controls = NULL;  // IRDSPlayerControls 实例
 static volatile uintptr_t g_player_drivetrain = 0;
@@ -160,11 +169,10 @@ static void *input_writer_thread(void *arg) {
         // 用户完全没操作时不写字段——让游戏自带油门/刹车/方向键输入
         // 不被覆盖。只有任一 active 为真（用户按住模块踏板）才写。
         if (g_throttle_active || g_brake_active) {
-            void *controller = (void *) g_last_controller;
-            // 防止 use-after-free：玩家车 GameObject 被销毁后（重启/重进赛道），
-            // g_last_controller 可能指向已释放内存。is_player_controller 会读
-            // 0x108 字段——若实例已销毁，该字段大概率 null 或触发非法访问。
-            // 加此守卫：非玩家车或已失效的指针都不写。
+            // 只用 g_player_controller（由 player_controls_update 设置，只挂玩家车）。
+            // 不再用 g_last_controller——它可能被 AI 车 setter 调用的
+            // is_player_controller 误判污染（AI 车 0x108 可能非空）。
+            void *controller = (void *) g_player_controller;
             if (controller != NULL && is_player_controller(controller)) {
                 apply_inputs_to_controller(controller);
             }
@@ -202,14 +210,24 @@ static void proxy_set_throttle(void *this, float value) {
     // 旧实现无条件 g_last_controller = this，导致多车模式下 19 辆 AI 车
     // 每帧 19 次覆盖 g_last_controller，writer 线程把模块输入写到 AI 车字段。
     int is_player = is_player_controller(this);
+
+    {  // 诊断：油门活跃时低速确认 AI 车判据（每 200 次采样一次）
+        static volatile int diag = 0;
+        if (g_throttle_active && (++diag % 200) == 0) {
+            void *pc = *(void **) ((uintptr_t) this + 0x108);
+            LOGI("DIAG set_throttle: this=%p val=%.3f is_player=%d pc(0x108)=%p active=%d",
+                 this, value, is_player, pc, g_throttle_active);
+        }
+    }
+
     if (is_player) {
         g_last_controller = this;
     }
 
-    // When the overlay is controlling throttle, swallow the game's input.
-    // The background writer thread (which reads overlay values from a file)
-    // continuously overwrites the instance fields with the overlay's values.
-    if (g_throttle_active) {
+    // 只在玩家车时吞掉游戏输入（模块踏板控制中）。
+    // AI 车必须透传 orig——否则游戏 AI 写入的油门值被吞掉，
+    // AI 车油门卡在用户踩下踏板那一刻的值，所有 AI 车一起加速。
+    if (is_player && g_throttle_active) {
         return;
     }
 
@@ -221,11 +239,13 @@ static void proxy_set_throttle(void *this, float value) {
 
 static void proxy_set_brake(void *this, float value) {
     // 只有玩家车的 controller 才捕获——同 proxy_set_throttle。
-    if (is_player_controller(this)) {
+    int is_player = is_player_controller(this);
+    if (is_player) {
         g_last_controller = this;
     }
 
-    if (g_brake_active) {
+    // 只在玩家车时吞掉游戏输入的刹车值——AI 车须透传 orig。
+    if (is_player && g_brake_active) {
         return;
     }
 
@@ -271,8 +291,10 @@ static void proxy_fixed_update(void *this) {
             write_bool_field(this, 0xC4, false);
         }
 
-        // Ensure our inputs are present before the physics tick reads them.
-        apply_inputs_to_controller(this);
+        // 注意：不再在此处调 apply_inputs_to_controller。
+        // 确保模块输入由 writer 线程（~500Hz）写入——它只写 g_player_controller
+        //（由只挂在玩家车上的 IRDSPlayerControls.Update 设置），不受 AI 车误判影响。
+        // 这里只保留 TC/ABS 写入（写字段对 AI 车无害）。
     }
 
     typedef void (*orig_t)(void *);
@@ -280,9 +302,17 @@ static void proxy_fixed_update(void *this) {
         ((orig_t) g_fixed_update_orig)(this);
     }
 
+    // 恢复：在 orig 后也写一次（确保模块值覆盖游戏 FixedUpdate 写入的值）。
+    // 但只写玩家车。
+    // 注：这行是有风险的——如果 is_player_controller 对 AI 车也返回 true，就会写 AI 车。
+    // 保留此行是因为游戏每帧 FixedUpdate 会覆盖 throttle/brake 字段，不在这写，
+    // 单靠 writer 线程的 2ms 间隔可能被 FixedUpdate 的 50Hz (~20ms) 周期覆盖。
+    // 用户报告 AI 误控时，先注释，等诊断确认 is_player_controller 可靠性后再决定。
+    /*
     if (is_player) {
         apply_inputs_to_controller(this);
     }
+    */
 }
 
 static void proxy_drivetrain_fixed_update(void *this) {
@@ -332,7 +362,11 @@ static void proxy_player_controls_update(void *this) {
         g_player_controls = this;  // 记住 IRDSPlayerControls 实例
         void *car_inputs = *(void **) ((uintptr_t) this + 0x60);
         if (car_inputs != NULL) {
+            // ★ 玩家车 controller 的唯一写入点。IRDSPlayerControls 只挂玩家车
+            // GameObject，从这里读 carInputs 是最可靠的玩家车判据。
+            // 同时刷新 g_last_controller（JNI 入口用）和 g_player_controller（writer 线程用）。
             g_last_controller = car_inputs;
+            g_player_controller = car_inputs;
 
             // ★ ABS 被内联到 carController，hook HandleABS 方法没用。
             // 在 FixedUpdate 入口写 absEnable=0 更可靠（carController 紧随其后读），
@@ -647,12 +681,12 @@ void pedal_uninstall_hooks(void) {
 }
 
 void *pedal_get_controller(void) {
-    return (void *) g_last_controller;
+    return (void *) g_player_controller;
 }
 
 void pedal_shift_up(void) {
     LOGI("pedal_shift_up");
-    void *controller = (void *) g_last_controller;
+    void *controller = (void *) g_player_controller;
     if (controller != NULL && is_player_controller(controller) && g_shift_up_orig != NULL) {
         typedef void (*orig_t)(void *);
         ((orig_t) g_shift_up_orig)(controller);
@@ -661,7 +695,7 @@ void pedal_shift_up(void) {
 
 void pedal_shift_down(void) {
     LOGI("pedal_shift_down");
-    void *controller = (void *) g_last_controller;
+    void *controller = (void *) g_player_controller;
     if (controller != NULL && is_player_controller(controller) && g_shift_down_orig != NULL) {
         typedef void (*orig_t)(void *);
         ((orig_t) g_shift_down_orig)(controller);
@@ -689,7 +723,8 @@ void pedal_set_throttle_value(float value) {
         g_throttle_value = value;
     }
 
-    void *controller = (void *) g_last_controller;
+    // 用 g_player_controller（由 IRDSPlayerControls.Update 设置，只挂玩家车）。
+    void *controller = (void *) g_player_controller;
     if (controller == NULL) return;
     if (!is_player_controller(controller)) return;  // 野指针/已销毁实例防护
 
@@ -715,7 +750,8 @@ void pedal_set_brake_value(float value) {
         g_brake_value = value;
     }
 
-    void *controller = (void *) g_last_controller;
+    // 用 g_player_controller（由 IRDSPlayerControls.Update 设置，只挂玩家车）。
+    void *controller = (void *) g_player_controller;
     if (controller == NULL) return;
     if (!is_player_controller(controller)) return;  // 野指针/已销毁实例防护
 
