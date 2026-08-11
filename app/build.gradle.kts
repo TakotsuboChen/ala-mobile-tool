@@ -109,6 +109,7 @@ dependencies {
 
     implementation(libs.miuix.ui)
     implementation(libs.miuix.preference)
+    implementation(libs.miuix.blur)
     implementation(libs.activity.compose)
     implementation(libs.navigationevent.compose)
     implementation(libs.material.icons.core)

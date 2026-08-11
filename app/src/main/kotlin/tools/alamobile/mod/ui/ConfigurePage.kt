@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -33,6 +34,8 @@ import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -46,6 +49,7 @@ import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
+import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -58,51 +62,60 @@ fun ConfigurePage(
     bottomBarHeight: Dp = 0.dp
 ) {
     val scrollBehavior = MiuixScrollBehavior()
+    val enableBlur = LocalEnableBlur.current
+    val backdrop = rememberBlurBackdrop(enableBlur)
+    val blurActive = backdrop != null
+    val barColor = if (blurActive) Color.Transparent else MiuixTheme.colorScheme.surface
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = "配置",
-                scrollBehavior = scrollBehavior
-            )
+            BlurredBar(backdrop) {
+                TopAppBar(
+                    title = "配置",
+                    color = barColor,
+                    scrollBehavior = scrollBehavior
+                )
+            }
         },
         contentWindowInsets = WindowInsets.systemBars
             .only(WindowInsetsSides.Horizontal)
     ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxHeight()
-                .scrollEndHaptic()
-                .overScrollVertical()
-                .padding(horizontal = 12.dp),
-            // 底部留出底栏高度，否则最后一个 item 会被 NavigationBar 挡住。
-            // 叠在外层 Scaffold 给的 topBar padding 之下，两者互不干扰。
-            contentPadding = PaddingValues(
-                top = innerPadding.calculateTopPadding(),
-                bottom = innerPadding.calculateBottomPadding() + bottomBarHeight
-            ),
-            overscrollEffect = null
-        ) {
-            item {
-                Column(
-                    modifier = Modifier.padding(vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    SmallTitle(
-                        text = "功能开关",
-                        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
-                    )
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        SwitchRow(
-                            title = "解锁付费内容",
-                            summary = "强制解锁 DLC 和 IAP",
-                            icon = Icons.Rounded.LockOpen,
-                            checked = uiState.enableUnlock.value,
-                            onCheckedChange = {
-                                uiState.enableUnlock.value = it
-                                onSave()
-                            }
+        Box(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .scrollEndHaptic()
+                    .overScrollVertical()
+                    .nestedScroll(scrollBehavior.nestedScrollConnection)
+                    .padding(horizontal = 12.dp),
+                // 底部留出底栏高度，否则最后一个 item 会被 NavigationBar 挡住。
+                // 叠在外层 Scaffold 给的 topBar padding 之下，两者互不干扰。
+                contentPadding = PaddingValues(
+                    top = innerPadding.calculateTopPadding(),
+                    bottom = innerPadding.calculateBottomPadding() + bottomBarHeight
+                ),
+                overscrollEffect = null
+            ) {
+                item {
+                    Column(
+                        modifier = Modifier.padding(vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        SmallTitle(
+                            text = "功能开关",
+                            insideMargin = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
                         )
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            SwitchRow(
+                                title = "解锁付费内容",
+                                summary = "强制解锁 DLC 和 IAP",
+                                icon = Icons.Rounded.LockOpen,
+                                checked = uiState.enableUnlock.value,
+                                onCheckedChange = {
+                                    uiState.enableUnlock.value = it
+                                    onSave()
+                                }
+                            )
                         // 原生牵引力控制（TC）开关。默认开启。借"游戏手柄已连接"
                         // 机制，强制玩家车 tclEnable 生效——只作用玩家车，不破坏
                         // 陀螺仪/触摸转向，也根治 M18 的 AI 误控。
@@ -316,6 +329,7 @@ fun ConfigurePage(
             }
         }
     }
+}
 }
 
 @Composable

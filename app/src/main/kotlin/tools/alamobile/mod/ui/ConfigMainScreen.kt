@@ -12,6 +12,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
+import androidx.compose.animation.core.EaseInOut
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
@@ -24,19 +27,23 @@ import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import tools.alamobile.mod.config.ModConfig
 import top.yukonga.miuix.kmp.basic.NavigationBar
@@ -45,7 +52,9 @@ import top.yukonga.miuix.kmp.basic.NavigationRail
 import top.yukonga.miuix.kmp.basic.NavigationRailItem
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.rememberNavigationRailState
+import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import kotlin.math.abs
 
 /**
  * Top-level entry for the KernelSU-style miuix configuration UI.
@@ -126,6 +135,17 @@ private fun ConfigMainScreenContent(
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { Tab.entries.size })
     val pagerStateHolder = rememberMainPagerState(pagerState)
     val useRail = false
+    val enableBlur = LocalEnableBlur.current
+    val backdrop = rememberBlurBackdrop(enableBlur)
+
+    val settledPage = pagerState.settledPage
+    LaunchedEffect(settledPage) {
+        pagerStateHolder.syncPage()
+    }
+    val currentPage = pagerState.currentPage
+    LaunchedEffect(currentPage) {
+        pagerStateHolder.syncPage()
+    }
 
     CompositionLocalProvider(
         LocalMainPagerState provides pagerStateHolder
@@ -133,24 +153,26 @@ private fun ConfigMainScreenContent(
         Scaffold { innerPadding ->
             Box(modifier = Modifier.fillMaxSize()) {
                 val pagerContent: @Composable (bottomPadding: Dp) -> Unit = { bottomPadding ->
-                    HorizontalPager(
-                        state = pagerState,
-                        beyondViewportPageCount = 1,
-                        userScrollEnabled = true,
-                        modifier = Modifier.fillMaxSize()
-                    ) { page ->
-                        when (Tab.entries[page]) {
-                            Tab.HOME -> OverviewPage(bottomBarHeight = bottomPadding)
-                            Tab.CONFIGURE -> ConfigurePage(
-                                uiState = uiState,
-                                onSave = onSave,
-                                bottomBarHeight = bottomPadding
-                            )
-                            Tab.SETTINGS -> SettingsPage(
-                                uiState = uiState,
-                                onSave = onSave,
-                                bottomBarHeight = bottomPadding
-                            )
+                    Box(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
+                        HorizontalPager(
+                            state = pagerState,
+                            beyondViewportPageCount = 1,
+                            userScrollEnabled = true,
+                            modifier = Modifier.fillMaxSize()
+                        ) { page ->
+                            when (Tab.entries[page]) {
+                                Tab.HOME -> OverviewPage(bottomBarHeight = bottomPadding)
+                                Tab.CONFIGURE -> ConfigurePage(
+                                    uiState = uiState,
+                                    onSave = onSave,
+                                    bottomBarHeight = bottomPadding
+                                )
+                                Tab.SETTINGS -> SettingsPage(
+                                    uiState = uiState,
+                                    onSave = onSave,
+                                    bottomBarHeight = bottomPadding
+                                )
+                            }
                         }
                     }
                 }
@@ -185,17 +207,19 @@ private fun ConfigMainScreenContent(
                 } else {
                     Scaffold(
                         bottomBar = {
-                            NavigationBar(
-                                modifier = Modifier.fillMaxWidth(),
-                                color = MiuixTheme.colorScheme.surface
-                            ) {
-                                Tab.entries.forEachIndexed { index, tab ->
-                                    this.NavigationBarItem(
-                                        selected = pagerStateHolder.selectedPage == index,
-                                        onClick = { pagerStateHolder.animateToPage(index) },
-                                        icon = tab.selectedIcon,
-                                        label = tab.title
-                                    )
+                            BlurredBar(backdrop) {
+                                NavigationBar(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = if (backdrop != null) Color.Transparent else MiuixTheme.colorScheme.surface
+                                ) {
+                                    Tab.entries.forEachIndexed { index, tab ->
+                                        this.NavigationBarItem(
+                                            selected = pagerStateHolder.selectedPage == index,
+                                            onClick = { pagerStateHolder.animateToPage(index) },
+                                            icon = tab.selectedIcon,
+                                            label = tab.title
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -241,22 +265,49 @@ class MainPagerState(
     val pagerState: PagerState,
     private val coroutineScope: CoroutineScope
 ) {
-    var selectedPage by mutableStateOf(pagerState.currentPage)
-        @Suppress("UNUSED") private set
+    var selectedPage by mutableIntStateOf(pagerState.currentPage)
+        private set
+
+    var isNavigating by mutableStateOf(false)
+        private set
 
     private var navJob: Job? = null
 
     fun animateToPage(targetIndex: Int) {
         if (targetIndex == selectedPage) return
+
         navJob?.cancel()
+
         selectedPage = targetIndex
+        isNavigating = true
+
+        val distance = abs(targetIndex - pagerState.currentPage).coerceAtLeast(2)
+        val duration = 100 * distance + 100
+        val layoutInfo = pagerState.layoutInfo
+        val pageSize = layoutInfo.pageSize + layoutInfo.pageSpacing
+        val currentDistanceInPages = targetIndex - pagerState.currentPage - pagerState.currentPageOffsetFraction
+        val scrollPixels = currentDistanceInPages * pageSize
+
         navJob = coroutineScope.launch {
-            pagerState.animateScrollToPage(targetIndex)
+            val myJob = coroutineContext.job
+            try {
+                pagerState.animateScrollBy(
+                    value = scrollPixels,
+                    animationSpec = tween(easing = EaseInOut, durationMillis = duration)
+                )
+            } finally {
+                if (navJob == myJob) {
+                    isNavigating = false
+                    if (pagerState.currentPage != targetIndex) {
+                        selectedPage = pagerState.currentPage
+                    }
+                }
+            }
         }
     }
 
     fun syncPage() {
-        if (selectedPage != pagerState.currentPage) {
+        if (!isNavigating && selectedPage != pagerState.currentPage) {
             selectedPage = pagerState.currentPage
         }
     }

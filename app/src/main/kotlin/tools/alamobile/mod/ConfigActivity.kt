@@ -9,6 +9,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import androidx.navigationevent.compose.rememberNavigationEventDispatcherOwner
 import tools.alamobile.mod.ui.ConfigMainScreen
+import tools.alamobile.mod.ui.LocalEnableBlur
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
@@ -25,7 +26,8 @@ class ConfigActivity : ComponentActivity() {
             ) {
                 val dispatcherOwner = rememberNavigationEventDispatcherOwner(parent = null)
                 CompositionLocalProvider(
-                    LocalNavigationEventDispatcherOwner provides dispatcherOwner
+                    LocalNavigationEventDispatcherOwner provides dispatcherOwner,
+                    LocalEnableBlur provides true
                 ) {
                     ConfigMainScreen(onFinish = { finish() })
                 }

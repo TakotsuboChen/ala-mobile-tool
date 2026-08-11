@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+        miuix-blur 声明的 minSdk=33（用 RenderEffect），但库内部 isRenderEffectSupported()
+        已在 Android 12+ 之外返回 false，运行时安全。照搬 KernelSU 的处理方式：
+        tools:overrideLibrary 允许 minSdk 26 的模块继续链接。
+    -->
+    <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
 
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
