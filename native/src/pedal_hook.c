@@ -211,15 +211,6 @@ static void proxy_set_throttle(void *this, float value) {
     // 每帧 19 次覆盖 g_last_controller，writer 线程把模块输入写到 AI 车字段。
     int is_player = is_player_controller(this);
 
-    {  // 诊断：油门活跃时低速确认 AI 车判据（每 200 次采样一次）
-        static volatile int diag = 0;
-        if (g_throttle_active && (++diag % 200) == 0) {
-            void *pc = *(void **) ((uintptr_t) this + 0x108);
-            LOGI("DIAG set_throttle: this=%p val=%.3f is_player=%d pc(0x108)=%p active=%d",
-                 this, value, is_player, pc, g_throttle_active);
-        }
-    }
-
     if (is_player) {
         g_last_controller = this;
     }
