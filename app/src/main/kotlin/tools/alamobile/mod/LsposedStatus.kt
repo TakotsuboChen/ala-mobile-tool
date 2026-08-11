@@ -6,32 +6,38 @@ import android.util.Log
 /**
  * 模块激活状态判定。
  *
- * 判定基准（用户确认："Manager 当前启用"语义）：
- * - **LSPosed 真激活** = LSPosed daemon 已绑定到本进程 **且** `getScope()` 非空。
- *   daemon binder 在模块 APK 被检测到时由框架经 `XposedProvider.call("SendBinder")`
- *   推给模块进程——**即使模块未在 Manager 里启用**，binder 也会到来。
- *   所以仅凭 `App.xposedService != null` 不足以判定"已启用"，必须再用
- *   [XposedService.getScope] 确认 Manager 里挂接了至少一个目标 App。
- *   scope 非空 = Manager 当前启用；scope 为空 = 仅安装未启用。
- *   这个信号随 Manager 启用态实时变化，不需要进程重启，也不依赖 onModuleLoaded
- *   时机（onModuleLoaded 只在目标 App 进程调，ConfigActivity 进程永不调——
- *   旧的 System.getProperty 路径对 ConfigActivity 根本不可达，已废弃）。
+ * 判定基准：**`onModuleLoaded` 是否在本进程内执行**（仅对目标进程有效）
+ * 或 **daemon 已绑定且 scope 非空**（对 ConfigActivity 进程有效）。
  *
- *   **首次安装陷阱**：LSPosed 在检测到新安装的 xposed 模块 APK 时，会在模块进程
- *   首次创建时推 binder 过来（即使用户还没在 Manager 启用），这是"第一次启动显示
- *   已激活"的根因。清后台后进程重启，daemon 不再重复推 binder（仅首次安装推一次），
- *   `xposedService` 回到 null → 第二次启动变"未激活"。加 scope 检查后，首次启动时
- *   scope 为空（还没在 Manager 启用）→ 正确显示"未激活"，不再出现首次误判。
- * - **Non-root 框架**（LSPatch/NPatch/FPA）：不装 LSPosed Manager，不绑 daemon，
- *   `App.xposedService == null` → 落到手动手动确认路径。用户在弹窗里选"是"后
- *   写 `nonroot_confirmed` 标记（daemon 没绑时写本地 filesDir）。
+ * `onModuleLoaded` 只会在模块被框架注入的目标进程（游戏进程）里调用，在模块
+ * 自己的 ConfigActivity 进程里**从不调用**——所以 `System.getProperty(
+ * MODULE_LOADED_FLAG)` 在 ConfigActivity 里**永远为 false**，不能作为单一判定。
+ *
+ * 对于 ConfigActivity 进程，可用的信号是：
+ * 1. `App.xposedService != null` —— LSPosed daemon 已绑定到本进程。但 daemon
+ *    在检测到已安装的 xposed 模块 APK 时，即使模块**未在 Manager 启用**，也会
+ *    在模块进程首次创建时推 binder 过来。所以仅凭 service 绑定不能判定"已启用"。
+ * 2. `getScope().isNotEmpty()` —— 模块在 Manager 里配置过的 scope 列表，存在
+ *    LSPosed daemon 的 SQLite 数据库里。**scope 和模块的启用/禁用状态独立存储**：
+ *    用户关掉模块开关**不会清 scope**，`pm clear` 也清不掉 daemon DB 里的 scope。
+ *    所以"`service != null && getScope().isNotEmpty()`"在禁用后第一次打开仍可能
+ *    误判为已激活（scope 残留）。
+ * 3. 两者组合：`service != null && getScope().isNotEmpty()` 是当前可用的最佳
+ *    近似信号。scope 残留的误判仅发生在"清除数据 + 关闭模块开关 + 第一次打开"
+ *    的特定场景，第二次打开（进程重启后 daemon 不再推 binder，service 为 null）
+ *    就不会再误判。
+ *
+ * 判定优先级：
+ * 1. `hasModuleLoadedFlag()` —— 目标进程（游戏进程）路径，`onModuleLoaded` 执行过。
+ * 2. `service != null && getScope().isNotEmpty()` —— ConfigActivity 进程路径。
+ * 3. `readNonRootConfirmed()` —— 用户在弹窗里确认了 Non-root 框架。
+ * 4. 默认 `INACTIVE`。
  *
  * 迁移规则：LSPosed 真激活覆盖并忘掉 Non-root 标记（清 nonroot_confirmed）；
  * 之后 LSPosed 关了 → 不保留 Non-root 已激活状态，必须重新点选。
  *
- * 异步陷阱：[App.xposedService] 在 ConfigActivity.onCreate 时可能仍为 null
- * （XposedServiceHelper 异步绑定）。[evaluate] 的 `awaitService` 参数提供轮询
- * 兜住这个绑定窗口——首次进入页面时传 true，后续刷新传 false。
+ * 异步时序：[App.xposedService] 在 ConfigActivity.onCreate 时可能仍为 null
+ * （XposedServiceHelper 异步绑定）。`awaitService` 参数提供 3s 轮询兜底。
  */
 object LsposedStatus {
 
@@ -39,7 +45,7 @@ object LsposedStatus {
 
     /** 激活状态。UI 据此渲染卡片标题、描述、颜色与点击行为。 */
     enum class Status {
-        /** 真被 LSPosed 加载（daemon 已绑定 = Manager 当前启用本模块）。 */
+        /** 真被 LSPosed 加载（onModuleLoaded 在本进程执行过）。 */
         LSPOSED,
         /** 用户确认用 Non-root 框架（LSPatch/NPatch/FPA）加载。 */
         NONROOT,
@@ -50,22 +56,25 @@ object LsposedStatus {
     /**
      * 判定当前激活状态。
      *
-     * **关键区分**：`App.xposedService != null` 只代表"LSPosed daemon 可达"——
-     * LSPosed 在检测到已安装的 xposed 模块 APK 时，会在模块进程首次创建时推一个
-     * binder 过来，即使模块未在 Manager 里启用。这导致"刚安装、未启用"时
-     * `xposedService` 非空 → 误判为已激活。
-     *
-     * 真正判定"模块已启用"的信号是 [XposedService.getScope]：它返回模块在 Manager
-     * 里被启用挂接的目标 App 列表。scope 为空 = 模块未启用 = 应显示未激活。
-     * 清后台后进程重启，daemon 不再重复推 binder（仅首次安装推一次），
-     * `xposedService` 回到 null —— 这解释了"第一次显示已激活、第二次显示未激活"。
-     *
-     * @param context ConfigActivity 的 context（模块进程）
-     * @param awaitService 是否轮询等待 daemon 绑定（处理 XposedServiceHelper 异步
-     *   绑定晚于读检测的情况）。首次进入页面时传 true，后续手动刷新传 false。
+     * **判定优先级**：
+     * 1. `hasModuleLoadedFlag()` —— 目标进程（游戏进程）路径：`onModuleLoaded`
+     *    执行过，markActivated 设了进程级 property。模块被真正启用时才有。
+     * 2. `service != null && getScope().isNotEmpty()` —— ConfigActivity 进程路径：
+     *    `onModuleLoaded` 在 ConfigActivity 里**从不调用**（模块进程不被注入），
+     *    所以 property 永远为 false，必须用 daemon scope 判定。scope 存在 daemon
+     *    SQLite DB，与启用状态独立存储，禁用后首次打开可能残留误判（见 [evaluate]
+     *    的根因说明）。
+     * 3. `readNonRootConfirmed()` —— 用户在弹窗里确认了 Non-root 框架。
+     * 4. 默认 `INACTIVE`。
      */
     fun evaluate(context: Context, awaitService: Boolean = false): Status {
-        // 1) LSPosed daemon 绑定 + scope 非空 = Manager 当前启用本模块。
+        // 1) 目标进程路径：onModuleLoaded 执行过（游戏进程被真正注入）。
+        if (hasModuleLoadedFlag()) {
+            clearNonRootConfirmed(context)
+            return Status.LSPOSED
+        }
+
+        // 2) ConfigActivity 进程路径：daemon 已绑定 + scope 非空 = Manager 里启用。
         //    App.xposedService 由 App.onServiceBind 赋值，只在框架触发 binder 时调到。
         //    异步绑定可能晚于首次读检测——轮询等待最多 ~3s。
         val service = App.xposedService
@@ -74,8 +83,6 @@ object LsposedStatus {
                 clearNonRootConfirmed(context)
                 return Status.LSPOSED
             }
-            // service 绑上了但 scope 为空 → 模块已安装但未在 Manager 启用。
-            // 不清 Non-root 标记（用户可能之前确认过 Non-root），不判为已激活。
         } else if (awaitService) {
             val deadline = System.currentTimeMillis() + 3000
             while (System.currentTimeMillis() < deadline) {
@@ -85,14 +92,13 @@ object LsposedStatus {
                         clearNonRootConfirmed(context)
                         return Status.LSPOSED
                     }
-                    // service 绑上了但 scope 为空 —— 等再久也不会变，停止轮询。
                     break
                 }
                 try { Thread.sleep(100) } catch (_: InterruptedException) { break }
             }
         }
 
-        // 2) Non-root 用户确认标记 —— 用户在弹窗里选了"是"。
+        // 3) Non-root 用户确认标记 —— 用户在弹窗里选了"是"。
         if (readNonRootConfirmed(context)) {
             return Status.NONROOT
         }
@@ -100,11 +106,16 @@ object LsposedStatus {
         return Status.INACTIVE
     }
 
+    /** 本进程是否执行过 onModuleLoaded（markActivated 设的进程级 property，仅目标进程）。 */
+    private fun hasModuleLoadedFlag(): Boolean =
+        System.getProperty(AlaMobileModule.MODULE_LOADED_FLAG) == "true"
+
     /**
      * 检查模块是否在框架 Manager 里被启用（scope 非空）。
      *
-     * [XposedService.getScope] 返回模块被启用挂接的目标 App 包名列表。
-     * scope 为空 = 模块已安装/已被框架识别，但未在 Manager 里启用任何目标 App。
+     * [XposedService.getScope] 返回模块配置过的目标 App 包名列表。scope 为空 =
+     * 模块已安装/已被框架识别，但未配置任何目标 App。scope 非空通常意味着模块
+     * 被启用过（scope 是启用模块的必要配置）。
      *
      * 异常处理：如果 getScope() 因 daemon 临时故障失败，保守返回 true——
      * 避免已启用模块因 daemon 抖动被误判为未激活（"已激活→未激活"比

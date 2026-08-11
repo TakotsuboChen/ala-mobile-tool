@@ -93,15 +93,13 @@ class AlaMobileModule : XposedModule() {
     }
 
     /**
-     * 写"模块已被框架加载"的进程级 property。
+     * 写"模块已被框架加载"的进程级 property `MODULE_LOADED_FLAG`。
      *
-     * 历史用途：旧版 ConfigActivity 读此 property 判激活态。现已废弃——ConfigActivity
-     * 进程不被 LSPosed 注入，onModuleLoaded 不会在模块进程调，property 永不设上。
-     * 新版激活判定改用 `App.xposedService` 绑定状态（见 [tools.alamobile.mod.LsposedStatus]）。
-     *
-     * 保留 setProperty 仅作向后兼容：[tools.alamobile.mod.LsposedStatus.clearAll]
-     * 仍清它，避免旧版用户升级后残留 property 造成迷惑。daemon `module_loaded`
-     * 持久标记的写入已移除——被 service 绑定状态取代，不再需要。
+     * 语义：onModuleLoaded 只在模块被框架注入的**目标进程**（游戏进程）里调用，
+     * 模块自己的 ConfigActivity 进程**从不调用**。所以此 property 对游戏进程
+     * 是可靠的"模块被真正启用"信号（禁用后进程重启消失），但 ConfigActivity
+     * 进程里永远为 false——[tools.alamobile.mod.LsposedStatus.evaluate] 必须
+     * 额外加 daemon scope 判定（见 LsposedStatus 的判定优先级说明）。
      */
     private fun markActivated() {
         System.setProperty(MODULE_LOADED_FLAG, "true")
