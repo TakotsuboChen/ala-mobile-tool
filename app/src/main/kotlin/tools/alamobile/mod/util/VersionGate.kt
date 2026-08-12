@@ -10,8 +10,12 @@ private val SUPPORTED_PACKAGES = setOf(
     "com.Takotsubo.AlamobileFormula"
 )
 
-private const val SUPPORTED_VERSION_NAME = "8.0.0"
-private const val SUPPORTED_VERSION_CODE = 200142
+private const val SUPPORTED_VERSION_NAME = "8.0.4"
+private const val SUPPORTED_VERSION_CODE = 200146
+
+// 8.0.0 (200142) 的 offsets 已不再匹配 8.0.4 的 libil2cpp.so。
+// 若需同时支持两个版本，需要按版本号分发不同的 OffsetTable；
+// 当前实现只支持一个版本（8.0.4），8.0.0 用户会收到 unsupported 警告。
 
 fun isSupportedVersion(context: Context?): Boolean {
     if (context == null) return false
