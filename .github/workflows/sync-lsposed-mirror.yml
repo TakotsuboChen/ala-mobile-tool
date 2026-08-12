@@ -24,6 +24,10 @@ on:
         required: false
         type: string
         default: ''
+    secrets:
+      TARGET_REPO_TOKEN:
+        required: true
+        description: 'PAT with admin access to Xposed-Modules-Repo/tools.alamobile.mod'
   workflow_dispatch:
     inputs:
       tag:
