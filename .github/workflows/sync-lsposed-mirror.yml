@@ -1,15 +1,14 @@
 name: Sync to LSPosed Modules Repo
 
-# 把本仓库的 release 原样同步到官方模块镜像仓库
-# Xposed-Modules-Repo/tools.alamobile.mod。
+# 把本仓库的 release 同步到官方模块镜像仓库
+# Xposed-Modules-Repo/tools.alamobile.mod，并按官方规范命名。
 #
-# 原则：原样搬运，不做任何转换。
-#   - 镜像 release 的 tag   = 源 release 的 tag（如 v1.0.0-Beta-3）
-#   - 镜像 release 的 name  = 源 release 的 name
-#   - 镜像 release 的正文   = 源 release 的 body
-#   - 镜像 release 的 prerelease = 源 release 的 prerelease
-#   - APK                     = 源 release 的 APK 资产（经资产接口上传，不走 git）
+# 官方命名规范（由 bot 对其他模块的实测确认）：
+#   镜像 release tag = <versionCode>-<versionName>，versionName 中空格替换为 `_`
+#   例：versionCode=100230, versionName="1.0.0 Beta 3" -> tag=100230-1.0.0_Beta_3
+# 本 workflow 直接按该规范建 tag，避免依赖 bot 事后重命名，保证顺序可控。
 #
+# 顺序：按 versionCode 升序逐个同步（Alpha 1 -> Beta 3），保证镜像列表按发布时间正序。
 # 触发方式：
 #   1. build.yml 打 tag 发版后 workflow_call 串联（自动同步单个新 tag）
 #   2. workflow_dispatch 手动触发：tag 留空 = 全量同步所有历史 release
@@ -43,7 +42,12 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Resolve tags to sync
+      - name: Checkout (all refs, to read build.gradle.kts per tag)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tags to sync (sorted by versionCode ascending)
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
@@ -58,12 +62,27 @@ jobs:
             echo "::error::No releases found to sync."
             exit 1
           fi
-          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$TAGS" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          # 按 versionCode 升序排序，保证同步顺序 = 发布顺序（Alpha 1 -> Beta 3）
+          SORTED=""
+          while IFS= read -r TAG; do
+            [ -z "$TAG" ] && continue
+            blade=$(git rev-parse --verify "refs/tags/$TAG^{tree}" >/dev/null 2>&1 && \
+              git ls-tree "refs/tags/$TAG^{tree}" app/build.gradle.kts 2>/dev/null | awk '{print $3}' | head -1)
+            if [ -z "$blade" ]; then
+              echo "::warning::No build.gradle.kts at $TAG, using tag order as-is"
+              SORTED="$SORTED $TAG"
+              continue
+            fi
+            VC=$(git cat-file blob "$blade" 2>/dev/null | awk '/versionCode[ ]*=/{print $3}' | head -1)
+            SORTED="$SORTED $TAG:$VC"
+          done <<< "$TAGS"
+          # 按 versionCode 数字升序
+          SORTED_UNIQ=$(echo "$SORTED" | tr ' ' '\n' | grep -E ':' | sort -t: -k2 -n | cut -d: -f1 | tr '\n' ' ')
+          echo "sorted_tags=$SORTED_UNIQ" >> "$GITHUB_OUTPUT"
           echo "mirror=$MIRROR" >> "$GITHUB_OUTPUT"
+          echo "::notice::Sync order: $SORTED_UNIQ"
 
-      - name: Sync releases to mirror (verbatim)
+      - name: Sync releases to mirror (official tag naming)
         env:
           GH_TOKEN: ${{ secrets.TARGET_REPO_TOKEN }}
         run: |
@@ -74,10 +93,25 @@ jobs:
           fi
           SRC="${{ github.repository }}"
           MIRROR="${{ steps.resolve.outputs.mirror }}"
-          mapfile -t TAGS < <(printf '%s' "${{ steps.resolve.outputs.tags }}")
-          for TAG in "${TAGS[@]}"; do
+          for TAG in ${{ steps.resolve.outputs.sorted_tags }}; do
             [ -z "$TAG" ] && continue
             echo "===== Syncing $TAG ====="
+            # 从该 tag 的 build.gradle.kts 提取 versionCode / versionName -> 官方 tag 名
+            blade=$(git rev-parse --verify "refs/tags/$TAG^{tree}" >/dev/null 2>&1 && \
+              git ls-tree "refs/tags/$TAG^{tree}" app/build.gradle.kts 2>/dev/null | awk '{print $3}' | head -1)
+            if [ -z "$blade" ]; then
+              echo "::warning::No build.gradle.kts at $TAG, skipping."
+              continue
+            fi
+            VC=$(git cat-file blob "$blade" 2>/dev/null | awk '/versionCode[ ]*=/{print $3}' | head -1)
+            VN=$(git cat-file blob "$blade" 2>/dev/null | grep 'versionName' | sed -E 's/.*"([^"]+)".*/\1/' | head -1)
+            if [ -z "$VC" ] || [ -z "$VN" ]; then
+              echo "::warning::Could not extract version at $TAG, skipping."
+              continue
+            fi
+            NEW_TAG="${VC}-${VN// /_}"
+            echo "  source tag=$TAG -> mirror tag=$NEW_TAG"
+
             NAME=$(gh release view "$TAG" --repo "$SRC" --json name -q .name)
             PRERELEASE=$(gh release view "$TAG" --repo "$SRC" --json isPrerelease -q .isPrerelease)
             gh release view "$TAG" --repo "$SRC" --json body -q .body > /tmp/body.md || true
@@ -93,17 +127,17 @@ jobs:
               continue
             fi
 
-            # 幂等：镜像已有该 tag 则更新，否则创建。tag/name/body/prerelease/APK 全部原样。
-            if gh release view "$TAG" --repo "$MIRROR" >/dev/null 2>&1; then
-              gh release edit "$TAG" --repo "$MIRROR" \
+            # 幂等：镜像已有该 NEW_TAG 则更新，否则创建
+            if gh release view "$NEW_TAG" --repo "$MIRROR" >/dev/null 2>&1; then
+              gh release edit "$NEW_TAG" --repo "$MIRROR" \
                 --name "$NAME" --notes-file /tmp/body.md --prerelease="$PRERELEASE"
-              for a in $(gh release view "$TAG" --repo "$MIRROR" --json assets -q '.assets[] | select(.name|endswith(".apk")) | .name'); do
-                gh release delete-asset "$TAG" "$a" --repo "$MIRROR" || true
+              for a in $(gh release view "$NEW_TAG" --repo "$MIRROR" --json assets -q '.assets[] | select(.name|endswith(".apk")) | .name'); do
+                gh release delete-asset "$NEW_TAG" "$a" --repo "$MIRROR" || true
               done
-              gh release upload "$TAG" "${APKS[0]}" --repo "$MIRROR" --clobber
+              gh release upload "$NEW_TAG" "${APKS[0]}" --repo "$MIRROR" --clobber
             else
-              gh release create "$TAG" --repo "$MIRROR" \
+              gh release create "$NEW_TAG" --repo "$MIRROR" \
                 --title "$NAME" --notes-file /tmp/body.md --prerelease="$PRERELEASE" "${APKS[0]}"
             fi
-            echo "::notice::Synced $TAG -> $MIRROR"
+            echo "::notice::Synced $TAG -> $MIRROR (tag=$NEW_TAG)"
           done
