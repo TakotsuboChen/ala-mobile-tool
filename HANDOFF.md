@@ -1,71 +1,59 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-08-12T23:07:47+08:00 · Git HEAD: `8276c7b`
+生成时间: 2026-08-13T03:10:00+08:00 · Git HEAD: `aad36ce`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: `main` @ `8276c7b` (2026-08-12)
-- 漂移检查: `git rev-parse HEAD` 是否仍 = `8276c7b`；变了说明快照可能过期。
+- 锚点: `feat/ala-mobile-8.0.4-adapt` @ `aad36ce` (2026-08-13)
+- 漂移检查: `git rev-parse HEAD` 是否仍 = `aad36ce`；变了说明快照可能过期。
 - 待重探的 [?]: 见第 5 节。
 - 先读: `CLAUDE.md` + `README.md` + 本文件。
 
 ## 1. 当前目标
-**把本仓库 release 全量同步到 LSPosed 官方模块镜像仓库** `Xposed-Modules-Repo/tools.alamobile.mod`，全自动、官方规范 tag、官网顺序正确（本会话完成）。待办：验证「打新 tag → build.yml 自动串联同步」整条链一次（尚未触发过）。
+**让模块适配 Ala Mobile 8.0.4 (versionCode 200146)**。偏移量迁移已完成（OffsetTable/VersionGate/unlock_hook.c）。**卡点：制作共存版 APK 时，打开游戏开屏几秒后跳转 Play 商店（"无法识别设备上安装的应用"），8.0.0 共存版 origin.apk 完全正常。** 完成定义：共存版 8.0.4 打开不跳 Play、模块 hook 正常工作。
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **镜像仓库全部就位**——5 个 release（`100-1.0.0-Alpha-1`/`100120-1.0.0-Alpha-2`/`100210-1.0.0-Beta-1`/`100220-1.0.0_Beta_2`/`100230-1.0.0_Beta_3`），tag 全用官方规范 `<versionCode>-<versionName>`（空格转 `_`），每个带 Release Note + APK，`published_at` 2:40 系列（Alpha-1 最早 2:40:29 → Beta-3 最晚 2:40:46），**官网 modules.lsposed.org/module/tools.alamobile.mod Releases 顺序正确**（Beta-3 最上、Alpha-1 最下）。
-- [V] **镜像仓库无垃圾**——无残留 `v1.0.0-*` 旧 tag、无 Draft、无多余 tag（`git ls-remote` + `gh api releases` 双确认）。
-- [V] **workflow 已落地**——`.github/workflows/sync-lsposed-mirror.yml` 改为官方 tag 命名 + 按 versionCode 升序；`build.yml` 新增 `sync-lsposed` job（tag push 时 `workflow_call` 串联）。本地已 push（commit `c712787`→`8276c7b` 共 4 个 CI 修复 commit）。
-- [V] **workflow 实际执行验证**——`workflow_dispatch` 全量同步成功（run #4 绿），5 个 release 由它建成（脚本读源 tag 的 `build.gradle.kts` 提取 VC/VN 拼 tag）。
-- [V] **TARGET_REPO_TOKEN secret 已配**——用户确认已设置，workflow 跨仓库写镜像成功。
-- [V] **官网 CDN 缓存特性确认**——官网页面显示的时间是它自己抓取时的时间戳，不是 release 真实时间；改镜像后需等约 10-20 分钟官网才刷新（用户实测"过十几分钟才行"），**不是顺序 bug**。
-- [V] **工作区干净**——`git status --short --branch -uall` 输出 `## main...origin/main`，无未提交改动。
+- [V] **偏移量迁移完成**——`git log` HEAD=`aad36ce`，3 个文件已提交并 push 到 `origin/feat/ala-mobile-8.0.4-adapt`。
+- [V] **构建通过**——`./gradlew :app:assembleDebug` → `BUILD SUCCESSFUL in 5s`（从干净 shell 跑）。
+- [V] **il2cpp-dumps/v8.0.4/** 已生成——Il2CppDumper v6.7.46 + dotnet 6.0.428 跑官方 8.0.4 APKS，offsets_sheet.csv 已建。实例字段偏移全部不变。
+- [V] **共存版 APK 已能安装**——单 APK（合并 arm64 libs + unity assets），zipalign + apksigner 签名，`adb install` 成功无报错。
+- [V] **8.0.0 共存版参照物**——`build/origin-8.0.0.apk`（纯净共存版，包名已改、但 smali 目录保持 `com/Vince`、只改 manifest package）+ `build/origin-npatched.apk`（NPatch 注入版）。APK 签名证书 `CN=Mod`。
+- **工作区**：`git status` 只剩 HANDOFF.md 归档待提交（`.` 未提交的 `HANDOFF.md` 删除 + `.handoffs/` 新增）。
 
 ### 测试/build 输出（本次交接 run）
 ```
-本会话只改 .github/workflows/*.yml（CI 配置），无代码构建。
-workflow run #4 (workflow_dispatch, 760e834) = completed/success，5 个 release 建成。
+./gradlew :app:assembleDebug --console=plain → BUILD SUCCESSFUL in 5s
+adb install coex-8.0.4.apk → Success
 ```
 
 ## 3. 决策与理由
-- **镜像 release 用官方规范 tag `<versionCode>-<versionName>`（空格转 `_`）** [V]——实测官方 bot 会主动把镜像 tag 重命名为该格式（quotelock 源 `v1.4.0`→镜像 `11-1.4.0`；coderstory 源 `v4.9`→镜像 `2047-4.9`）。workflow 直接按规范建，避免 bot 事后重命名导致顺序不可控。否决方案：沿用源 tag `v1.0.0-*` 让 bot 改，顺序依赖 bot 行为。
-- **同步按 versionCode 升序** [V]——保证官网按 `published_at` 倒序显示时 Beta-3 在最前、Alpha-1 在最后。workflow 从源 tag 的 `build.gradle.kts` 提取 VC/VN 排序。
-- **跨仓库写用 PAT `TARGET_REPO_TOKEN`** [V]——GitHub Actions 内置 token 只能写当前仓库；hyperisland 的 `sync-release.yml` 同款 `secrets.TARGET_REPO_TOKEN`。
-- **workflow_call 必须显式声明 `secrets:`** [V]——调用方 `secrets:` 传参而定义方漏声明会 startup_failure（实测踩过）。
+- **偏移量按类区域固定 delta 迁移** [V]——8.0.0→8.0.4：IRDSCarControllInput/Drivetrain/PlayerControls +0xDC1C，BillingManager +0x6340，handleMusicVolume +0xDDCC，AudioSource.set_volume -0x1A32384（Unity 引擎升级迹象）。
+- **共存版打包只改 manifest package，不动 smali 目录** [V]——完整参照 origin.apk：smali 保持 `com/Vince/AlamobileFormula/`，只改 `package=` 和 `authorities=`，避免改坏 R 类引用。
+- **禁止 checkLicense + 移除误导 Play 的 metadata** [V]——origin 把 `checkLicense` 改成 `return-void`；8.0.4 额外移除 `com.android.vending.splits.required` / `com.android.stamp.source` / `splits0.xml` / `derived.apk.id`。
 
 ## 4. 失败的尝试 — 不要再试
-- **（本会话全量）镜像 tag 直接用源 tag `v1.0.0-*`** [V]——官方 bot 会把镜像 release tag 重命名为 `<versionCode>-<versionName>`（quotelock/coderstory 实证），tag 名与源不一致是 bot 规范而非 bug，不要误判为 workflow 生成错误。
-- **（本会话）依赖 release `created_at` 排序** [V]——官网按 `published_at`（或自身 crawl 时间）排序，且所有 release `created_at` 常同刻（同一次同步），排序不可控。改用「按 versionCode 升序逐个 create」让 `published_at` 递增。
-- **（本会话）靠记忆判断官网时间戳** [X]——官网显示 `2:24 PM` 是它 CDN 缓存快照时间，不是 release 真实时间（真实 `published_at=14:40`）。刷新浏览器无效，等 10-20 分钟官网自然重抓。不要据此删重建镜像。
-- **（本会话）手动本地 `gh release create` 建镜像 release** [V]——`gh release download` + `${APKS[0]}` 的 glob 在变量赋值时不展开，报 `stat : no such file or directory`，5 个全失败。改用 workflow（Actions 的 bash 里 glob 正常）。
-- **（前向搬运 M14/M23-29 全部死路）** `XSharedPreferences`（API 102 禁止）、`openRemoteFile`、模块进程写公共 `/sdcard/`（EACCES）、`createPackageContext` 跨进程、ContentProvider 跨进程（LSPosed 下包不可见）、`getRemotePreferences` 用于 NPatch（无 daemon）、`bindNpatchRemoteService` 用于 embedded/local 模式、只给 setter 加 `is_player` 条件（AI 车仍误控）、`kotlin.daemon.enabled=false`（KGP 2.4.0 无视仍卡死）、EULA 存 remote prefs（pm clear 清不掉）、EulaDialog 在 Scaffold 外渲染（灰屏）、只用 `System.getProperty(MODULE_LOADED_FLAG)` 判激活（ConfigActivity 永远 false）、`getScope()`/`getRunningTargets()` 判激活（NPatch 记忆 scope / 游戏未跑返回空）、Non-root 标记写 remote prefs（pm clear 清不掉）、`gh release edit --body-file`（正确是 `--notes-file`/`-F`）、靠 AI 记忆写 Release Notes（必须对照代码）、`generate_release_notes: true` 搭配手工 `body:`（被覆盖）、自作主张裁剪 GIF/降帧率/改 README 结构（用户明令最小改动）——均不再试。
+- **（本会话全量）所有 Java 层绕过 pairip 的思路** [V]——已试过：改 checkLicense→return-void、改 performLocalInstallerCheck→return true、LicenseActivity→空壳、删 LicenseActivity + 全部 licensecheck smali、删 splits0/stamp/derived metadata、`performLocalInstallerCheck` 改回 true——**全部无效，开屏几秒后仍跳 Play**。结论：8.0.4 的许可校验在 **Unity C#/IL2CPP 层**（libil2cpp.so 内），不在 Java 层。
+- **（本会话)依赖 smali 层许可校验存在** ——8.0.4 pairip 把许可校验移到了 IL2CPP/native 层，Java 层全禁掉也没用。
+- **（前向搬运 M14/M23-29 全部死路）** `XSharedPreferences`（API 102 禁止）、`openRemoteFile`、模块进程写公共 `/sdcard/`（EACCES）、`createPackageContext` 跨进程、ContentProvider 跨进程、`getRemotePreferences` 用于 NPatch（无 daemon）、`bindNpatchRemoteService` 用于 embedded/local、只给 setter 加 `is_player` 条件（AI 误控）、`kotlin.daemon.enabled=false`、EULA 存 remote prefs（pm clear 清不掉）、`getScope()`/`getRunningTargets()` 判激活、Non-root 标记写 remote prefs、`gh release edit --body-file`（正确是 `--notes-file`/`-F`）、`generate_release_notes: true` 搭配手工 `body:`、自作主张裁剪 GIF/改 README——均不再试。
 
 ## 5. 已知坑
-- **⚠️ 官网 CDN 缓存** [V]——改镜像后官网约 10-20 分钟才更新（用户实测）。刷新浏览器无效，别误判为同步失败。**不是 bug，是官网抓取延迟。**
-- **⚠️ 官方 bot 会重命名镜像 release tag** [V]——改成 `<versionCode>-<versionName>`（空格转 `_`）。workflow 已直接按规范建，无需担心；但若手动建 release 时 tag 用源 tag，会被 bot 改名。
-- **⚠️ `gh release view --json` 字段名** [V]——是 `isPrerelease`，不是 `prerelease`（踩过）。
-- **⚠️ NPatch 注入时序依赖** [V]——清模块+游戏数据 + 不开 NPatch → 模块不生效；点开一次 NPatch 永久生效（上会话遗留，仍待查）。
-- **⚠️ ABS/手动换挡开关在 UI 被注释** [V]——ConfigurePage.kt `/* */`。ABS: HandleABS 死代码；手动换挡: DoGearShifting 出不了 P 房。待找到正确入口后恢复。
-- **⚠️ LSPosed 共存版双 ClassLoader** [V]——`System.setProperty(NATIVE_INSTALLED_FLAG)` 进程级标记避免双注入。
-- **⚠️ `OverlayDialog` 必须在 miuix Scaffold `popupHost` 槽位内渲染** [V]。
-- **⚠️ EULA 只存 filesDir** [V]——改 `EULA_SECTIONS` 必须递增 `EulaManager.EULA_VERSION`（当前 = 2）。
-- **⚠️ miuix-blur minSdk=33 而项目 minSdk=26** [V]；`MiuixScrollBehavior()` 不自动生效 [V]；WSL2 Kotlin 编译守护进程 RMI loopback 卡死 [V]。
-- **⚠️ `is_player_controller`（读 0x108）不可靠** [V]——玩家车判据走 `g_player_controller`。
-- **⚠️ Release R8 重命名 res/raw 下 mp3** [V]——音乐放 `assets/`；游戏进程 ClassLoader 取不到 APK 资源 [V]——走 `resolveModuleApkPath()` + ZipFile。
-- **⚠️ ConfigProvider.kt 不可删** [V]（NPatch 回退路径）；versionCode Beta 3=`100230` [V]。
+- **⚠️ 8.0.4 共存版跳 Play 商店（未解决）** [?]——怀疑正确做法是像 8.0.0 那样**保留全部 pairip 校验代码但把入口/结果改绕过**，或需要从 8.0.0 origin.apk 中 diff 出真正缺的修改（本会话只 diff 了 smali 结构，没 diff dex 字节码差异全量）。
+- **⚠️ origin.apk 是纯净共存版参照物，不是 NPatch 注入版** [V]——用户明确：`Downloads/origin.apk`=注入前纯净共存版，`Downloads/origin-725-npatched.apk`=注入后版本。
+- **⚠️ NPatch 需要的 APK 必须签名** [V]——未签名/仅 v1 签名会被拒（`get original signature failed`）；`apksigner` 必须签 v2/v3（targetSdk 35 强制）。
+- **⚠️ `/tmp` 是 tmpfs 只有 7.3G** [V]——解压多个 500MB+ APK 会占满导致 zip CRC 损坏；工作目录必须放项目 `build/`。
+- **⚠️ 8.0.0 共存版 smali 目录不动、只改 manifest** [V]——origin.apk 证明（smali/com/Vince 仍在）。
+- **⚠️ 官方/共存包共存** [V]——两者都可安装（不同包名）；已装 8.0.0 共存版不冲突。
+- **⚠️ `is_player_controller` 不可靠** [V]——玩家车判据走 `g_player_controller`。
+- **⚠️ NPatch 双 ClassLoader** [V]——`System.setProperty(NATIVE_INSTALLED_FLAG)` 进程级标记避免双注入。
+- **⚠️ ConfigProvider.kt 不可删** [V]（NPatch 回退路径）。
 
 ## 6. 下一步（有序）
-1. **验证「打新 tag → build.yml 自动串联 sync」整条链**（本会话只验证了 `workflow_dispatch` 手动全量，未验证自动触发）：下个版本打 tag 发版后，确认 `build.yml` 的 `sync-lsposed` job 自动跑成功、镜像自动新增对应 release。若失败优先查 `secrets: TARGET_REPO_TOKEN` 传参链。
-2. **（可选）README 镜像仓库更新**：若源码 README 有大的措辞改动，需手动 push 到镜像仓库（workflow 只同步 release，不同步 README 文件）。当前镜像 README 已是最新（含 GIF）。
-3. **清理 `App.KEY_NONROOT_CONFIRMED` 残留常量**（低优先级，无害）。
-4. **NPatch 注入时序依赖根因**（用户报告）：假设 NPatch 管理器第一次启动才注册模块，验证 `references/NPatch` 的 `patch-loader`/`meta-loader` 源码。
-5. **ABS/手动换挡正确入口点**：找到未被内联的入口后恢复 UI 开关并更新 README。
+1. **从 8.0.0 origin.apk 全量 diff 出共存版制作脚本**：重点对比 origin.apk 与官方 8.0.0 base 的 **dex 字节码差异**（/tmp 或 build/ 下用 apktool 全解两个版本，diff 所有 smali 文件除 R 类/许可证类外还有哪些被改）。
+2. **定位 8.0.4 的 IL2CPP 许可校验点**：8.0.4 libil2cpp.so 内搜索 pairip/license 相关字符串与函数（`strings` + 反汇编），找到 CheckLicense/PaipCheck 入口后 hook 或 patch。
+3. **用 NPatch 注入 8.0.4**（用户已装好 NPatch，先手工走通注入流程，确认 NPatch 自己会重签，无需我们签名）。
+4. **验证模块功能在 8.0.4 上可用**（踏板/换挡/DRS/解锁/音乐替换）。
 
 ## 7. 留给用户的开放问题
-- 「打新 tag 自动同步」整条链尚未实测（见第 6 节第 1 项）——下次发版时确认。
-- 官网 CDN 有 10-20 分钟延迟，是否可接受？（平台特性，无解）
-- `TARGET_REPO_TOKEN` 是长期有效 PAT 还是短期？过期后 workflow 会失败，需在 secret 过期前更新。
-- NPatch 注入时序依赖根因待查（见第 6 节第 4 项）。
-- 去掉 `generate_release_notes` 后发布 body 只有安装说明——是否需要 CI 走"读版本号 Notes 文件"实现完整 changelog 自动发布？（上会话遗留）
-- miuix-blur 在老设备（Android 12 以下）自动降级纯色底——是否需要显式 `LocalEnableBlur` false 待讨论。
-- 320kbps 替换曲是否够用？换曲直接替换 `assets/f1_music.mp3`。
+- 8.0.4 跳 Play 商店的确切触发点是 Java 层还是 IL2CPP 层？（本会话结论指向 IL2CPP 层，待验证）
+- 是否需要完全复刻 8.0.0 origin 的制作流水线（用脚本固化）？
+- 是否考虑放弃共存版、只支持官方版 + NPatch 直接注入？（若 Play Protect 判定无解）
