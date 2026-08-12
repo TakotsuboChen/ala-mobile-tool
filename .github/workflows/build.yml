@@ -113,7 +113,6 @@ jobs:
         with:
           prerelease: true
           name: ${{ github.ref_name }}
-          generate_release_notes: true
           files: ${{ steps.rename_apk.outputs.apk_path }}
           body: |
             ## 安装
