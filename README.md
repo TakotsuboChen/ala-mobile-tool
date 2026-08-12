@@ -3,30 +3,40 @@
 <p align="center">
   <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/LSPosed%20API-102-green" alt="LSPosed API">
-  <img src="https://img.shields.io/badge/version-1.0.0%20Beta%202-orange" alt="Version">
-  <img src="https://img.shields.io/badge/target-Ala%20Mobile%208.0.0-red" alt="Target">
+  <img src="https://img.shields.io/badge/version-1.0.0%20Beta%203-orange" alt="Version">
+  <img src="https://img.shields.io/badge/target-Ala%20Mobile-red" alt="Target">
 </p>
 
 <p align="center">
-  <strong>Ala Mobile 的操控增强 LSPosed 模块</strong><br>
-  屏幕踏板 &middot; 音乐替换 &middot; 内购解锁 &middot; TC/ABS 增强 &middot; 自动 DRS（开发中）
+  <strong>Ala Mobile 的体验增强 LSPosed 模块</strong><br>
+  线性踏板操控 &middot; 原生 TC 控制 &middot; 音乐替换 &middot; 内购解锁
 </p>
 
 ---
 
 ## 演示
 
-> 此处插入素材：三种踏板拓扑的对比屏录（关闭 / 单踏板 / 双踏板）
+### 踏板拓扑
 
-`[image-1: 单踏板模式下手指在屏幕上下滑动控制油门和刹车]`
+| 单踏板 | 双踏板 |
+|---|---|
+| <img src="docs/images/single-pedal.gif" width="360" alt="单踏板演示"> | <img src="docs/images/dual-pedal.gif" width="360" alt="双踏板演示"> |
 
-> 此处插入素材：长按工具按钮进入编辑模式，拖拽 + 缩放 overlay 位置
+单踏板模式：手指在屏幕上下滑动，上半区控制油门、下半区控制刹车。
 
-`[image-2: 编辑模式下的拖拽和角落缩放操作]`
+双踏板模式：左右两指分别控制独立的油门和刹车踏板。
 
-> 此处插入素材：模块设置界面三页布局截图（概览 / 配置 / 设置）
+### Overlay 控件
 
-`[image-3: miuix 风格三页设置界面]`
+图标按钮可拖动，单击切换 Overlay 控件显示/隐藏，长按模块图标按钮进入编辑模式，拖拽移动 + 四角缩放各 Overlay 控件大小：
+
+<img src="docs/images/overlay-edit.gif" width="360" alt="Overlay 编辑演示">
+
+### 模块设置界面
+
+miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
+
+<img src="docs/images/settings-ui.gif" width="180" alt="模块设置界面">
 
 ---
 
@@ -44,18 +54,12 @@
 
 ### ✅ 已实现
 
-#### 屏幕踏板（Pedal Overlay）
-- **三种拓扑**：关闭、单踏板（上半油门/下半刹车）、双踏板（独立拖拽定位）
+#### 线性踏板（Pedal Overlay）
+- **三种拓扑**：关闭、单踏板（上半油门/下半刹车）、双踏板（独立油门/刹车控件）
 - **响应曲线**：线性 / 指数（ease-out，指数 0.66 使 ~30% 行程 → ~45% 输出），油门和刹车可分别设置
 - **死区与过渡点**：单踏板模式下可调油门/刹车交界处的无效范围（0-20%）和分界线位置（20-80%）
 - **刹车优先仲裁**：双踏板模式下两指同时按下时，刹车值超过过渡点（默认 10%）则刹车优先屏蔽油门
 - **刹车方向反转**：双踏板模式下刹车填充方向可切换（默认从下往上 / 反转后从上往下）
-
-#### 换挡按钮（Gear Shift Overlay）
-- 屏幕左侧升档/降档按钮
-
-> ⚠️ **当前手动换挡开关已暂时禁用**：`DoGearShifting` hook 会导致车辆无法驶出维修区（P 房），
-> 待重新实现后恢复。Hook 代码保留但为 no-op。
 
 #### 主菜单音乐替换
 - 将主菜单背景音乐替换为 **Hans Zimmer - F1**（320kbps）
@@ -76,11 +80,9 @@
 - **关闭解锁开关时**仍 hook `Awake` 预设 `IsUnlocked=true` + 阻挡 `OnOwnedNone`/`OnPurchaseFailed` 弹窗，
   防止正版用户每次冷启动看到"Fresh unlock"弹窗，同时让游戏正常走 Google Play 查询流程
 
-#### 原生 TC/ABS 增强
-- 通过 hook `TractionFilter`（TC）和 `HandleABS`（ABS）在入口处决定是否跳过
+#### 原生 TC 控制
+- 通过 hook `TractionFilter`（TC）在入口处决定是否跳过
 - **TC 已生效**：关闭时 TractionFilter 直接返回原始 accel，不削减
-- **ABS 当前为死代码**：`HandleABS` 被编译器内联到 carController，hook 不触发。
-  实际通过写 `absEnable` 字段（偏移 0xC4）实现
 
 #### 配置即时生效
 - 三路配置同步：**Remote Preferences**（LSPosed daemon SQLite）→ **ConfigProvider**（ContentProvider）→ **定向广播**
@@ -97,13 +99,13 @@
 - NPatch 路径：通过 `content://top.nkbe.npatch.remote` ContentProvider 拿 remote service binder 读写配置
 - LSPosed 共存版：`System.setProperty` 进程级标记避免双 ClassLoader 重复注入
 
-#### LSPosed 真激活检测
+#### LSPosed 激活检测
 - 概览页实时显示激活状态（已激活 / 未激活）
 - 判定依据 `service.frameworkName == "LSPosed"`：LSPosed daemon 只在模块启用时推 binder，绑定即激活（参照 AdClose `onServiceBind` 思路）
 - NPatch 等非 root 框架（`frameworkName == "NPatch"`，API 101）不算 LSPOSED，自动弹窗确认（LSPatch/NPatch/FPA）
 
 #### 现代 UI
-- KernelSU 风格三页布局（概览 / 配置 / 设置），支持深色模式
+- Miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式
 - 顶栏/底栏毛玻璃（blurRadius=12f），下滑顶栏折叠
 - 内嵌 GitHub 与 QQ 群入口图标（SVG Path 渲染）
 
@@ -130,6 +132,7 @@
 
 - **自动 DRS**：已完成 `drsToggle()` 拦截，telemetry 赛道数据解析待实现
 - **手动换挡**：`DoGearShifting` hook 导致起步失败，需重新实现
+- **原生 ABS 控制**：`HandleABS` 被编译器内联到 carController，hook 不触发。当前通过写 `absEnable` 字段（偏移 0xC4）实现，待找到未被内联的正确入口点后再做开关
 
 ---
 
@@ -148,13 +151,12 @@
 4. 在作用域中勾选 **Ala Mobile**（原版 `com.Vince.AlamobileFormula` 或共存版 `com.Takotsubo.AlamobileFormula`）
 5. 启动游戏，进入后点击左上角工具按钮显示 overlay
 
-> 💡 **首次使用**：建议先进入模块设置界面（LSPosed 列表中点击模块名称）确认配置，再进入游戏。
+> 💡 **首次使用**：建议先进入模块设置界面（打开模块 App）确认配置，再进入游戏。
 
 ### 非 root 用户（NPatch）
 
-1. 安装 [NPatch](https://github.com/nkbe/npatch) 框架
-2. 使用 NPatch 将本模块补丁到游戏 APK 中
-3. 安装补丁后的 APK 即可使用
+1. 安装 [NPatch](https://github.com/nkbe/npatch) 框架、共存版游戏与模块
+2. 在 NPatch 中 Ala Mobile 的模块作用域勾选 Ala Mobile Tool
 
 ---
 
@@ -209,7 +211,7 @@
 
 - 自动 DRS 仅完成 `drsToggle()` 拦截，赛道数据自动判断尚未实现
 - 手动换挡因 `DoGearShifting` hook 导致起步失败，**已暂时禁用**，待重新实现
-- ABS native hook（`HandleABS`）被编译器内联，当前通过写字段（偏移 0xC4）替代
+- ABS 原生 hook（`HandleABS`）被编译器内联，当前通过写字段（偏移 0xC4）替代，开关尚未实现
 - **弯道「顿挫」通常来自游戏内置的刹车辅助**，与模块无关，请在游戏设置中关闭辅助功能
 - 共存版（重打包改包名）需配合双 ClassLoader 守卫，当前版本已修复
 
@@ -273,7 +275,7 @@ tools/run-il2cpp-dumper.sh
 
 - [ ] 自动 DRS：赛道 telemetry 解析 + 自动开关
 - [ ] 手动换挡：重新实现 `DoGearShifting` hook
-- [ ] ABS 原生 hook：找到未被内联的正确入口点
+- [ ] 原生 ABS 开关：找到未被内联的正确入口点后接入
 - [ ] 工具按钮位置持久化开关
 - [ ] 多语言支持
 
@@ -282,7 +284,7 @@ tools/run-il2cpp-dumper.sh
 ## 社区与支持
 
 - **GitHub Issues**：[报告 bug 或建议新功能](https://github.com/TakotsuboChen/ala-mobile-tool/issues)
-- **QQ 群**：[加入玩家交流群](https://qun.qq.com/qqweb/qunpro/share?_wv=3&_wwv=128&appKey=...)
+- **QQ 群**：[加入玩家交流群](https://qun.qq.com/universal-share/share?ac=1&authKey=V0nuKHg0u%2BZKVi/jgDReAiZSCQdbMb0yMwaOSV49gejQWRtdz%2BG4G6eQQgWyFOJB&busi_data=eyJncm91cENvZGUiOiI3NTc5NDA3MDgiLCJ0b2tlbiI6IjVzRjZTTWpLckJIRExvRTk3K0QzVzJGK2N4QURRM2RwRjJWNkw0L29wcG9ocjI1NXo5T1hLZ2FJVkZXZkhlMVAiLCJ1aW4iOiIxMjU5OTc2NTIwIn0=&data=x1JvsLJUAovAdpfNmLQpuTN_-yGbUrMfCJ1VSQqD-QbIzj9-ZLiRKNEHNbJXpokkPhx5cc-RG47HyWYUrPBtTA&svctype=4&tempid=h5_group_info)
 - 欢迎提交 Pull Request
 
 ---
