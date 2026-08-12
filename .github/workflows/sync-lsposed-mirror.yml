@@ -79,7 +79,7 @@ jobs:
             [ -z "$TAG" ] && continue
             echo "===== Syncing $TAG ====="
             NAME=$(gh release view "$TAG" --repo "$SRC" --json name -q .name)
-            PRERELEASE=$(gh release view "$TAG" --repo "$SRC" --json prerelease -q .prerelease)
+            PRERELEASE=$(gh release view "$TAG" --repo "$SRC" --json isPrerelease -q .isPrerelease)
             gh release view "$TAG" --repo "$SRC" --json body -q .body > /tmp/body.md || true
 
             rm -rf "/tmp/rel/$TAG"; mkdir -p "/tmp/rel/$TAG"
