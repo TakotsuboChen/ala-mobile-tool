@@ -121,3 +121,15 @@ jobs:
             2. 从下方 Assets 下载 `Ala Mobile Tool v*.apk`。
             3. 在 LSPosed 中勾选 **Ala Mobile** 作为作用域。
             4. 启动游戏，进入游戏后点击左上角「工具」按钮显示 overlay。
+
+  # 发版后自动把 release 同步到官方 LSPosed 模块镜像仓库。
+  # 依赖仓库 secret TARGET_REPO_TOKEN（对 Xposed-Modules-Repo/tools.alamobile.mod 有 admin 权限的 PAT）。
+  # 失败不影响主发布流程。
+  sync-lsposed:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/sync-lsposed-mirror.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets:
+      TARGET_REPO_TOKEN: ${{ secrets.TARGET_REPO_TOKEN }}

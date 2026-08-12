@@ -1,0 +1,105 @@
+name: Sync to LSPosed Modules Repo
+
+# 把本仓库的 release 原样同步到官方模块镜像仓库
+# Xposed-Modules-Repo/tools.alamobile.mod。
+#
+# 原则：原样搬运，不做任何转换。
+#   - 镜像 release 的 tag   = 源 release 的 tag（如 v1.0.0-Beta-3）
+#   - 镜像 release 的 name  = 源 release 的 name
+#   - 镜像 release 的正文   = 源 release 的 body
+#   - 镜像 release 的 prerelease = 源 release 的 prerelease
+#   - APK                     = 源 release 的 APK 资产（经资产接口上传，不走 git）
+#
+# 触发方式：
+#   1. build.yml 打 tag 发版后 workflow_call 串联（自动同步单个新 tag）
+#   2. workflow_dispatch 手动触发：tag 留空 = 全量同步所有历史 release
+#
+# 跨仓库写依赖 secrets.TARGET_REPO_TOKEN（对镜像仓库有 admin 权限的 PAT）。
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Source release tag to sync to the mirror (empty = all releases)'
+        required: false
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Source release tag to sync; leave empty to sync ALL releases'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve tags to sync
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SRC="${{ github.repository }}"
+          MIRROR="Xposed-Modules-Repo/tools.alamobile.mod"
+          TAGS="${{ inputs.tag }}"
+          if [ -z "$TAGS" ]; then
+            TAGS=$(gh release list --repo "$SRC" --limit 100 --json tagName -q '.[].tagName')
+          fi
+          if [ -z "$TAGS" ]; then
+            echo "::error::No releases found to sync."
+            exit 1
+          fi
+          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$TAGS" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "mirror=$MIRROR" >> "$GITHUB_OUTPUT"
+
+      - name: Sync releases to mirror (verbatim)
+        env:
+          GH_TOKEN: ${{ secrets.TARGET_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::TARGET_REPO_TOKEN secret is not set. Create a PAT (scope: repo) for Xposed-Modules-Repo/tools.alamobile.mod and add it as repository secret."
+            exit 1
+          fi
+          SRC="${{ github.repository }}"
+          MIRROR="${{ steps.resolve.outputs.mirror }}"
+          mapfile -t TAGS < <(printf '%s' "${{ steps.resolve.outputs.tags }}")
+          for TAG in "${TAGS[@]}"; do
+            [ -z "$TAG" ] && continue
+            echo "===== Syncing $TAG ====="
+            NAME=$(gh release view "$TAG" --repo "$SRC" --json name -q .name)
+            PRERELEASE=$(gh release view "$TAG" --repo "$SRC" --json prerelease -q .prerelease)
+            gh release view "$TAG" --repo "$SRC" --json body -q .body > /tmp/body.md || true
+
+            rm -rf "/tmp/rel/$TAG"; mkdir -p "/tmp/rel/$TAG"
+            if ! gh release download "$TAG" --repo "$SRC" --pattern "*.apk" --dir "/tmp/rel/$TAG"; then
+              echo "::warning::No APK asset for $TAG, skipping."
+              continue
+            fi
+            APKS=(/tmp/rel/$TAG/*.apk)
+            if [ ${#APKS[@]} -eq 0 ]; then
+              echo "::warning::No APK asset for $TAG, skipping."
+              continue
+            fi
+
+            # 幂等：镜像已有该 tag 则更新，否则创建。tag/name/body/prerelease/APK 全部原样。
+            if gh release view "$TAG" --repo "$MIRROR" >/dev/null 2>&1; then
+              gh release edit "$TAG" --repo "$MIRROR" \
+                --name "$NAME" --notes-file /tmp/body.md --prerelease="$PRERELEASE"
+              for a in $(gh release view "$TAG" --repo "$MIRROR" --json assets -q '.assets[] | select(.name|endswith(".apk")) | .name'); do
+                gh release delete-asset "$TAG" "$a" --repo "$MIRROR" || true
+              done
+              gh release upload "$TAG" "${APKS[0]}" --repo "$MIRROR" --clobber
+            else
+              gh release create "$TAG" --repo "$MIRROR" \
+                --title "$NAME" --notes-file /tmp/body.md --prerelease="$PRERELEASE" "${APKS[0]}"
+            fi
+            echo "::notice::Synced $TAG -> $MIRROR"
+          done
