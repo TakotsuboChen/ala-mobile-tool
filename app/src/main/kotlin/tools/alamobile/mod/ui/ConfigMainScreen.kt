@@ -12,9 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
-import androidx.compose.animation.core.EaseInOut
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.MutatePriority
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
@@ -42,9 +41,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import tools.alamobile.mod.EulaManager
 import tools.alamobile.mod.config.ModConfig
 import top.yukonga.miuix.kmp.basic.NavigationBar
@@ -67,6 +68,7 @@ fun ConfigMainScreen(
 ) {
     val context = LocalContext.current
     val settings = remember { ModConfig.read(context) }
+    val saveScope = rememberCoroutineScope()
 
     val uiState = remember {
         ConfigUiState(
@@ -89,36 +91,38 @@ fun ConfigMainScreen(
         )
     }
 
-    val saveHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
-    var saveRunnable: Runnable? = null
+    // Debounced save：照搬 KernelSU 的 ViewModel + Dispatchers.IO 模式。
+    // ModConfig.write 同步做了 JSON 序列化 + Binder IPC + 文件写 + 广播，
+    // 全部放在 IO 线程，main looper 只负责调度。
+    // 300ms debounce 防止滑块拖动连续触发。
+    var saveJob: Job? by remember { mutableStateOf(null) }
 
     val saveNow: () -> Unit = {
-        saveRunnable?.let { saveHandler.removeCallbacks(it) }
-        val runnable = Runnable {
-            ModConfig.write(
-                context,
-                ModConfig.Settings(
-                    pedalMode = uiState.pedalMode.value,
-                    enableAutoDrs = uiState.enableAutoDrs.value,
-                    showOverlay = uiState.showOverlay.value,
-                    disableAutoGear = uiState.disableAutoGear.value,
-                    enableManualShift = uiState.enableManualShift.value,
-                    enableUnlock = uiState.enableUnlock.value,
-                    enableTc = uiState.enableTc.value,
-                    enableAbs = uiState.enableAbs.value,
-                    enableMusicReplace = uiState.enableMusicReplace.value,
-                    pedalDeadzone = uiState.deadzone.value,
-                    pedalTransition = uiState.transition.value,
-                    brakeTransition = uiState.brakeTransition.value,
-                    brakeInvert = uiState.brakeInvert.value,
-                    throttleCurve = uiState.throttleCurve.value,
-                    brakeCurve = uiState.brakeCurve.value,
-                    logEnabled = uiState.logEnabled.value
-                )
-            )
+        saveJob?.cancel()
+        val snapshot = ModConfig.Settings(
+            pedalMode = uiState.pedalMode.value,
+            enableAutoDrs = uiState.enableAutoDrs.value,
+            showOverlay = uiState.showOverlay.value,
+            disableAutoGear = uiState.disableAutoGear.value,
+            enableManualShift = uiState.enableManualShift.value,
+            enableUnlock = uiState.enableUnlock.value,
+            enableTc = uiState.enableTc.value,
+            enableAbs = uiState.enableAbs.value,
+            enableMusicReplace = uiState.enableMusicReplace.value,
+            pedalDeadzone = uiState.deadzone.value,
+            pedalTransition = uiState.transition.value,
+            brakeTransition = uiState.brakeTransition.value,
+            brakeInvert = uiState.brakeInvert.value,
+            throttleCurve = uiState.throttleCurve.value,
+            brakeCurve = uiState.brakeCurve.value,
+            logEnabled = uiState.logEnabled.value
+        )
+        saveJob = saveScope.launch {
+            kotlinx.coroutines.delay(300)
+            withContext(Dispatchers.IO) {
+                ModConfig.write(context, snapshot)
+            }
         }
-        saveRunnable = runnable
-        saveHandler.postDelayed(runnable, 300)
     }
 
     // EULA 弹窗状态：isAccepted 在 composition 内读取（CompositionLocal 作用域内），
@@ -161,12 +165,19 @@ private fun ConfigMainScreenContent(
     val enableBlur = LocalEnableBlur.current
     val backdrop = rememberBlurBackdrop(enableBlur)
 
+    // 延迟加载：首次 composition 只渲染初始页，等首次 settledPage 稳定后再
+    // 放开 beyondViewportPageCount。照搬 KernelSU rememberContentReady 思路
+    //（MainActivity.kt:304-323），避免冷启动时三个页面同时 compose 的开销。
+    var contentReady by remember { mutableStateOf(false) }
+    LaunchedEffect(pagerState.settledPage) {
+        if (!contentReady) contentReady = true
+    }
+
+    // 只监听 settledPage（动画稳定后的页面），与 KernelSU MainActivity.kt:287-289
+    // 对齐。删掉 currentPage 的 LaunchedEffect —— 两者同时变化会重复调 syncPage()，
+    // 每次写 selectedPage(mutableIntStateOf) 触发所有底栏 NavigationBarItem 重组两遍。
     val settledPage = pagerState.settledPage
     LaunchedEffect(settledPage) {
-        pagerStateHolder.syncPage()
-    }
-    val currentPage = pagerState.currentPage
-    LaunchedEffect(currentPage) {
         pagerStateHolder.syncPage()
     }
 
@@ -186,21 +197,24 @@ private fun ConfigMainScreenContent(
                     Box(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
                         HorizontalPager(
                             state = pagerState,
-                            beyondViewportPageCount = 1,
+                            beyondViewportPageCount = if (contentReady) 1 else 0,
                             userScrollEnabled = true,
                             modifier = Modifier.fillMaxSize()
                         ) { page ->
+                            // 与 KernelSU MainActivity.kt:314-321 一致：contentReady
+                            // 前只渲染当前页，避免冷启动三页同时 compose。
+                            val isCurrent = page == settledPage
                             when (Tab.entries[page]) {
-                                Tab.HOME -> OverviewPage(
+                                Tab.HOME -> if (isCurrent || contentReady) OverviewPage(
                                     bottomBarHeight = bottomPadding,
                                     activationEnabled = eulaAccepted
                                 )
-                                Tab.CONFIGURE -> ConfigurePage(
+                                Tab.CONFIGURE -> if (isCurrent || contentReady) ConfigurePage(
                                     uiState = uiState,
                                     onSave = onSave,
                                     bottomBarHeight = bottomPadding
                                 )
-                                Tab.SETTINGS -> SettingsPage(
+                                Tab.SETTINGS -> if (isCurrent || contentReady) SettingsPage(
                                     uiState = uiState,
                                     onSave = onSave,
                                     bottomBarHeight = bottomPadding
@@ -275,6 +289,10 @@ private enum class Tab(
     SETTINGS("设置", Icons.Filled.Settings, Icons.Outlined.Settings)
 }
 
+// @Stable 标注：所有字段是 MutableState（Compose 已知稳定），引用通过 remember 固定。
+// 不标的话编译器推断 ConfigUiState 不稳定，传给 ConfigurePage/SettingsPage 时
+// 整组 composable 被当作不稳定参数重组。照搬 KernelSU @Immutable 普及策略。
+@androidx.compose.runtime.Stable
 class ConfigUiState(
     val pedalMode: MutableState<ModConfig.PedalMode>,
     val enableAutoDrs: MutableState<Boolean>,
@@ -314,20 +332,10 @@ class MainPagerState(
         selectedPage = targetIndex
         isNavigating = true
 
-        val distance = abs(targetIndex - pagerState.currentPage).coerceAtLeast(2)
-        val duration = 100 * distance + 100
-        val layoutInfo = pagerState.layoutInfo
-        val pageSize = layoutInfo.pageSize + layoutInfo.pageSpacing
-        val currentDistanceInPages = targetIndex - pagerState.currentPage - pagerState.currentPageOffsetFraction
-        val scrollPixels = currentDistanceInPages * pageSize
-
         navJob = coroutineScope.launch {
             val myJob = coroutineContext.job
             try {
-                pagerState.animateScrollBy(
-                    value = scrollPixels,
-                    animationSpec = tween(easing = EaseInOut, durationMillis = duration)
-                )
+                pagerState.springAnimateToPage(targetIndex)
             } finally {
                 if (navJob == myJob) {
                     isNavigating = false
@@ -343,6 +351,62 @@ class MainPagerState(
         if (!isNavigating && selectedPage != pagerState.currentPage) {
             selectedPage = pagerState.currentPage
         }
+    }
+}
+
+/**
+ * Spring 动画切页，照搬 KernelSU BottomBar.kt:69-112 的 springAnimateToPage。
+ * 用 scroll + Animatable + spring spec 替代 tween + animateScrollBy：
+ * - spring 有自然的减速曲线，tween 的 EaseInOut 在快速连续点击时显得机械
+ * - 用 MutatePriority.UserInput 抢占手势优先级，快速切换时能立即打断旧动画
+ * - 末尾 scrollToPage 兜底，保证最终落点精确（动画累积误差 < 0.5px 会被 snap 修正）
+ */
+private suspend fun PagerState.springAnimateToPage(target: Int) {
+    if (target !in 0 until pageCount) return
+    var shouldSnapToTarget = false
+    scroll(androidx.compose.foundation.MutatePriority.UserInput) {
+        val pageSize = layoutInfo.pageSize + layoutInfo.pageSpacing
+        val distance = target - currentPage - currentPageOffsetFraction
+        val scrollPixels = distance * pageSize
+        if (abs(scrollPixels) <= 0.5f) return@scroll
+
+        var consumedScroll = 0f
+        var skipScroll = false
+        androidx.compose.animation.core.Animatable(0f).animateTo(
+            targetValue = scrollPixels,
+            animationSpec = androidx.compose.animation.core.spring(
+                stiffness = 322.2f,
+                dampingRatio = 32.31f / (2f * kotlin.math.sqrt(322.2f)),
+                visibilityThreshold = 0.5f,
+            ),
+        ) {
+            if (skipScroll) return@animateTo
+
+            val delta = value - consumedScroll
+            if (abs(delta) > 0.5f) {
+                val consumed = scrollBy(delta)
+                consumedScroll += consumed
+                if (abs(delta - consumed) > 0.1f) {
+                    shouldSnapToTarget = true
+                    skipScroll = true
+                }
+            } else {
+                consumedScroll = value
+            }
+
+            if (abs(velocity) < 0.1f && abs(scrollPixels - consumedScroll) < 1.0f) {
+                skipScroll = true
+            }
+        }
+
+        val remaining = scrollPixels - consumedScroll
+        if (abs(remaining) > 0.5f) {
+            scrollBy(remaining)
+        }
+    }
+
+    if (shouldSnapToTarget || currentPage != target) {
+        scrollToPage(target)
     }
 }
 

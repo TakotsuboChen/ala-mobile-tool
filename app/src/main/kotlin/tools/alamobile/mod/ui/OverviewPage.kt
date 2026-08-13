@@ -52,6 +52,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import tools.alamobile.mod.BuildConfig
 import tools.alamobile.mod.LsposedStatus
 import tools.alamobile.mod.util.openExternalUrl
@@ -126,17 +128,25 @@ fun OverviewPage(bottomBarHeight: Dp = 0.dp, activationEnabled: Boolean = true) 
 @Composable
 private fun ActivationCard(activationEnabled: Boolean = true) {
     val context = LocalContext.current
-    var status by remember { mutableStateOf(LsposedStatus.evaluate(context, awaitService = true)) }
+    // 先用 awaitService=false 快速返回（仅读内存 + 文件 flag，不阻塞），
+    // 再在 LaunchedEffect 里异步升级到准确值。照搬 KernelSU HomeScreen 的
+    // hasActivated + LaunchedEffect(Unit) 模式：重型检测永远不在 composition 路径上。
+    var status by remember { mutableStateOf(LsposedStatus.evaluate(context, awaitService = false)) }
     var showNonRootDialog by remember { mutableStateOf(false) }
     val isDark = isSystemInDarkTheme()
 
-    // 进入页面时刷新一次（不轮询）：覆盖弹窗选完后的回写、或从设置页清除标记回来。
-    // 未接受 EULA（activationEnabled=false）时不刷新、不自动弹窗——
+    // 异步升级激活状态（不阻塞主线程）：未接受 EULA 时不刷新、不自动弹窗——
     // 用户协议未同意前激活弹窗无意义，且不得覆盖在用户协议上方。
+    // awaitService=true 路径在 LsposedStatus 里有最多 3s 的轮询循环，
+    // 放 LaunchedEffect 里跑协程而不是在主线程 remember{} 里同步阻塞。
     LaunchedEffect(activationEnabled) {
         if (!activationEnabled) return@LaunchedEffect
-        status = LsposedStatus.evaluate(context, awaitService = false)
-        if (status == LsposedStatus.Status.INACTIVE) {
+        // 切到 IO 线程做轮询（LsposedStatus.evaluate 内部有 Thread.sleep 循环）。
+        val evaluated = withContext(Dispatchers.IO) {
+            LsposedStatus.evaluate(context, awaitService = true)
+        }
+        status = evaluated
+        if (evaluated == LsposedStatus.Status.INACTIVE) {
             showNonRootDialog = true
         }
     }
