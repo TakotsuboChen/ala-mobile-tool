@@ -1,43 +1,44 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-08-13T21:14:00+08:00 · Git HEAD: `82fb72b`
+生成时间: 2026-08-13T21:30:00+08:00 · Git HEAD: `9b5c2f3`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: `feat/ala-mobile-8.0.4-adapt` @ `82fb72b` (2026-08-13)
-- 漂移检查: `git rev-parse HEAD` 是否仍 = `82fb72b`；变了说明快照可能过期
+- 锚点: `main` @ `9b5c2f3` (2026-08-13)
+- 漂移检查: `git rev-parse HEAD` 是否仍 = `9b5c2f3`；变了说明快照可能过期
 - 待重探的 [?]: 无
-- 先读: `.claude/skills/coex-apk-builder/SKILL.md` + `CLAUDE.md` + 本文件
+- 先读: `CLAUDE.md` + 本文件
 
 ## 1. 当前目标
-**8.0.4 适配已完成。** 模块偏移量迁移、共存版 APK 制作（Play Protect 绕过 + doNotCompress 修复）、NPatch 路径验证均已完成。**等待用户 NPatch 注入 + 自签 + 分发后的终端反馈。** 完成定义：8.0.4 共存版不跳 Play + 不黑屏 + 模块功能正常（已真机验证通过）。
+**UI 流畅性修复完成。** 底栏快速切换卡顿问题已通过照搬 KernelSU 流畅性方案解决，真机验证"非常流畅"。完成定义：底栏快速来回切换不再卡死、滑块切换不掉帧 — 已满足。
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **偏移量迁移完成**——`git log` HEAD=`aad36ce`，3 文件已提交（OffsetTable/VersionGate/unlock_hook.c）。
-- [V] **共存版 APK 制作完成并真机验证**——`安装包/Ala Mobile 8.0.4 Takotsubo 共存版.apk`（628MB），两台设备（魅族20 + OPD2413/Android16）均验证：不跳 Play + 不黑屏 + 进入主菜单。
-- [V] **Play Protect 绕过配方固化**——`.claude/skills/coex-apk-builder/SKILL.md`（472行），9 阶段流水线 + 故障排查 + 版本适配清单。
-- [V] **NPatch 路径已确认可用**——用户用 NPatch 本地模式注入 8.0.0 和 8.0.4 共存版，自签后适配成功。
-- [V] **模块构建通过**——`./gradlew :app:assembleDebug` → BUILD SUCCESSFUL，versionCode=100230。
+- [V] **底栏卡顿修复已提交并推送**——`git log` HEAD=`9b5c2f3`，commit message `perf(ui): 修复底栏快速切换卡顿，对齐 KernelSU 流畅性方案`，2 文件 +128/-54。
+- [V] **Release APK 构建通过**——`./gradlew :app:assembleRelease` → BUILD SUCCESSFUL in 1m 53s，产物 `app/build/outputs/apk/release/app-release.apk`。
+- [V] **真机验证通过**——用户反馈"可以，非常流畅"。设备 `381QYFCN22B9A`，`adb install -r` 成功。
 - 工作区: `git status` 干净，无未提交改动。
 
 ### 测试/build 输出（本次交接 run）
 ```
-./gradlew :app:assembleDebug → BUILD SUCCESSFUL in 20s
-adb install coex-8.0.4-signed2.apk → Success（魅族20 + OPD2413 两台设备）
-adb logcat → Unity 开场动画正常、无 AndroidVideoMedia extractor 错误、无 LicenseClient 日志
+./gradlew :app:assembleRelease → BUILD SUCCESSFUL in 1m 53s
+adb install -r app-release.apk → Success
+用户反馈: "可以，非常流畅"
 ```
 
 ## 3. 决策与理由
-- **Play Protect 绕过需要清两层** [V]——smali patch（checkLicense→return-void 等）只绕 Java 层 pairip 校验；manifest stamp 元数据（com.android.stamp.*/com.android.vending.splits.*/derived.apk.id/CHECK_LICENSE）+ stamp-cert-sha256 文件必须全清，否则 Play Protect 仍触发跳转。对照 7.7.9/8.0.2/8.0.3 百分网破解版 + 8.0.0 Takotsubo 共存版反推验证。
-- **doNotCompress 列表必须完整** [V]——apktool 2.7.0 反编译 split APK 合并的单 APK 时，doNotCompress 只从 base.apk 继承约 10 条，丢失 split_UnityDataAssetPack.apk 的条目。Unity assets 文件被压缩 → `AndroidVideoMedia::OpenExtractor` 报 -10004 → Unity Timeout → 黑屏。修复：所有 assets 文件加入 doNotCompress（除 *.dat 可压缩）。
-- **NPatch 只走本地模式** [V]——模块有 ConfigActivity 配置界面，做集成模式不利于三方并行更新。用户（Takotsubo）在 NPatch 注入后自签固定签名，分发给终端小白用户。
-- **百分网保留 GMS/play.core/BILLING** [V]——这些不影响 Play Protect，删了反而可能崩溃。
+- **P0 根因：`OverviewPage.kt:129` 的 `remember { mutableStateOf(LsposedStatus.evaluate(context, awaitService = true)) }` 同步阻塞主线程最多 3 秒** [V]——`evaluate(awaitService=true)` 内有 `while + Thread.sleep(100)` 轮询循环（`LsposedStatus.kt:84-98`），配合 `beyondViewportPageCount=1`，切到非相邻页时 `OverviewPage` 被销毁，切回来时 `remember{}` 重新执行 → 每次切换冻结 3 秒。修复：`remember` 只用 `awaitService=false` 快速返回，`LaunchedEffect + withContext(IO)` 异步升级到准确值。否决方案：直接删 `awaitService` 轮询——会丢失 LSPosed daemon 异步绑定的兜底，首次进配置页可能误判未激活。
+- **P0 次因：`ModConfig.write` 在 main looper Handler 上执行** [V]——`saveHandler.postDelayed` 看似异步，但 runnable 跑在 main looper。`ModConfig.write` 同步做 JSON 序列化 + Binder IPC + 文件写 + 广播，与底栏动画帧竞争主线程。修复：改用 `saveScope.launch { delay(300); withContext(IO) { ModConfig.write(...) } }`。否决方案：用 HandlerThread——额外线程开销且与 Compose 协程模型不统一。
+- **P1：两个 `LaunchedEffect` 监听 `settledPage` 和 `currentPage` 重复触发 `syncPage()`** [V]——两者底栏切换时都变，`syncPage()` 被调两次，每次写 `mutableIntStateOf(selectedPage)` 触发所有底栏 `NavigationBarItem` 重组两遍。修复：删 `currentPage` 的 `LaunchedEffect`，对齐 KernelSU `MainActivity.kt:287-289`。
+- **P2：引入 `contentReady` 延迟加载** [V]——冷启动时三页同时 compose 开销大，`beyondViewportPageCount = if (contentReady) 1 else 0`，首次 `settledPage` 稳定后才放开。对齐 KernelSU `rememberContentReady`。
+- **P2：`animateToPage` 从 `tween+animateScrollBy` 改为 `springAnimateToPage`** [V]——KernelSU `BottomBar.kt:69-112` 的 `scroll + Animatable + spring spec`（stiffness=322.2, dampingRatio≈0.9），`MutatePriority.UserInput` 抢占手势优先级，快速连续点击时能立即打断旧动画。tween 的 EaseInOut 在快速切换时显得机械。
+- **每个页面各自 `rememberBlurBackdrop` 是 miuix 标准用法，保持现状** [V]——核对 KernelSU `HomeMiuix.kt:88` 等页面，每个页面都各自创建 backdrop，`beyondViewportPageCount=1` 时同时存活的 backdrop 数量有限（2 个），不是主要卡顿源。
 
 ## 4. 失败的尝试 — 不要再试
-- **只改 smali 不清 stamp 元数据** [V]——8.0.4 共存版第一版只 patch 了 LicenseClient/LicenseActivity smali，但 manifest 保留 stamp.type/CHECK_LICENSE/stamp-cert-sha256 → 仍跳 Play。不要再只改 smali。
-- **apktool 默认 doNotCompress 不够** [V]——apktool b 产出 APK 的 assets 文件被 Defl 压缩 → Unity 黑屏。必须手动补全 apktool.yml doNotCompress 列表。
+- **在 `remember{}` 里调 `evaluate(awaitService=true)`** [V]——`remember` 在 composition 期间同步执行，`awaitService=true` 的 3 秒轮询循环直接阻塞主线程。不要再把重型同步操作放 `remember{}`。
+- **用 `Handler.postDelayed` 做"异步"写配置** [V]——runnable 实际跑在 main looper，`ModConfig.write` 的 JSON 序列化+Binder IPC+文件写+广播全在主线程。Compose 项目应该用 `rememberCoroutineScope() + withContext(IO)`。
+- **（前向搬运 M35）只改 smali 不清 stamp 元数据** [V]——8.0.4 共存版第一版只 patch 了 LicenseClient/LicenseActivity smali，但 manifest 保留 stamp.type/CHECK_LICENSE/stamp-cert-sha256 → 仍跳 Play。必须 smali patch + 清 stamp 元数据全做。
+- **（前向搬运 M35）apktool 默认 doNotCompress 不够** [V]——apktool b 产出 APK 的 assets 文件被 Defl 压缩 → Unity 黑屏。必须手动补全 apktool.yml doNotCompress 列表。
 - **（前向搬运 M34）所有 Java 层绕过 pairip 的思路** [V]——checkLicense→return-void、performLocalInstallerCheck→return true、LicenseActivity→空壳、删 LicenseActivity + licensecheck smali、删 splits0/stamp/derived metadata 单独做——**单独做任一项都不够，必须全做**。
-- **（前向搬运 M34）8.0.4 许可校验在 IL2CPP/native 层** [X]——已证伪。libil2cpp.so 内无 pairip/license 字符串，校验仍在 Java/smali 层 pairip。
 - **（前向搬运 M33-M14 死路）** XSharedPreferences、openRemoteFile 跨进程、ContentProvider 跨进程 NPatch、getRunningTargets 判激活、gh release edit --body-file——均不再试。
 
 ## 5. 已知坑
