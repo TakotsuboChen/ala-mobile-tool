@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Source repository: `https://github.com/TakotsuboChen/ala-mobile-tool`
 License: Apache-2.0
 
-Supported game version: **Ala Mobile 8.0.0 (versionCode 200142)**. IL2CPP method offsets are version-specific; the module gates all native hooks behind `VersionGate`.
+Supported game version: **Ala Mobile 8.0.4 (versionCode 200146)**. IL2CPP method offsets are version-specific; the module gates all native hooks behind `VersionGate`.
 
 ## Development Decisions (already approved)
 
@@ -161,3 +161,4 @@ Two areas are explicitly designated for human contribution during implementation
 - Do not commit the APK or any IL2CPP dump larger than GitHub's file size limit. Large files are excluded via `.gitignore`.
 - miuix is a Kotlin Multiplatform library; keep Compose code in `ConfigActivity` and do not use it for runtime overlays.
 - Before adding new native hooks, regenerate the IL2CPP dump and update `offsets_sheet.csv`/`OffsetTable.kt`.
+- Coexistence APK build: use the `coex-apk-builder` skill (`.claude/skills/coex-apk-builder/SKILL.md`). Two paths maintained: LSPosed (root) and NPatch local mode (non-root, majority users). NPatch flow: Claude provides coex APK → Takotsubo injects via NPatch → self-signs with fixed keystore → distributes to end users.
