@@ -1,41 +1,41 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-08-13T21:30:00+08:00 · Git HEAD: `9b5c2f3`
+生成时间: 2026-08-13T22:35:00+08:00 · Git HEAD: `4ea4ce0`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: `main` @ `9b5c2f3` (2026-08-13)
-- 漂移检查: `git rev-parse HEAD` 是否仍 = `9b5c2f3`；变了说明快照可能过期
+- 锚点: `main` @ `4ea4ce0` (2026-08-13)
+- 漂移检查: `git rev-parse HEAD` 是否仍 = `4ea4ce0`；变了说明快照可能过期
 - 待重探的 [?]: 无
 - 先读: `CLAUDE.md` + 本文件
 
 ## 1. 当前目标
-**UI 流畅性修复完成。** 底栏快速切换卡顿问题已通过照搬 KernelSU 流畅性方案解决，真机验证"非常流畅"。完成定义：底栏快速来回切换不再卡死、滑块切换不掉帧 — 已满足。
+**切页掉帧修复完成。** 底栏快速切换卡死（M36 已修）+ 切页期间掉帧（本次修）两层问题都已解决，真机验证"非常流畅"。完成定义：底栏快速来回切换满帧、切页动画期间无可见掉帧 — 已满足。
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **底栏卡顿修复已提交并推送**——`git log` HEAD=`9b5c2f3`，commit message `perf(ui): 修复底栏快速切换卡顿，对齐 KernelSU 流畅性方案`，2 文件 +128/-54。
-- [V] **Release APK 构建通过**——`./gradlew :app:assembleRelease` → BUILD SUCCESSFUL in 1m 53s，产物 `app/build/outputs/apk/release/app-release.apk`。
-- [V] **真机验证通过**——用户反馈"可以，非常流畅"。设备 `381QYFCN22B9A`，`adb install -r` 成功。
+- [V] **切页掉帧修复已提交并推送**——`git log` HEAD=`4ea4ce0`，commit message `perf(ui): 全盘照搬 KernelSU backdrop 分层，修复切页掉帧`，2 文件 +34/-18。
+- [V] **Release APK 构建通过**——`./gradlew :app:assembleRelease` → BUILD SUCCESSFUL in 1m 42s，产物 `app/build/outputs/apk/release/app-release.apk`。
+- [V] **真机验证通过**——用户反馈"可以，非常流畅"。设备 `381QYFCN22B9A`（骁龙 8 Gen 2），`adb install -r` 成功。
+- [V] **gfxinfo 数据**——Janky frames 8.04%（首次），切页帧分布 50th=10ms / 90th=19ms / 99th=53ms；用户实测流畅。
 - 工作区: `git status` 干净，无未提交改动。
 
 ### 测试/build 输出（本次交接 run）
 ```
-./gradlew :app:assembleRelease → BUILD SUCCESSFUL in 1m 53s
+./gradlew :app:assembleRelease → BUILD SUCCESSFUL in 1m 42s
 adb install -r app-release.apk → Success
 用户反馈: "可以，非常流畅"
 ```
 
 ## 3. 决策与理由
-- **P0 根因：`OverviewPage.kt:129` 的 `remember { mutableStateOf(LsposedStatus.evaluate(context, awaitService = true)) }` 同步阻塞主线程最多 3 秒** [V]——`evaluate(awaitService=true)` 内有 `while + Thread.sleep(100)` 轮询循环（`LsposedStatus.kt:84-98`），配合 `beyondViewportPageCount=1`，切到非相邻页时 `OverviewPage` 被销毁，切回来时 `remember{}` 重新执行 → 每次切换冻结 3 秒。修复：`remember` 只用 `awaitService=false` 快速返回，`LaunchedEffect + withContext(IO)` 异步升级到准确值。否决方案：直接删 `awaitService` 轮询——会丢失 LSPosed daemon 异步绑定的兜底，首次进配置页可能误判未激活。
-- **P0 次因：`ModConfig.write` 在 main looper Handler 上执行** [V]——`saveHandler.postDelayed` 看似异步，但 runnable 跑在 main looper。`ModConfig.write` 同步做 JSON 序列化 + Binder IPC + 文件写 + 广播，与底栏动画帧竞争主线程。修复：改用 `saveScope.launch { delay(300); withContext(IO) { ModConfig.write(...) } }`。否决方案：用 HandlerThread——额外线程开销且与 Compose 协程模型不统一。
-- **P1：两个 `LaunchedEffect` 监听 `settledPage` 和 `currentPage` 重复触发 `syncPage()`** [V]——两者底栏切换时都变，`syncPage()` 被调两次，每次写 `mutableIntStateOf(selectedPage)` 触发所有底栏 `NavigationBarItem` 重组两遍。修复：删 `currentPage` 的 `LaunchedEffect`，对齐 KernelSU `MainActivity.kt:287-289`。
-- **P2：引入 `contentReady` 延迟加载** [V]——冷启动时三页同时 compose 开销大，`beyondViewportPageCount = if (contentReady) 1 else 0`，首次 `settledPage` 稳定后才放开。对齐 KernelSU `rememberContentReady`。
-- **P2：`animateToPage` 从 `tween+animateScrollBy` 改为 `springAnimateToPage`** [V]——KernelSU `BottomBar.kt:69-112` 的 `scroll + Animatable + spring spec`（stiffness=322.2, dampingRatio≈0.9），`MutatePriority.UserInput` 抢占手势优先级，快速连续点击时能立即打断旧动画。tween 的 EaseInOut 在快速切换时显得机械。
-- **每个页面各自 `rememberBlurBackdrop` 是 miuix 标准用法，保持现状** [V]——核对 KernelSU `HomeMiuix.kt:88` 等页面，每个页面都各自创建 backdrop，`beyondViewportPageCount=1` 时同时存活的 backdrop 数量有限（2 个），不是主要卡顿源。
+- **P0：`contentReady` 判断从 `settledPage` 改为 `currentPageOffsetFraction != 0f`** [V]——`settledPage` 是离散整数，动画一启动就跳到目标值，导致 `beyondViewportPageCount` 在动画进行中就从 0 放开到 1，重内容在动画过程中就 compose，挤占主线程。改用 `currentPageOffsetFraction`（连续浮点，动画进行中非 0，停稳后回 0）判断动画状态，配合 `withFrameNanos {}` 等一帧，让重内容在动画已停止的静态画面上 compose，stutter 不可见。照搬 KernelSU `DeferredContent.kt` 的 `rememberContentReady` 思路。
+- **P1：backdrop 重命名 `backdrop` → `blurBackdrop`，明确职责** [V]——原命名 `backdrop` 与子页面各自的 backdrop 命名冲突，且注释未说明它是"给底栏 + 包裹 pager 的外层 backdrop"。重命名后代码自文档化。纯重命名，行为不变。
+- **P2：`blurRadius` 从 12f 改回 KernelSU 原值 25f** [V]——之前自作主张减半到 12f 导致模糊效果偏弱；改回 25f 与 KernelSU 一致，视觉无差异。
 
 ## 4. 失败的尝试 — 不要再试
-- **在 `remember{}` 里调 `evaluate(awaitService=true)`** [V]——`remember` 在 composition 期间同步执行，`awaitService=true` 的 3 秒轮询循环直接阻塞主线程。不要再把重型同步操作放 `remember{}`。
-- **用 `Handler.postDelayed` 做"异步"写配置** [V]——runnable 实际跑在 main looper，`ModConfig.write` 的 JSON 序列化+Binder IPC+文件写+广播全在主线程。Compose 项目应该用 `rememberCoroutineScope() + withContext(IO)`。
+- **共享同一个 `LayerBackdrop` 实例给底栏 + 子页面 `layerBackdrop()`** [X]——同一个 `LayerBackdrop` 实例在 render tree 多处 `layerBackdrop()` 挂载，`libhwui` 的 `RenderThread` 在 `prepareTreeImpl` 遍历时访问到被释放的 GPU 资源 → `SIGSEGV @ RenderThread`。KernelSU 的真实结构是嵌套两层 backdrop：外层给底栏 + 包裹 pager，子页面各自创建独立的 backdrop 实例。不要再共享实例。
+- **移除外层 `layerBackdrop` 让子页面各自 `rememberBlurBackdrop`** [X]——底栏的 `BlurredBar` 依赖外层 backdrop 捕获 pager 内容做模糊，移除后底栏模糊消失（用户反馈"底栏模糊又没了"）。底栏的 blur 必须依赖外层 backdrop，不能只靠子页面的。
+- **在 `remember{}` 里调 `evaluate(awaitService=true)`** [V]（前向搬运 M36）——`remember` 在 composition 期间同步执行，`awaitService=true` 的 3 秒轮询循环直接阻塞主线程。不要再把重型同步操作放 `remember{}`。
+- **用 `Handler.postDelayed` 做"异步"写配置** [V]（前向搬运 M36）——runnable 实际跑在 main looper，`ModConfig.write` 的 JSON 序列化+Binder IPC+文件写+广播全在主线程。Compose 项目应该用 `rememberCoroutineScope() + withContext(IO)`。
 - **（前向搬运 M35）只改 smali 不清 stamp 元数据** [V]——8.0.4 共存版第一版只 patch 了 LicenseClient/LicenseActivity smali，但 manifest 保留 stamp.type/CHECK_LICENSE/stamp-cert-sha256 → 仍跳 Play。必须 smali patch + 清 stamp 元数据全做。
 - **（前向搬运 M35）apktool 默认 doNotCompress 不够** [V]——apktool b 产出 APK 的 assets 文件被 Defl 压缩 → Unity 黑屏。必须手动补全 apktool.yml doNotCompress 列表。
 - **（前向搬运 M34）所有 Java 层绕过 pairip 的思路** [V]——checkLicense→return-void、performLocalInstallerCheck→return true、LicenseActivity→空壳、删 LicenseActivity + licensecheck smali、删 splits0/stamp/derived metadata 单独做——**单独做任一项都不够，必须全做**。
