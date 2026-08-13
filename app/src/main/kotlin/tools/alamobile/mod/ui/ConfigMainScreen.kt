@@ -35,6 +35,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -60,6 +61,11 @@ import kotlin.math.abs
 
 /**
  * Top-level entry for the KernelSU-style miuix configuration UI.
+ *
+ * backdrop 分层照搬 KernelSU MainActivity.kt:280-323：
+ * - 外层 [blurBackdrop] 给底栏 BlurredBar 用，同时包裹整个 pager。
+ * - 子页面（OverviewPage 等）各自再 rememberBlurBackdrop 给自己的 TopBar + content 用。
+ * 这是嵌套两层 backdrop，不是一层共享——同一个 LayerBackdrop 实例多处 layerBackdrop 会 SIGSEGV。
  */
 @Composable
 fun ConfigMainScreen(
@@ -163,19 +169,26 @@ private fun ConfigMainScreenContent(
     val pagerStateHolder = rememberMainPagerState(pagerState)
     val useRail = false
     val enableBlur = LocalEnableBlur.current
-    val backdrop = rememberBlurBackdrop(enableBlur)
+    // 外层 backdrop：给底栏 BlurredBar 用，同时包裹整个 pager 内容。
+    // 与 KernelSU MainActivity.kt:280 对齐。
+    val blurBackdrop = rememberBlurBackdrop(enableBlur)
 
-    // 延迟加载：首次 composition 只渲染初始页，等首次 settledPage 稳定后再
-    // 放开 beyondViewportPageCount。照搬 KernelSU rememberContentReady 思路
-    //（MainActivity.kt:304-323），避免冷启动时三个页面同时 compose 的开销。
+    // contentReady：照搬 KernelSU rememberContentReady（DeferredContent.kt）。
+    // 动画运行中 contentReady=false，只渲染当前页的轻量内容；动画停稳 + 等 1 帧
+    // 后才放开 beyondViewportPageCount，让重内容在动画已停止的静态画面上 compose，
+    // stutter 不可见。原实现用 settledPage 判断，但 settledPage 动画一启动就跳到
+    // 目标值，导致重内容在动画进行中就 compose → 挤占主线程 → 掉帧。
     var contentReady by remember { mutableStateOf(false) }
-    LaunchedEffect(pagerState.settledPage) {
-        if (!contentReady) contentReady = true
+    val isAnimating = pagerState.currentPageOffsetFraction != 0f
+    LaunchedEffect(isAnimating) {
+        if (!isAnimating && !contentReady) {
+            // 等一帧让首屏占位渲染完毕再加载重内容。
+            withFrameNanos { }
+            contentReady = true
+        }
     }
 
-    // 只监听 settledPage（动画稳定后的页面），与 KernelSU MainActivity.kt:287-289
-    // 对齐。删掉 currentPage 的 LaunchedEffect —— 两者同时变化会重复调 syncPage()，
-    // 每次写 selectedPage(mutableIntStateOf) 触发所有底栏 NavigationBarItem 重组两遍。
+    // 监听 settledPage 同步底栏选中态。照搬 KernelSU MainActivity.kt:287-295。
     val settledPage = pagerState.settledPage
     LaunchedEffect(settledPage) {
         pagerStateHolder.syncPage()
@@ -194,15 +207,19 @@ private fun ConfigMainScreenContent(
         ) { innerPadding ->
             Box(modifier = Modifier.fillMaxSize()) {
                 val pagerContent: @Composable (bottomPadding: Dp) -> Unit = { bottomPadding ->
-                    Box(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
+                    // 整个 pager 包在外层 blurBackdrop 的 layerBackdrop 里。
+                    // 底栏的 BlurredBar 用同一个 blurBackdrop 做模糊——它捕获的内容
+                    // 就是这个 layerBackdrop 子树渲染出来的画面。照搬 KernelSU
+                    // MainActivity.kt:306。
+                    Box(modifier = if (blurBackdrop != null) Modifier.layerBackdrop(blurBackdrop) else Modifier) {
                         HorizontalPager(
                             state = pagerState,
                             beyondViewportPageCount = if (contentReady) 1 else 0,
                             userScrollEnabled = true,
                             modifier = Modifier.fillMaxSize()
                         ) { page ->
-                            // 与 KernelSU MainActivity.kt:314-321 一致：contentReady
-                            // 前只渲染当前页，避免冷启动三页同时 compose。
+                            // contentReady 前只渲染当前页，避免冷启动三页同时 compose。
+                            // 照搬 KernelSU MainActivity.kt:314-321。
                             val isCurrent = page == settledPage
                             when (Tab.entries[page]) {
                                 Tab.HOME -> if (isCurrent || contentReady) OverviewPage(
@@ -254,10 +271,10 @@ private fun ConfigMainScreenContent(
                 } else {
                     Scaffold(
                         bottomBar = {
-                            BlurredBar(backdrop) {
+                            BlurredBar(blurBackdrop) {
                                 NavigationBar(
                                     modifier = Modifier.fillMaxWidth(),
-                                    color = if (backdrop != null) Color.Transparent else MiuixTheme.colorScheme.surface
+                                    color = if (blurBackdrop != null) Color.Transparent else MiuixTheme.colorScheme.surface
                                 ) {
                                     Tab.entries.forEachIndexed { index, tab ->
                                         this.NavigationBarItem(

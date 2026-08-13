@@ -34,8 +34,8 @@ fun rememberBlurBackdrop(enableBlur: Boolean): LayerBackdrop? {
 }
 
 /**
- * 照搬 KernelSU `BlurredBar`：把 [content] 包在 [backdrop] 的毛玻璃层上。
- * blur 半径为 KernelSU 原值 25f 的一半（12f），模糊更轻盈。
+ * 照搬 KernelSU `BlurredBar`（BlurExt.kt:25-49）：把 [content] 包在 [backdrop]
+ * 的毛玻璃层上。blur 半径与 KernelSU 一致（25f）。
  */
 @Composable
 fun BlurredBar(
@@ -48,8 +48,7 @@ fun BlurredBar(
             Modifier.textureBlur(
                 backdrop = backdrop,
                 shape = RectangleShape,
-                // KernelSU 原值 25f，这里调低约 1/2 更轻盈。
-                blurRadius = 12f,
+                blurRadius = 25f,
                 colors = BlurColors(
                     blendColors = listOf(
                         BlendColorEntry(color = MiuixTheme.colorScheme.surface.copy(0.87f)),
