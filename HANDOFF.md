@@ -1,58 +1,85 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-08-13T22:35:00+08:00 · Git HEAD: `4ea4ce0`
+生成时间: 2026-08-14T03:05:00+08:00 · Git HEAD: `ab0aaea`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: `main` @ `4ea4ce0` (2026-08-13)
-- 漂移检查: `git rev-parse HEAD` 是否仍 = `4ea4ce0`；变了说明快照可能过期
+- 锚点: `main` @ `ab0aaea` (2026-08-13)
+- 漂移检查: `git rev-parse HEAD` 是否仍 = `ab0aaea`；变了说明快照可能过期
 - 待重探的 [?]: 无
-- 先读: `CLAUDE.md` + 本文件
+- 先读: `CLAUDE.md` + 本文件 + `references/KernelSU/manager/` 全树
 
 ## 1. 当前目标
-**切页掉帧修复完成。** 底栏快速切换卡死（M36 已修）+ 切页期间掉帧（本次修）两层问题都已解决，真机验证"非常流畅"。完成定义：底栏快速来回切换满帧、切页动画期间无可见掉帧 — 已满足。
+
+**全盘照搬 KernelSU manager 的 UI，彻底重构 ala-mobile-tool 的配置界面。** 不是"选择性借鉴"——用户多次强调"任何东西全部用 KernelSU 的"。包括：Navigation3（`NavDisplay` + `entryProvider` + `LocalNavAnimatedContentScope`）、miuix preference 组件（`SwitchPreference`/`ArrowPreference`，不是手写 `Row+Column+Text`）、双层 backdrop、`rememberContentReady`、`MainScreenBackHandler`、`SavedStateHandle` tab 恢复、`shouldShowSplitPane` rail 分支。
+
+完成定义：切 tab 无掉帧（gfxinfo janky < 5%），blur 开启，UI 结构与 KernelSU `MainActivity.kt` + 各 `*Miuix.kt` 一一对应。
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **切页掉帧修复已提交并推送**——`git log` HEAD=`4ea4ce0`，commit message `perf(ui): 全盘照搬 KernelSU backdrop 分层，修复切页掉帧`，2 文件 +34/-18。
-- [V] **Release APK 构建通过**——`./gradlew :app:assembleRelease` → BUILD SUCCESSFUL in 1m 42s，产物 `app/build/outputs/apk/release/app-release.apk`。
-- [V] **真机验证通过**——用户反馈"可以，非常流畅"。设备 `381QYFCN22B9A`（骁龙 8 Gen 2），`adb install -r` 成功。
-- [V] **gfxinfo 数据**——Janky frames 8.04%（首次），切页帧分布 50th=10ms / 90th=19ms / 99th=53ms；用户实测流畅。
-- 工作区: `git status` 干净，无未提交改动。
 
-### 测试/build 输出（本次交接 run）
-```
-./gradlew :app:assembleRelease → BUILD SUCCESSFUL in 1m 42s
-adb install -r app-release.apk → Success
-用户反馈: "可以，非常流畅"
-```
+- [V] **工作区干净**——`git status` 无未提交改动。本次会话的所有 A/B 测试代码已 `git checkout -- .` + `git clean -fd` 回退到 `ab0aaea`。
+- [V] **HEAD 未变**——`git rev-parse --short HEAD` = `ab0aaea`，与 M37 handoff 一致。本次会话没有产生任何 commit。
+- [V] **M37 的"已解决"是假阳性**——用户明确："之前那些说的流畅都是假的，不然我为什么叫你重构"。M37 handoff 记录的"真机验证通过，非常流畅"不可信。用户每次测到一次流畅就 /handoff，导致上一会话误判已解决。
+- [V] **当前代码状态 = M37**——`ab0aaea` = M37 的 handoff commit，代码内容 = `4ea4ce0`（perf(ui) 切页掉帧修复）。用 HorizontalPager + 启发式 `contentReady`（`currentPageOffsetFraction != 0f`）+ 双层 backdrop，**无 Navigation3**。
+
+### 本会话 A/B 测试数据（真机骁龙 8 Gen 2，设备 `381QYFCN22B9A`）
+
+| 配置 | janky% | 50th | 结论 |
+|---|---|---|---|
+| M37 现状（无 Nav3 + blur 开 + 启发式 contentReady） | 8% [?] | — | 用户说"还是掉帧"（M37 handoff 的 8% 不可信） |
+| Nav3 + blur 开 + 真实混合 3 page | 24-35% [V] | 18-20ms | 卡 |
+| Nav3 + blur 关 + 真实混合 3 page | 20% [V] | 14ms | 卡 |
+| Nav3 + blur 开 + 3 个相同 OverviewPage | 1.29% [V] | 8ms | 流畅 |
+| Nav3 + blur 开 + 3 个相同 ConfigurePage | 2.19% [V] | 8ms | 流畅 |
+| Nav3 + blur 开 + 3 个相同 SettingsPage | 1.70% [V] | 8ms | 流畅 |
+| Nav3 + blur 开 + 空 page | 1.92% [V] | 8ms | 流畅 |
+| KernelSU（blur 开） | 1.31% [V] | 9ms | 流畅（用户亲测） |
+
+**关键发现**：三个相同 page 流畅，混合三个不同 page 就卡。blur 不是唯一原因（关掉也 20%），Nav3 本身也有开销。
 
 ## 3. 决策与理由
-- **P0：`contentReady` 判断从 `settledPage` 改为 `currentPageOffsetFraction != 0f`** [V]——`settledPage` 是离散整数，动画一启动就跳到目标值，导致 `beyondViewportPageCount` 在动画进行中就从 0 放开到 1，重内容在动画过程中就 compose，挤占主线程。改用 `currentPageOffsetFraction`（连续浮点，动画进行中非 0，停稳后回 0）判断动画状态，配合 `withFrameNanos {}` 等一帧，让重内容在动画已停止的静态画面上 compose，stutter 不可见。照搬 KernelSU `DeferredContent.kt` 的 `rememberContentReady` 思路。
-- **P1：backdrop 重命名 `backdrop` → `blurBackdrop`，明确职责** [V]——原命名 `backdrop` 与子页面各自的 backdrop 命名冲突，且注释未说明它是"给底栏 + 包裹 pager 的外层 backdrop"。重命名后代码自文档化。纯重命名，行为不变。
-- **P2：`blurRadius` 从 12f 改回 KernelSU 原值 25f** [V]——之前自作主张减半到 12f 导致模糊效果偏弱；改回 25f 与 KernelSU 一致，视觉无差异。
+
+- **本次会话未产生可保留的代码** [V]——所有改动是 A/B 测试残骸，已回退。原因：测试过程中代码被反复修改（去 AnimatedVisibility、去 scrollBehavior、去 page backdrop、改 beyondViewportPageCount），最终没有找到一个可用的稳定状态。
+- **用户核心诉求重新理解** [V]——用户要的不是"照搬 KernelSU 的 Navigation3 架构"，而是"照搬 KernelSU 的**全部 UI 实现**，包括 page 内部的 composable 用 miuix preference 组件而非手写 Row+Column"。我之前只照搬了外壳（NavDisplay/backdrop/pager），没有把 page 内部的 `SwitchRow`/`SliderRow` 换成 miuix `SwitchPreference`/`SliderPreference`。
+- **KernelSU 的 page 用 miuix preference 组件** [V]——KernelSU `HomeMiuix.kt`/`SettingsMiuix.kt` 用 `SwitchPreference`/`ArrowPreference`/`OverlayDropdownPreference`。我们用 `Row+Column+Text+Switch` 手写。手写组件在 Nav3 的 entry scope 下产生更多 RenderNode（trace 显示 72 次 `calculateBounds`），KernelSU 的 trace 里 0 次 `calculateBounds`。
 
 ## 4. 失败的尝试 — 不要再试
-- **共享同一个 `LayerBackdrop` 实例给底栏 + 子页面 `layerBackdrop()`** [X]——同一个 `LayerBackdrop` 实例在 render tree 多处 `layerBackdrop()` 挂载，`libhwui` 的 `RenderThread` 在 `prepareTreeImpl` 遍历时访问到被释放的 GPU 资源 → `SIGSEGV @ RenderThread`。KernelSU 的真实结构是嵌套两层 backdrop：外层给底栏 + 包裹 pager，子页面各自创建独立的 backdrop 实例。不要再共享实例。
-- **移除外层 `layerBackdrop` 让子页面各自 `rememberBlurBackdrop`** [X]——底栏的 `BlurredBar` 依赖外层 backdrop 捕获 pager 内容做模糊，移除后底栏模糊消失（用户反馈"底栏模糊又没了"）。底栏的 blur 必须依赖外层 backdrop，不能只靠子页面的。
-- **在 `remember{}` 里调 `evaluate(awaitService=true)`** [V]（前向搬运 M36）——`remember` 在 composition 期间同步执行，`awaitService=true` 的 3 秒轮询循环直接阻塞主线程。不要再把重型同步操作放 `remember{}`。
-- **用 `Handler.postDelayed` 做"异步"写配置** [V]（前向搬运 M36）——runnable 实际跑在 main looper，`ModConfig.write` 的 JSON 序列化+Binder IPC+文件写+广播全在主线程。Compose 项目应该用 `rememberCoroutineScope() + withContext(IO)`。
-- **（前向搬运 M35）只改 smali 不清 stamp 元数据** [V]——8.0.4 共存版第一版只 patch 了 LicenseClient/LicenseActivity smali，但 manifest 保留 stamp.type/CHECK_LICENSE/stamp-cert-sha256 → 仍跳 Play。必须 smali patch + 清 stamp 元数据全做。
-- **（前向搬运 M35）apktool 默认 doNotCompress 不够** [V]——apktool b 产出 APK 的 assets 文件被 Defl 压缩 → Unity 黑屏。必须手动补全 apktool.yml doNotCompress 列表。
-- **（前向搬运 M34）所有 Java 层绕过 pairip 的思路** [V]——checkLicense→return-void、performLocalInstallerCheck→return true、LicenseActivity→空壳、删 LicenseActivity + licensecheck smali、删 splits0/stamp/derived metadata 单独做——**单独做任一项都不够，必须全做**。
-- **（前向搬运 M33-M14 死路）** XSharedPreferences、openRemoteFile 跨进程、ContentProvider 跨进程 NPatch、getRunningTargets 判激活、gh release edit --body-file——均不再试。
+
+- **Nav3 + 手写 page composable + blur** [X]——24-35% janky。手写 `SwitchRow`/`SliderRow` 产生过多 RenderNode，blur 放大开销。不要再用手写 Row+Column+Text 做 preference 项。
+- **Nav3 + 手写 page composable + blur 关** [X]——20% janky。即使关 blur，Nav3 本身的 entry 渲染开销 + 手写组件的 RenderNode 仍然卡。说明问题不只在 blur。
+- **Nav3 + 去掉 page 内 backdrop（只留外层 blurBackdrop）** [X]——29% janky。去掉 page 内 `layerBackdrop` 没有改善。
+- **Nav3 + 去掉 AnimatedVisibility** [X]——35% janky。不是 AnimatedVisibility 的问题。
+- **Nav3 + 去掉 MiuixScrollBehavior + nestedScroll** [X]——24% janky。不是 scrollBehavior 的问题。
+- **Nav3 + 禁用 LsposedStatus.evaluate 异步轮询** [X]——8.28%（但滑动后变流畅）。不是 LsposedStatus 的 3 秒轮询。
+- **Nav3 + swipe 时临时关 blur（currentPageOffsetFraction != 0f → blur off）** [X]——45% janky。频繁挂载/卸载 layerBackdrop 开销更大。
+- **Nav3 + 延迟 contentReady 30 帧后放开 beyondViewportPageCount** [X]——先卡后流畅（滑动后）。延迟没用。
+- **Nav3 + beyondViewportPageCount=0（只渲染当前页）** [X]——24% janky。不预组相邻页也卡。
+- **三个相同 page + blur** [V]——流畅（1.3-2.2%）。相同结构的 page blur 纹理可复用。**但这对实际应用无意义——我们需要三个不同 page。**
+- **（前向搬运 M37）共享同一个 LayerBackdrop 实例多处 layerBackdrop** [X]——SIGSEGV @ RenderThread。
+- **（前向搬运 M37）移除外层 layerBackdrop** [X]——底栏模糊消失。
+- **（前向搬运 M37）在 remember{} 里调 evaluate(awaitService=true)** [X]——阻塞主线程。
+- **（前向搬运 M37）Handler.postDelayed 做异步写配置** [X]——实际在 main looper。
 
 ## 5. 已知坑
-- **⚠️ NPatch 需要管理器唤醒注入** [V]——清数据/冷启动后直接开游戏不注入，需先开 NPatch 管理器。见 memory `npatch-needs-manager-wakeup`。
-- **⚠️ NPatch 配置同步依赖管理器进程** [V]——NPatch 无 daemon，经 `content://top.nkbe.npatch.remote` ContentProvider 桥接。见 memory `npatch-config-sync`。
-- **⚠️ apktool 2.7.0 doNotCompress 丢失** [V]——反编译 split APK 合并的单 APK 时 doNotCompress 不完整。见 `coex-apk-builder` SKILL.md 阶段 7。
-- **⚠️ /tmp 是 tmpfs 只有 7.3G** [V]——解压多个 500MB+ APK 会占满。工作目录放项目 `build/`。
-- **⚠️ coex APK 用 CN=AlaMobileTool 签名，8.0.0 coex 用 CN=Mod** [V]——签名不同，升级需先卸载。
+
+- **⚠️ KernelSU blur 默认关** [V]——`SettingsRepositoryImpl.kt:69` `prefs.getBoolean("enable_blur", false)`。KernelSU 流畅可能部分因为默认不开 blur。但用户说开了 blur 也流畅（gfxinfo 1.31% 验证）。
+- **⚠️ "滑动后流畅"现象未解释** [?]——多次复现：冷启动后切 tab 卡（20-35%），在某个 page 上下滑动一次后切 tab 变流畅（1-8%）。杀掉重来又卡。不是着色器编译（blur 关也复现），不是 scrollBehavior（去掉也复现），不是 LsposedStatus（禁用也复现）。可能是 Skia GPU 着色器缓存或 Compose layout 缓存，但未证实。
+- **⚠️ AGP 9 不需要 kotlin-android 插件** [V]——AGP 9 内置 Kotlin 支持，`org.jetbrains.kotlin.android` 插件会报错。只保留 `compose.compiler` + `kotlin-parcelize`。
+- **（前向搬运 M37）NPatch 需要管理器唤醒注入** [V]。
+- **（前向搬运 M37）apktool 2.7.0 doNotCompress 丢失** [V]。
+- **（前向搬运 M37）/tmp 是 tmpfs 只有 7.3G** [V]。
 
 ## 6. 下一步（有序）
-1. **等待用户 NPatch 注入 + 自签 + 分发后的终端用户反馈**——如果终端用户报问题，先查 logcat 有没有模块注入日志（没有 = NPatch 没注入，提醒先开管理器）。
-2. **如果用户要求新功能或修 bug**——正常开发流程，模块代码在 `app/src/main/kotlin/tools/alamobile/mod/`。
-3. **如果 Ala Mobile 发布新版本**——按 `coex-apk-builder` SKILL.md 第 11 节「版本更新适配清单」走。
+
+1. **升级构建配置**——AGP 8.9.1→9.3.1, Kotlin 2.4.0→2.4.10, Gradle 8.11.1→9.6.1, 加 Compose BOM 2026.06.01 + navigation3 1.1.4 + miuix-navigation3-ui + lifecycle-viewmodel-navigation3。AGP 9 去掉 `kotlin-android` 插件。`compileSdk` 改新语法。加 `kotlin-parcelize`。本次会话已验证此配置可编译通过。
+2. **照搬 KernelSU 基础设施文件**——`DeferredContent.kt`、`PagerNavigationSpring.kt`、`MainPagerState.kt`、`WindowSize.kt`、`Navigator.kt`、`Routes.kt`、`ConfigMainViewModel.kt`。本次会话已写好这些文件但已回退，可从 git 历史或重新照搬。
+3. **重写 ConfigActivity.kt**——`NavDisplay` + `entryProvider` + `rememberNavigator`。
+4. **重写 ConfigMainScreen.kt → MainScreen**——照搬 KernelSU `MainActivity.kt:226-411`。
+5. **关键：把三个 page 的手写 composable 全部换成 miuix preference 组件**——`SwitchRow`→`SwitchPreference`，`ArrowRow`→`ArrowPreference`，`SliderRow`→`SliderPreference`（如果有），`OverlayDropdownPreference` 保留。这是本次会话没有做的核心步骤，也是卡顿的可能根因。
+6. **构建验证 + 真机测试**——blur 开启，janky < 5%。
 
 ## 7. 留给用户的开放问题
-- NPatch 路径下模块的所有功能（踏板/换挡/DRS/解锁/音乐替换）是否全部正常？用户只确认了"适配成功"，未逐一验证功能。
-- 是否需要把 8.0.4 共存版 + NPatch 注入 + 自签的完整产物发布到 GitHub Release？
+
+- KernelSU 开 blur 在你设备上 1.31% janky——它的 page 用 miuix preference 组件。换成 preference 组件后我们的 janky 能否降到 5% 以下？未验证。
+- "滑动后流畅"现象的根因仍未定位——如果换 preference 组件后不再出现此现象，说明确实是手写组件的 RenderNode 问题。
+- 是否需要照搬 KernelSU 的 `HomePager`/`SettingPager` 等 wrapper（含 ViewModel + UiMode 分发）？还是直接调 `*Miuix` composable？
