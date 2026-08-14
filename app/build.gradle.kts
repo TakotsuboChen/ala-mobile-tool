@@ -1,7 +1,12 @@
+@file:Suppress("UnstableApiUsage")
+
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.kotlin.serialization)
+    id("kotlin-parcelize")
 }
 
 android {
@@ -54,7 +59,7 @@ android {
 
     kotlin {
         compilerOptions {
-            jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+            jvmTarget = JvmTarget.JVM_17
         }
     }
 
@@ -64,6 +69,12 @@ android {
         buildConfig = true
     }
 
+    // AGP 9.3.1 默认要 build-tools 36.0.0，本地只有 36.1.0；显式指定避免自动下载。
+    buildToolsVersion = "36.1.0"
+
+    // 本地只有 NDK 26.1.10909125；KernelSU 用 29.0.14206865，但我们的 native 代码
+    // (pedal_hook.c / drs_hook.c / ala_core.c) 是纯 C，NDK 26 完全够用。
+    // Clash TUN TLS 干扰导致 NDK 29 无法自动下载，后续需要时再手动装。
     ndkVersion = "26.1.10909125"
 
     externalNativeBuild {
@@ -104,17 +115,48 @@ android {
 }
 
 dependencies {
+    // Xposed
     compileOnly(libs.libxposed.api)
     implementation(libs.libxposed.service)
 
+    // Compose (BOM 统一版本)
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.compose.material.icons.extended)
+    implementation(libs.androidx.compose.material3)
+    debugImplementation(libs.androidx.compose.ui.tooling)
+
+    // Activity / Lifecycle / Navigation
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.navigation3)
+
+    // Navigation3
+    implementation(libs.androidx.navigation3.runtime)
+    implementation(libs.androidx.navigationevent.compose)
+
+    // Kotlinx
+    implementation(libs.kotlinx.coroutines.core)
+
+    // miuix
     implementation(libs.miuix.ui)
+    implementation(libs.miuix.icons)
+    implementation(libs.miuix.navigation3.ui)
     implementation(libs.miuix.preference)
     implementation(libs.miuix.blur)
-    implementation(libs.activity.compose)
-    implementation(libs.navigationevent.compose)
-    implementation(libs.material.icons.core)
-    implementation(libs.material.icons.extended)
-    implementation(libs.material3)
 
+    // Native hooks
     implementation(libs.shadowhook)
+}
+
+kotlin {
+    compilerOptions {
+        freeCompilerArgs.addAll(
+            "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
+            "-opt-in=androidx.compose.material3.ExperimentalMaterial3ExpressiveApi",
+        )
+    }
 }
