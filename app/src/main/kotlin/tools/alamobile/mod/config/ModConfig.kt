@@ -642,6 +642,11 @@ object ModConfig {
     }
 
     private fun defaultSettings(): Settings {
+        return defaultSettingsPublic()
+    }
+
+    /** 供 ViewModel 在 IO 线程加载配置前提供默认值，避免主线程阻塞。 */
+    fun defaultSettingsPublic(): Settings {
         return Settings(
             pedalMode = Defaults.PEDAL_MODE,
             enableAutoDrs = Defaults.ENABLE_AUTO_DRS,

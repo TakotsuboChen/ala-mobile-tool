@@ -1,44 +1,34 @@
-package tools.alamobile.mod.ui
+package tools.alamobile.mod.ui.screen.overview
 
 import android.os.Build
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.add
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-// matchParentSize not used, using fillMaxSize instead
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
-import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.rounded.CheckCircleOutline
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.Phone
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.PathNode
-import androidx.compose.ui.graphics.vector.PathParser
-import androidx.compose.ui.graphics.vector.path
-import androidx.compose.ui.input.nestedscroll.nestedScroll
-
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,6 +37,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.PathNode
+import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -55,43 +51,60 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import tools.alamobile.mod.BuildConfig
+import tools.alamobile.mod.EulaManager
 import tools.alamobile.mod.LsposedStatus
+import tools.alamobile.mod.ui.viewmodel.ConfigViewModel
 import tools.alamobile.mod.util.openExternalUrl
 import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
-import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
+/**
+ * 照搬 KernelSU `HomePagerMiuix`（HomeMiuix.kt:81）结构：
+ * Scaffold + BlurredBar + TopAppBar + LazyColumn(overScrollVertical + scrollEndHaptic) + layerBackdrop。
+ *
+ * 三个 Card 保留 Ala Mobile 业务：ActivationCard / DeviceInfoCard / LinksCard。
+ * InfoRow 保留手写（title/value 对齐的 Row），因为它不是 preference 项，
+ * 是纯展示信息——KernelSU 的 InfoCard 也是手写 Row+Text。
+ */
 @Composable
-fun OverviewPage(bottomBarHeight: Dp = 0.dp, activationEnabled: Boolean = true) {
+fun OverviewPagerMiuix(
+    uiState: tools.alamobile.mod.ui.viewmodel.ConfigUiState,
+    actions: ConfigViewModel,
+    bottomInnerPadding: Dp,
+) {
     val scrollBehavior = MiuixScrollBehavior()
-    val enableBlur = LocalEnableBlur.current
-    val backdrop = rememberBlurBackdrop(enableBlur)
+    val enableBlur = tools.alamobile.mod.ui.theme.LocalEnableBlur.current
+    val backdrop = tools.alamobile.mod.ui.util.rememberBlurBackdrop(enableBlur)
     val blurActive = backdrop != null
-    val barColor = if (blurActive) Color.Transparent else MiuixTheme.colorScheme.surface
+    val barColor = if (blurActive) Color.Transparent else colorScheme.surface
 
     Scaffold(
         topBar = {
-            BlurredBar(backdrop) {
+            tools.alamobile.mod.ui.util.BlurredBar(backdrop) {
                 TopAppBar(
-                    title = "Ala Mobile Tool",
                     color = barColor,
-                    scrollBehavior = scrollBehavior
+                    title = "Ala Mobile Tool",
+                    scrollBehavior = scrollBehavior,
                 )
             }
         },
-        contentWindowInsets = WindowInsets.systemBars
-            .only(WindowInsetsSides.Horizontal)
+        popupHost = { },
+        contentWindowInsets = WindowInsets.systemBars.add(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal),
     ) { innerPadding ->
         Box(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
             LazyColumn(
@@ -101,20 +114,19 @@ fun OverviewPage(bottomBarHeight: Dp = 0.dp, activationEnabled: Boolean = true) 
                     .overScrollVertical()
                     .nestedScroll(scrollBehavior.nestedScrollConnection)
                     .padding(horizontal = 12.dp),
-                // 底部留出底栏高度，否则最后一个 item 会被 NavigationBar 挡住。
                 contentPadding = PaddingValues(
                     top = innerPadding.calculateTopPadding(),
-                    bottom = innerPadding.calculateBottomPadding() + bottomBarHeight
+                    bottom = innerPadding.calculateBottomPadding() + bottomInnerPadding
                 ),
-                overscrollEffect = null
+                overscrollEffect = null,
             ) {
                 item {
                     Column(
                         modifier = Modifier.padding(vertical = 12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        ActivationCard(activationEnabled = activationEnabled)
+                        ActivationCard()
                         DeviceInfoCard()
                         LinksCard()
                         Spacer(modifier = Modifier.height(12.dp))
@@ -126,22 +138,23 @@ fun OverviewPage(bottomBarHeight: Dp = 0.dp, activationEnabled: Boolean = true) 
 }
 
 @Composable
-private fun ActivationCard(activationEnabled: Boolean = true) {
+private fun ActivationCard() {
     val context = LocalContext.current
-    // 先用 awaitService=false 快速返回（仅读内存 + 文件 flag，不阻塞），
-    // 再在 LaunchedEffect 里异步升级到准确值。照搬 KernelSU HomeScreen 的
-    // hasActivated + LaunchedEffect(Unit) 模式：重型检测永远不在 composition 路径上。
-    var status by remember { mutableStateOf(LsposedStatus.evaluate(context, awaitService = false)) }
+    // 照搬 KernelSU HomeScreen：初始状态用 null（不阻塞），LaunchedEffect 里异步加载。
+    // 之前 remember{ LsposedStatus.evaluate(awaitService=false) } 虽然不做 3s 轮询，
+    // 但仍然在主线程做文件存在性检查 + SharedPreferences 读取，首次组合时会阻塞。
+    var status by remember { mutableStateOf<LsposedStatus.Status?>(null) }
     var showNonRootDialog by remember { mutableStateOf(false) }
     val isDark = isSystemInDarkTheme()
 
-    // 异步升级激活状态（不阻塞主线程）：未接受 EULA 时不刷新、不自动弹窗——
-    // 用户协议未同意前激活弹窗无意义，且不得覆盖在用户协议上方。
-    // awaitService=true 路径在 LsposedStatus 里有最多 3s 的轮询循环，
-    // 放 LaunchedEffect 里跑协程而不是在主线程 remember{} 里同步阻塞。
-    LaunchedEffect(activationEnabled) {
-        if (!activationEnabled) return@LaunchedEffect
-        // 切到 IO 线程做轮询（LsposedStatus.evaluate 内部有 Thread.sleep 循环）。
+    // 所有激活状态检测都在 IO 线程：awaitService=false 快速返回 + awaitService=true 轮询升级。
+    LaunchedEffect(Unit) {
+        // 先快速返回一个初始值（IO 线程），再异步升级到准确值
+        val initial = withContext(Dispatchers.IO) {
+            LsposedStatus.evaluate(context, awaitService = false)
+        }
+        status = initial
+
         val evaluated = withContext(Dispatchers.IO) {
             LsposedStatus.evaluate(context, awaitService = true)
         }
@@ -151,11 +164,8 @@ private fun ActivationCard(activationEnabled: Boolean = true) {
         }
     }
 
-    // 配色照搬 KernelSU HomeMiuix 的 StatusCard：已激活用绿色调强调底
-    // （深色 #1A3825 / 浅色 #DFFAE4）+ 绿勾 #36D167；未激活对称用红色调
-    // 强调底（深色 #3D1A1A / 浅色 #FAE4E4）+ 红叉 #FF5252。两态都是强调底，
-    // 只是色相绿/红对称，不出现默认 surface 的纯黑/灰。
-    val activated = status != LsposedStatus.Status.INACTIVE
+    // status 为 null 时显示加载态，避免 null 检查导致的颜色闪烁。
+    val activated = status != null && status != LsposedStatus.Status.INACTIVE
     val cardColor = if (activated) {
         if (isDark) Color(0xFF1A3825) else Color(0xFFDFFAE4)
     } else {
@@ -164,8 +174,9 @@ private fun ActivationCard(activationEnabled: Boolean = true) {
     val textColor = if (isDark) Color.White else MiuixTheme.colorScheme.onSurface
     val descColor = if (isDark) Color(0xCCFFFFFF) else MiuixTheme.colorScheme.onSurfaceVariantSummary
 
-    val titleText = if (activated) "已激活" else "未激活"
+    val titleText = if (status == null) "检测中..." else if (activated) "已激活" else "未激活"
     val descText = when (status) {
+        null -> "正在检测模块激活状态"
         LsposedStatus.Status.LSPOSED -> "模块已通过 LSPosed 加载"
         LsposedStatus.Status.NONROOT -> "模块已通过 Non-root LSPosed 加载"
         LsposedStatus.Status.INACTIVE -> "点击确认是否使用了免 Root 框架"
@@ -177,19 +188,14 @@ private fun ActivationCard(activationEnabled: Boolean = true) {
             .height(90.dp),
         colors = CardDefaults.defaultColors(color = cardColor),
         onClick = {
-            // 未激活才弹窗（已激活的两种状态点击无操作）。
-            // 未接受 EULA 时点击也不弹（激活弹窗让位于用户协议）。
-            if (activationEnabled && status == LsposedStatus.Status.INACTIVE) {
+            if (status == LsposedStatus.Status.INACTIVE) {
                 showNonRootDialog = true
             }
         },
         showIndication = true,
         pressFeedbackType = if (activated) PressFeedbackType.Tilt else PressFeedbackType.Sink
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-        ) {
+        Box(modifier = Modifier.fillMaxSize()) {
             // 右下角大图标，超出边界被裁剪
             Icon(
                 imageVector = if (activated) Icons.Rounded.CheckCircleOutline else Icons.Rounded.ErrorOutline,
@@ -231,10 +237,7 @@ private fun ActivationCard(activationEnabled: Boolean = true) {
                 status = LsposedStatus.evaluate(context, awaitService = false)
                 showNonRootDialog = false
             },
-            onDismiss = {
-                // 选"否" → 保持未激活，不写标记。
-                showNonRootDialog = false
-            }
+            onDismiss = { showNonRootDialog = false }
         )
     }
 }
@@ -244,9 +247,7 @@ private fun NonRootConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    // 用 miuix 官方 OverlayDialog（照搬 miuix example CardSection 的 LongPressHoldDownCardDemo
-    // 里 dialog 用法）：title/summary 自动排版，content 放底部两个 TextButton。
-    top.yukonga.miuix.kmp.overlay.OverlayDialog(
+    OverlayDialog(
         show = true,
         title = "您是否安装了 LSPatch、NPatch 或 FPA 等免 Root LSPosed 框架？",
         onDismissRequest = onDismiss,
@@ -255,17 +256,17 @@ private fun NonRootConfirmDialog(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                top.yukonga.miuix.kmp.basic.TextButton(
+                TextButton(
                     text = "否",
                     onClick = onDismiss,
                     modifier = Modifier.weight(1f)
                 )
                 Spacer(modifier = Modifier.width(20.dp))
-                top.yukonga.miuix.kmp.basic.TextButton(
+                TextButton(
                     text = "是",
                     onClick = onConfirm,
                     modifier = Modifier.weight(1f),
-                    colors = top.yukonga.miuix.kmp.basic.ButtonDefaults.textButtonColorsPrimary()
+                    colors = ButtonDefaults.textButtonColorsPrimary()
                 )
             }
         }
@@ -312,8 +313,7 @@ private fun LinksCard() {
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
             BasicComponent(
@@ -362,11 +362,11 @@ private fun LinksCard() {
     }
 }
 
-// 内嵌 SVG path → ImageVector 的 helper。compose-ui 的 PathParser 直接吃
-// SVG `d` 字符串（含 M/m/c/a/z 全命令），转成 PathNode 列表；再在 path() DSL
-// 的 PathBuilder lambda 里按 node 类型分发到对应方法——零手动转译，比手写
-// moveTo/curveTo 链稳，尤其 QQ 含 arc 相对命令。path 数据均来自 simple-icons
-// （CC0），24×24 viewBox，与 Material 图标坐标系一致。
+// ── 内嵌 SVG path → ImageVector ──
+// compose-ui 的 PathParser 直接吃 SVG d 字符串（含 M/m/c/a/z 全命令），转成 PathNode 列表；
+// 再在 path() DSL 的 PathBuilder lambda 里按 node 类型分发到对应方法。
+// path 数据来自 simple-icons（CC0），24×24 viewBox，与 Material 图标坐标系一致。
+
 private fun svgIcon(name: String, svgPath: String): ImageVector =
     ImageVector.Builder(
         name = name,
