@@ -15,9 +15,6 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Build
-import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Settings
@@ -54,7 +51,6 @@ import tools.alamobile.mod.ui.theme.LocalEnableNavigationBadge
 import tools.alamobile.mod.ui.util.BlurredBar
 import tools.alamobile.mod.ui.util.rememberBlurBackdrop
 import tools.alamobile.mod.ui.util.rememberContentReady
-import tools.alamobile.mod.ui.viewmodel.ConfigViewModel
 import tools.alamobile.mod.ui.viewmodel.MainPagerConfig
 import top.yukonga.miuix.kmp.basic.NavigationBar
 import top.yukonga.miuix.kmp.basic.NavigationBarItem
@@ -62,15 +58,15 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.utils.MiuixPopupUtils
 
 /**
  * 照搬 KernelSU `MainActivity.kt:226-411` MainScreen + MainScreenBackHandler。
  *
- * 三页 pager（概览/配置/设置）+ 底栏 + 双层 backdrop + rememberContentReady 门控。
+ * 三页 pager（概览/配置/设置）+ 底栏 + 双层 backdrop。
  * Ala Mobile 没有 badge / floating bottom bar 的实际 UI（CompositionLocal 默认 false），
  * 但保留结构分支以对齐 KernelSU。
  */
+
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @Composable
 fun MainScreen(
@@ -111,26 +107,24 @@ fun MainScreen(
     CompositionLocalProvider(
         LocalMainPagerState provides mainPagerState
     ) {
-        // 不用 rememberContentReady：它依赖 LocalNavAnimatedContentScope.current.transition.isRunning，
-        // 但我们的三个 page 是 HorizontalPager 内切换，不经过 NavDisplay 的 AnimatedContent 过渡。
-        // transition 永远不 running → contentReady 永远 false → beyondViewportPageCount 永远 0
-        // → 每次切 tab 都要从零首次组合相邻页的整个子树（Scaffold+LazyColumn+Card+preference），
-        // 这就是 30% janky 的根因。
-        // KernelSU 用它是为了在 Nav3 页面切换过渡动画期间保护首帧；我们没有 Nav3 过渡，直接全预组。
+        val contentReady = rememberContentReady()
         val pagerContent = @Composable { bottomInnerPadding: Dp ->
             Box(modifier = if (blurBackdrop != null) Modifier.layerBackdrop(blurBackdrop) else Modifier) {
                 HorizontalPager(
                     modifier = Modifier
                         .then(if (enableFloatingBottomBar && enableFloatingBottomBarBlur) Modifier.layerBackdrop(backdrop) else Modifier),
                     state = mainPagerState.pagerState,
-                    beyondViewportPageCount = MainPagerConfig.LAST_PAGE_INDEX,
+                    beyondViewportPageCount = if (contentReady) MainPagerConfig.LAST_PAGE_INDEX else 0,
                     overscrollEffect = null,
                     userScrollEnabled = true,
                 ) { page ->
-                    when (page) {
-                        0 -> OverviewPager(navController, bottomInnerPadding, page == settledPage)
-                        1 -> ConfigurePager(navController, bottomInnerPadding, page == settledPage)
-                        2 -> SettingsPager(navController, bottomInnerPadding)
+                    val isCurrentPage = page == settledPage
+                    if (isCurrentPage || contentReady) {
+                        when (page) {
+                            0 -> OverviewPager(navController, bottomInnerPadding, isCurrentPage)
+                            1 -> ConfigurePager(navController, bottomInnerPadding, isCurrentPage)
+                            2 -> SettingsPager(navController, bottomInnerPadding)
+                        }
                     }
                 }
             }
@@ -179,7 +173,6 @@ fun MainScreen(
 
             Scaffold(
                 bottomBar = bottomBar,
-                popupHost = { MiuixPopupUtils.MiuixPopupHost() }
             ) { innerPadding ->
                 pagerContent(innerPadding.calculateBottomPadding())
             }
@@ -237,3 +230,4 @@ private fun MainScreenBackHandler(
 }
 
 val LocalMainPagerState = staticCompositionLocalOf<MainPagerState> { error("LocalMainPagerState not provided") }
+

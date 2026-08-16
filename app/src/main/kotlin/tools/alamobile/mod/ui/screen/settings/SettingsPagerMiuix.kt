@@ -99,10 +99,7 @@ fun SettingsPagerMiuix(
                     .overScrollVertical()
                     .nestedScroll(scrollBehavior.nestedScrollConnection)
                     .padding(horizontal = 12.dp),
-                contentPadding = PaddingValues(
-                    top = innerPadding.calculateTopPadding(),
-                    bottom = innerPadding.calculateBottomPadding() + bottomInnerPadding
-                ),
+                contentPadding = innerPadding,
                 overscrollEffect = null,
             ) {
                 item {
