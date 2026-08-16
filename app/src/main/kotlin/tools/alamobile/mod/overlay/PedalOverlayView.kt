@@ -25,7 +25,7 @@ import kotlin.math.pow
  *   reversible via [ModConfig.Settings.brakeInvert] (default fills
  *   bottom-up like throttle; inverted fills top-down).
  *
- * The response curve (linear / exponential ease-out ≈ 30%→60%) is applied
+ * The response curve (linear / custom control point) is applied
  * on top of the raw travel; SINGLE applies throttleCurve on the throttle
  * half and brakeCurve on the brake half, DUAL applies the matching curve
  * to each dedicated view.
@@ -44,7 +44,9 @@ class PedalOverlayView(
         brakeTransition = 0.1f,
         brakeInvert = false,
         throttleCurve = ModConfig.PedalCurve.LINEAR,
-        brakeCurve = ModConfig.PedalCurve.LINEAR
+        brakeCurve = ModConfig.PedalCurve.LINEAR,
+        throttleCurvePoints = emptyList(),
+        brakeCurvePoints = emptyList()
     ),
     private val role: PedalRole = PedalRole.SINGLE,
     private val position: OverlayPosition = settings.pedalPosition
@@ -191,7 +193,7 @@ class PedalOverlayView(
             val afterDead = applyDeadzone(raw, deadzone)
             rawThrottle = raw
             rawBrake = 0f
-            mappedThrottle = applyCurve(afterDead, settings.throttleCurve)
+            mappedThrottle = applyCurve(afterDead, settings.throttleCurve, settings.throttleCurvePoints)
             mappedBrake = 0f
         } else {
             val raw = if (transition >= 1f) 0f else (t - transition) / (1f - transition)
@@ -199,7 +201,7 @@ class PedalOverlayView(
             rawThrottle = 0f
             rawBrake = raw
             mappedThrottle = 0f
-            mappedBrake = applyCurve(afterDead, settings.brakeCurve)
+            mappedBrake = applyCurve(afterDead, settings.brakeCurve, settings.brakeCurvePoints)
         }
     }
 
@@ -210,7 +212,7 @@ class PedalOverlayView(
         val raw = 1f - t
         rawThrottle = raw
         rawBrake = 0f
-        val curveMapped = applyCurve(raw, settings.throttleCurve)
+        val curveMapped = applyCurve(raw, settings.throttleCurve, settings.throttleCurvePoints)
         // DUAL 仲裁：本 view 是油门，共享 rawThrottle 已更新，调 arbitrate
         // 决定 mappedThrottle（可能被刹车屏蔽）和 mappedBrake。
         arbitrateDual(curveMapped, isThrottleView = true)
@@ -227,7 +229,7 @@ class PedalOverlayView(
         val raw = if (settings.brakeInvert) t else 1f - t
         rawThrottle = 0f
         rawBrake = raw
-        val curveMapped = applyCurve(raw, settings.brakeCurve)
+        val curveMapped = applyCurve(raw, settings.brakeCurve, settings.brakeCurvePoints)
         arbitrateDual(curveMapped, isThrottleView = false)
     }
 
@@ -271,16 +273,15 @@ class PedalOverlayView(
         return (value - deadzone) / (1f - deadzone)
     }
 
-    private fun applyCurve(value: Float, curve: ModConfig.PedalCurve): Float {
-        // exponent < 1 => ease-out (fast rise, soft tail), realistic feel.
-        // 0.66 使 ~30% 物理行程 → ~45% 输出（0.3^0.66 ≈ 0.45），比旧的 0.42
-        // （30%→60%）更温和不激进。LINEAR stays identity.
+    private fun applyCurve(value: Float, curve: ModConfig.PedalCurve, points: List<ModConfig.CurvePoint>): Float {
         // 仅作用于 mapped（送 native），不影响 raw（绘制用）。
-        val exponent = when (curve) {
-            ModConfig.PedalCurve.LINEAR -> 1f
-            ModConfig.PedalCurve.EXPONENTIAL -> 0.66f
+        // LINEAR stays identity.
+        // CUSTOM：保单调三次样条（Fritsch–Carlson），恒过 (0,0)、各控制点、(1,1)，
+        // 连续光滑、段内单调（无过冲/抖动）。空列表 = 只有两端点 = 线性。
+        return when (curve) {
+            ModConfig.PedalCurve.LINEAR -> value.coerceIn(0f, 1f)
+            ModConfig.PedalCurve.CUSTOM -> ModConfig.monotoneCubic(points, value)
         }
-        return value.coerceIn(0f, 1f).pow(exponent).coerceIn(0f, 1f)
     }
 
     private fun updateNativeValues() {

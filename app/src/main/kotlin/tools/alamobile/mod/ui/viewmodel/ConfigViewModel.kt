@@ -58,6 +58,8 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
                 brakeInvert = s.brakeInvert,
                 throttleCurve = s.throttleCurve,
                 brakeCurve = s.brakeCurve,
+                throttleCurvePoints = s.throttleCurvePoints,
+                brakeCurvePoints = s.brakeCurvePoints,
                 logEnabled = s.logEnabled,
             )
         }
@@ -81,6 +83,8 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
             brakeInvert = s.brakeInvert,
             throttleCurve = s.throttleCurve,
             brakeCurve = s.brakeCurve,
+            throttleCurvePoints = s.throttleCurvePoints,
+            brakeCurvePoints = s.brakeCurvePoints,
             logEnabled = s.logEnabled,
         )
     }
@@ -114,6 +118,8 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
     fun setBrakeInvert(v: Boolean) { _uiState.value = _uiState.value.copy(brakeInvert = v); scheduleSave() }
     fun setThrottleCurve(v: ModConfig.PedalCurve) { _uiState.value = _uiState.value.copy(throttleCurve = v); scheduleSave() }
     fun setBrakeCurve(v: ModConfig.PedalCurve) { _uiState.value = _uiState.value.copy(brakeCurve = v); scheduleSave() }
+    fun setThrottleCurvePoints(v: List<ModConfig.CurvePoint>) { _uiState.value = _uiState.value.copy(throttleCurvePoints = v); scheduleSave() }
+    fun setBrakeCurvePoints(v: List<ModConfig.CurvePoint>) { _uiState.value = _uiState.value.copy(brakeCurvePoints = v); scheduleSave() }
     fun setLogEnabled(v: Boolean) { _uiState.value = _uiState.value.copy(logEnabled = v); scheduleSave() }
 
     /** 立即 flush（供 onServiceBind 等需要立刻落盘的场景）。 */
@@ -146,6 +152,8 @@ data class ConfigUiState(
     val brakeInvert: Boolean,
     val throttleCurve: ModConfig.PedalCurve,
     val brakeCurve: ModConfig.PedalCurve,
+    val throttleCurvePoints: List<ModConfig.CurvePoint>,
+    val brakeCurvePoints: List<ModConfig.CurvePoint>,
     val logEnabled: Boolean,
 ) {
     fun toSettings(): ModConfig.Settings = ModConfig.Settings(
@@ -164,6 +172,8 @@ data class ConfigUiState(
         brakeInvert = brakeInvert,
         throttleCurve = throttleCurve,
         brakeCurve = brakeCurve,
+        throttleCurvePoints = throttleCurvePoints,
+        brakeCurvePoints = brakeCurvePoints,
         logEnabled = logEnabled,
     )
 }

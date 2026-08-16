@@ -70,6 +70,10 @@ object ModConfig {
     const val KEY_BRAKE_INVERT = "brake_invert"
     const val KEY_THROTTLE_CURVE = "throttle_curve"
     const val KEY_BRAKE_CURVE = "brake_curve"
+    // 自定义曲线控制点列表 (x,y) ∈ [0,1]²。曲线是过 (0,0)、各控制点、(1,1) 的
+    // 分段线性插值。空列表 = 只有两端点 = 线性。
+    const val KEY_THROTTLE_CURVE_POINTS = "throttle_curve_points"
+    const val KEY_BRAKE_CURVE_POINTS = "brake_curve_points"
 
     // Legacy keys (kept only for one-way migration on read)
     const val KEY_LEGACY_ENABLE_CONTROL_REPLACEMENT = "enable_control_replacement"
@@ -126,25 +130,86 @@ object ModConfig {
     /**
      * Response curve applied on top of the raw 0..1 pedal travel.
      *
-     * The "exponential" curve here is an ease-out approximation tuned so that
-     * ~30% physical travel yields ~60% in-game output (fast initial rise,
-     * soft tail) — the realistic throttle/brake feel players expect. The
-     * exponent is < 1, deliberately the opposite direction of the old
-     * quadratic curve (which was "slow start, fast end" and felt dead).
+     * LINEAR is identity. CUSTOM uses a list of draggable control points;
+     * the curve is a piecewise-linear interpolation through (0,0), each
+     * control point, and (1,1). An empty list = linear.
      */
     enum class PedalCurve(val value: String) {
         LINEAR("linear"),
-        EXPONENTIAL("exponential");
+        CUSTOM("custom");
 
         companion object {
             fun from(value: String?): PedalCurve {
-                // Legacy configs may carry "quadratic"; map it to exponential
-                // so old users keep a non-linear feel instead of falling back
-                // to linear silently.
-                if (value == "quadratic") return EXPONENTIAL
+                // Legacy configs may carry "quadratic" or "exponential"; map both
+                // to CUSTOM so old users keep a non-linear feel instead of falling
+                // back to linear silently. The control point list defaults to empty
+                // (= linear); users can add points in the custom curve editor.
+                if (value == "quadratic" || value == "exponential") return CUSTOM
                 return entries.find { it.value == value } ?: LINEAR
             }
         }
+    }
+
+    /**
+     * A single control point on the custom response curve, in normalized
+     * [0,1]×[0,1] space (x = travel, y = output). Points must be sorted by
+     * x and are interpolated with a monotone cubic spline.
+     */
+    data class CurvePoint(val x: Float, val y: Float)
+
+    /**
+     * Monotone cubic interpolation (Fritsch–Carlson) through the control
+     * points plus the fixed endpoints (0,0) and (1,1).
+     *
+     * Unlike piecewise-linear, this produces a single smooth curve that
+     * passes through every point, has a continuous gradient, and stays
+     * monotonic within each segment (no overshoot / wibble). This is the
+     * standard choice for response/envelope curves in audio and UI tools.
+     *
+     * @param points control points (may be empty → linear)
+     * @param x      input in [0,1]
+     * @return       interpolated output in [0,1]
+     */
+    fun monotoneCubic(points: List<CurvePoint>, x: Float): Float {
+        val sorted = points.sortedBy { it.x }
+        if (sorted.isEmpty()) return x.coerceIn(0f, 1f)
+        // 固定端点 (0,0) 和 (1,1)。
+        val pts = listOf(CurvePoint(0f, 0f)) + sorted + listOf(CurvePoint(1f, 1f))
+        val n = pts.size - 1
+
+        // 每段斜率。
+        val slopes = FloatArray(n)
+        for (i in 0 until n) {
+            val dx = pts[i + 1].x - pts[i].x
+            slopes[i] = if (dx <= 0f) 0f else (pts[i + 1].y - pts[i].y) / dx
+        }
+
+        // 切线（Fritsch–Carlson 保单调）。
+        val d = FloatArray(pts.size)
+        d[0] = slopes[0]
+        d[n] = slopes[n - 1]
+        for (i in 1 until n) {
+            d[i] = if (slopes[i - 1] * slopes[i] <= 0f) 0f
+            else 2f / (1f / slopes[i - 1] + 1f / slopes[i])
+        }
+
+        // 定位区间。
+        val xc = x.coerceIn(0f, 1f)
+        var i = 0
+        while (i < n && xc > pts[i + 1].x) i++
+        if (i >= n) i = n - 1
+        val h = pts[i + 1].x - pts[i].x
+        if (h <= 0f) return pts[i + 1].y
+
+        // 三次 Hermite。
+        val t = (xc - pts[i].x) / h
+        val t2 = t * t
+        val t3 = t2 * t
+        val h00 = 2 * t3 - 3 * t2 + 1
+        val h10 = t3 - 2 * t2 + t
+        val h01 = -2 * t3 + 3 * t2
+        val h11 = t3 - t2
+        return h00 * pts[i].y + h10 * h * d[i] + h01 * pts[i + 1].y + h11 * h * d[i + 1]
     }
 
     private object Defaults {
@@ -170,6 +235,9 @@ object ModConfig {
         const val BRAKE_INVERT = false
         val THROTTLE_CURVE = PedalCurve.LINEAR
         val BRAKE_CURVE = PedalCurve.LINEAR
+        // 自定义曲线控制点列表默认空 = 线性（只有两端点）。
+        val THROTTLE_CURVE_POINTS: List<CurvePoint> = emptyList()
+        val BRAKE_CURVE_POINTS: List<CurvePoint> = emptyList()
         val PEDAL_POSITION = OverlayPosition.DEFAULT_PEDAL
         val GEAR_POSITION = OverlayPosition.DEFAULT_GEAR
         val BRAKE_POSITION = OverlayPosition.DEFAULT_BRAKE
@@ -278,6 +346,8 @@ object ModConfig {
                 brakeCurve = PedalCurve.from(
                     json.optString(KEY_BRAKE_CURVE, json.optString(KEY_LEGACY_PEDAL_CURVE, Defaults.BRAKE_CURVE.value))
                 ),
+                throttleCurvePoints = readCurvePoints(json, KEY_THROTTLE_CURVE_POINTS),
+                brakeCurvePoints = readCurvePoints(json, KEY_BRAKE_CURVE_POINTS),
                 pedalPosition = readOverlayPosition(json, KEY_PEDAL_POSITION, Defaults.PEDAL_POSITION),
                 gearPosition = readOverlayPosition(json, KEY_GEAR_POSITION, Defaults.GEAR_POSITION),
                 brakePosition = readOverlayPosition(json, KEY_BRAKE_POSITION, Defaults.BRAKE_POSITION),
@@ -322,6 +392,8 @@ object ModConfig {
             put(KEY_BRAKE_INVERT, settings.brakeInvert)
             put(KEY_THROTTLE_CURVE, settings.throttleCurve.value)
             put(KEY_BRAKE_CURVE, settings.brakeCurve.value)
+            put(KEY_THROTTLE_CURVE_POINTS, writeCurvePoints(settings.throttleCurvePoints))
+            put(KEY_BRAKE_CURVE_POINTS, writeCurvePoints(settings.brakeCurvePoints))
             // 不写 position 三字段：position 由游戏进程持有（拖拽时
             // saveOverlayPosition 写游戏 externalFilesDir），ConfigActivity
             // 不管 position。广播 JSON 不含 position，ConfigReceiver 收到
@@ -445,7 +517,7 @@ object ModConfig {
                     try { file.readText() } catch (e: Throwable) { null }
                 } else null
             } else null
-            val merged = mergePositionFromLocal(remoteJson, localJson)
+            val merged = mergePositionFromLocalPublic(remoteJson, localJson)
             val settings = fromJson(merged)
             android.util.Log.i(
                 TAG,
@@ -488,7 +560,7 @@ object ModConfig {
                     try { file.readText() } catch (e: Throwable) { null }
                 } else null
             } else null
-            val merged = mergePositionFromLocal(moduleConfigJson, localJson)
+            val merged = mergePositionFromLocalPublic(moduleConfigJson, localJson)
             val settings = fromJson(merged)
             android.util.Log.i(
                 TAG,
@@ -540,7 +612,7 @@ object ModConfig {
      * local 缺该 key 时保留 remote 的（remote 里通常是默认值）。local 为 null
      * 时直接返回 remote，position 走 fromJson 的默认。
      */
-    private fun mergePositionFromLocal(remoteJson: String, localJson: String?): String {
+    fun mergePositionFromLocalPublic(remoteJson: String, localJson: String?): String {
         if (localJson == null) return remoteJson
         return try {
             val remote = JSONObject(remoteJson)
@@ -589,6 +661,8 @@ object ModConfig {
                 brakeCurve = PedalCurve.from(
                     j.optString(KEY_BRAKE_CURVE, j.optString(KEY_LEGACY_PEDAL_CURVE, Defaults.BRAKE_CURVE.value))
                 ),
+                throttleCurvePoints = readCurvePoints(j, KEY_THROTTLE_CURVE_POINTS),
+                brakeCurvePoints = readCurvePoints(j, KEY_BRAKE_CURVE_POINTS),
                 pedalPosition = readOverlayPosition(j, KEY_PEDAL_POSITION, Defaults.PEDAL_POSITION),
                 gearPosition = readOverlayPosition(j, KEY_GEAR_POSITION, Defaults.GEAR_POSITION),
                 brakePosition = readOverlayPosition(j, KEY_BRAKE_POSITION, Defaults.BRAKE_POSITION),
@@ -632,6 +706,36 @@ object ModConfig {
         }
     }
 
+    /** 从 JSON 读曲线控制点列表。格式：[{x,y},{x,y},...]。解析失败/空返回空列表。 */
+    private fun readCurvePoints(json: JSONObject, key: String): List<CurvePoint> {
+        val arr = json.optJSONArray(key) ?: return emptyList()
+        return try {
+            val list = ArrayList<CurvePoint>(arr.length())
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                val x = o.optDouble("x", -1.0).toFloat()
+                val y = o.optDouble("y", -1.0).toFloat()
+                if (x < 0f || x > 1f || y < 0f || y > 1f) continue
+                list.add(CurvePoint(x, y))
+            }
+            list.sortedBy { it.x }
+        } catch (_: Throwable) {
+            emptyList()
+        }
+    }
+
+    /** 把曲线控制点列表序列化为 JSON 数组。 */
+    private fun writeCurvePoints(points: List<CurvePoint>): org.json.JSONArray {
+        val arr = org.json.JSONArray()
+        points.sortedBy { it.x }.forEach { p ->
+            arr.put(JSONObject().apply {
+                put("x", p.x.toDouble())
+                put("y", p.y.toDouble())
+            })
+        }
+        return arr
+    }
+
     private fun OverlayPosition.toJson(): JSONObject {
         return JSONObject().apply {
             put("x", x.toDouble())
@@ -663,6 +767,8 @@ object ModConfig {
             brakeInvert = Defaults.BRAKE_INVERT,
             throttleCurve = Defaults.THROTTLE_CURVE,
             brakeCurve = Defaults.BRAKE_CURVE,
+            throttleCurvePoints = Defaults.THROTTLE_CURVE_POINTS,
+            brakeCurvePoints = Defaults.BRAKE_CURVE_POINTS,
             pedalPosition = Defaults.PEDAL_POSITION,
             gearPosition = Defaults.GEAR_POSITION,
             brakePosition = Defaults.BRAKE_POSITION,
@@ -688,6 +794,8 @@ object ModConfig {
         val brakeInvert: Boolean = Defaults.BRAKE_INVERT,
         val throttleCurve: PedalCurve,
         val brakeCurve: PedalCurve,
+        val throttleCurvePoints: List<CurvePoint> = Defaults.THROTTLE_CURVE_POINTS,
+        val brakeCurvePoints: List<CurvePoint> = Defaults.BRAKE_CURVE_POINTS,
         val pedalPosition: OverlayPosition = OverlayPosition.DEFAULT_PEDAL,
         val gearPosition: OverlayPosition = OverlayPosition.DEFAULT_GEAR,
         val brakePosition: OverlayPosition = OverlayPosition.DEFAULT_BRAKE,
