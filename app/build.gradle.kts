@@ -101,7 +101,6 @@ android {
             excludes += "META-INF/*"
         }
         jniLibs {
-            useLegacyPackaging = true
             pickFirsts += "lib/arm64-v8a/libshadowhook.so"
         }
     }

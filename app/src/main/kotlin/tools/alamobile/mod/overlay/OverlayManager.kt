@@ -29,7 +29,15 @@ class OverlayManager(context: Context) {
         @Volatile
         private var instance: OverlayManager? = null
 
-        fun notifyConfigChanged() {
+        // 最近一次广播带来的最新配置 JSON。ConfigReceiver 收到广播后写入，
+        // rebuild 优先用它解析（比 readFromTargetProcess 读 daemon 更及时——
+        // daemon 可能是旧值，见 M41 根因）。@Volatile 保证跨线程可见。
+        @Volatile
+        private var latestConfigJson: String? = null
+
+        fun notifyConfigChanged(json: String?) {
+            if (json != null) latestConfigJson = json
+            android.util.Log.i("AlaMobileTool", "notifyConfigChanged: instance=${instance != null} json=${json != null}")
             instance?.let { mgr ->
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     mgr.rebuildFromConfigChange()
@@ -85,10 +93,11 @@ class OverlayManager(context: Context) {
      * 用户没操作，可见性应保持）。
      */
     private fun rebuildFromConfigChange() {
+        android.util.Log.i("AlaMobileTool", "rebuildFromConfigChange: root=${root != null} overlaysVisible=$overlaysVisible")
         // Activity 可能已重建，旧 root 失效——先刷新。
         refreshRoot()
         if (root == null) return
-        settings = ModConfig.readFromTargetProcess(appContext)
+        settings = resolveLatestSettings()
         removeGamingOverlays()
         addGamingOverlays()
         // addGamingOverlays 创建时 visibility=GONE，按当前 overlaysVisible 重设。
@@ -106,7 +115,7 @@ class OverlayManager(context: Context) {
         // 每次显示前重读配置——配置页（模块进程）改的 pedalMode/curve 通过
         // 共享 JSON 文件传递，游戏进程必须主动读才能拿到新值。原 by lazy 只读一次，
         // 导致运行时永远用旧配置（M10 真机不生效根因）。
-        settings = ModConfig.readFromTargetProcess(appContext)
+        settings = resolveLatestSettings()
 
         // Remove existing views to avoid duplicates.
         removeExisting()
@@ -120,6 +129,33 @@ class OverlayManager(context: Context) {
         // 后续 toggleOverlays / rebuildFromConfigChange 不再 reset，因为
         // 那是用户主动操作过程中，不应把按钮弹回默认。
         toggleButton?.resetToDefault()
+    }
+
+    /**
+     * 解析最新配置。优先用广播带来的最新 JSON（[latestConfigJson]），
+     * 它比 readFromTargetProcess 读 daemon 更及时——daemon 写入滞后于广播
+     * （M41 根因），导致 rebuild/toggle 读到旧 pedalMode/curve。
+     *
+     * 但广播 JSON 不含 position 字段（ConfigActivity 不管 position，position
+     * 由游戏进程拖拽时 saveOverlayPosition 写本地 externalFilesDir）。所以
+     * 用广播 JSON 解析后，必须从本地 externalFilesDir 合并 position，否则
+     * 重建后单踏板位置/大小会丢回默认（M41 位置丢失根因）。
+     */
+    private fun resolveLatestSettings(): ModConfig.Settings {
+        val json = latestConfigJson
+        if (json != null) {
+            // 从本地 externalFilesDir 读 position 字段，合并进广播 JSON。
+            val dir = appContext.getExternalFilesDir(null)
+            val localJson = if (dir != null) {
+                val file = java.io.File(dir, "ala_tool_config.json")
+                if (file.exists()) {
+                    try { file.readText() } catch (_: Throwable) { null }
+                } else null
+            } else null
+            val merged = ModConfig.mergePositionFromLocalPublic(json, localJson)
+            return ModConfig.fromJson(merged)
+        }
+        return ModConfig.readFromTargetProcess(appContext)
     }
 
     private fun addToggleButton() {
@@ -166,7 +202,7 @@ class OverlayManager(context: Context) {
         // curve（线性/拟真）、enableManualShift 后，用户点工具按钮重新展开，
         // 控件必须反映最新值。原实现用 pedalView==null 判空跳过重建，导致
         // 首次创建后就永远用旧配置——切关/双踏板仍显示单踏板，切拟真仍线性。
-        settings = ModConfig.readFromTargetProcess(appContext)
+        settings = resolveLatestSettings()
         removeGamingOverlays()
         addGamingOverlays()
 
@@ -213,6 +249,7 @@ class OverlayManager(context: Context) {
     private fun addGamingOverlays() {
         val screenWidth = appContext.resources.displayMetrics.widthPixels
         val screenHeight = appContext.resources.displayMetrics.heightPixels
+        android.util.Log.i("AlaMobileTool", "addGamingOverlays: pedalMode=${settings.pedalMode} root=${root} rootHash=${System.identityHashCode(root)}")
 
         val gearPosition = settings.gearPosition
         val pedalPosition = settings.pedalPosition
@@ -419,6 +456,7 @@ class OverlayManager(context: Context) {
         // 供用户再次点击，只需重建踏板/换挡 view 反映最新配置。
         // 用局部 val 快照 root，避免 var 的 smart cast 限制。
         val parent = root ?: return
+        android.util.Log.i("AlaMobileTool", "removeGamingOverlays: root=${parent} rootHash=${System.identityHashCode(parent)}")
         parent.findViewWithTag<View>("pedal_overlay")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("brake_overlay")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("gear_shift_overlay")?.let { parent.removeView(it) }

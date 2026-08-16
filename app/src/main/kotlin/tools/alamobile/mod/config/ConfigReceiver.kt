@@ -86,7 +86,9 @@ class ConfigReceiver : BroadcastReceiver() {
             // 通知 OverlayManager 重建——PedalOverlayView 构造拷 settings 快照，
             // 光写文件不够，必须重建 view 才能让新配置流进去。post 到主线程
             // 保证 UI 操作（removeView/addView）在主线程执行。
-            OverlayManager.notifyConfigChanged()
+            // 传入广播 JSON：rebuild 优先用它解析（比 readFromTargetProcess 读
+            // daemon 更及时——daemon 可能是旧值，见 M41 根因）。
+            OverlayManager.notifyConfigChanged(json)
 
             // 实时同步 TC/ABS 开关到 native g_config——ConfigActivity（模块进程）
             // 改了 TC/ABS 后，广播到达游戏进程，这里立刻调 native 更新 g_config，
