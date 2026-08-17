@@ -1,41 +1,42 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-08-17T22:45:00+08:00 · Git HEAD: `221d06a`
+生成时间: 2026-08-17T23:50:32+08:00 · Git HEAD: `3a4e3f5`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: `main` @ `221d06a` (2026-08-17)
-- 漂移检查: `git rev-parse HEAD` 是否仍 = `401e8ea`；变了说明快照可能过期
+- 锚点: `main` @ `3a4e3f5` (2026-08-17)
+- 漂移检查: `git rev-parse HEAD` 是否仍 = `3a4e3f5`；变了说明快照可能过期
 - 先读: `HANDOFF.md` + `CLAUDE.md`
 
 ## 1. 当前目标
 
-**移除"显示悬浮窗"开关 + 线性踏板关闭时收回整个"响应曲线" Section。** 已完成：`showOverlay` 字段全链路删除（UI/ConfigUiState/ModConfig.Settings/游戏进程读取），overlay 显示完全由 `pedalMode` 决定；响应曲线 Section 包进 `AnimatedVisibility`（`pedalMode != OFF` 时显示）。遗留：真机验证待用户确认；position 合并修复、janky 根因仍待排查。
+**设置页 UI 重组**：去除"日志"/"调试"两个小标题、去除"关于"卡片，保留 4 个功能项重组为两个 Card 组（启用日志+导出并分享日志 / 清除激活标记+用户协议），两组间保持 12dp 间隔。已完成并提交、已 adb 安装。遗留：真机验证待用户确认；M45 的 position 合并修复、janky 根因仍待排查。
 
 ## 2. 已验证状态 — 工作实际停在哪
 
-- [V] **移除"显示悬浮窗"开关** — `7912ac3` 删除 `showOverlay` 字段：`ModConfig.kt`（KEY_SHOW_OVERLAY 常量/Defaults/read/fromJson/write/defaultSettingsPublic/Settings 字段）、`ConfigViewModel.kt`（ConfigUiState 字段/setter/构造点/toSettings）、`AlaMobileModule.kt`（读取 + `if (ctx != null && showOverlay)` 判断）、`PedalOverlayView.kt`（默认 Settings 构造）。
-- [V] **线性踏板关闭时收回响应曲线** — `ConfigurePagerMiuix.kt` Section 3（SmallTitle + Card）包进 `AnimatedVisibility`，条件 `pedalMode != ModConfig.PedalMode.OFF`。单/双踏板调节项原本就随 pedalMode 收回，现在响应曲线也一起收回。
-- [V] **编译通过** — `./gradlew :app:compileDebugKotlin` → BUILD SUCCESSFUL（48s，仅既有 `getDistance` shadowed warning）；`./gradlew :app:assembleDebug` → BUILD SUCCESSFUL。
-- [V] **adb 安装成功** — `adb install -r app/build/outputs/apk/debug/app-debug.apk` → Success（OPD2413）。注意：`./gradlew :app:installDebug` 报 "No connected devices!"，但系统 adb 能看到设备——Gradle 用 SDK 自带 adb 与 PATH 里 adb 不一致，直接用系统 adb 装 APK 绕过。
-- [V] **README 同步** — `221d06a` 配置页表格删除"显示悬浮窗"行。
+- [V] **设置页 UI 重组** — `41ec5ee` 改动 `SettingsPagerMiuix.kt`（删两个 `SmallTitle`、删"关于" `ArrowPreference`、拆两个 Card）、`SettingsPager.kt`（删 `onOpenAbout`/`navigator` 参数）、`MainScreen.kt`（调用点同步）。清理 import：`PaddingValues`/`SmallTitle`/`Icons.Rounded.Info`。
+- [V] **编译通过** — `./gradlew :app:compileDebugKotlin` → BUILD SUCCESSFUL（9s）；`./gradlew :app:assembleDebug` → BUILD SUCCESSFUL（3s）。
+- [V] **adb 安装成功** — `adb install -r app/build/outputs/apk/debug/app-debug.apk` → Success（设备 `381QYFCN22B9A`）。注意：`./gradlew :app:installDebug` 报 "No connected devices!"，但系统 adb 能看到设备——Gradle 用 SDK 自带 adb 与 PATH 里 adb 不一致，直接用系统 adb 装 APK 绕过。
+- [V] **README 同步** — `3a4e3f5` 设置页表格删除"关于"行。
 - [V] **工作区干净** — `git status` 无未提交改动，`main` 与 `origin/main` 同步。
+- [V] **保留项** — `Route.About` 路由定义与 `AboutScreen.kt` 保留（删除设置页入口后成为不可达代码，但删除页面文件是不可逆操作，且与其他 pager 驱动的 Route 保留模式一致）。
+- [?] **M45 移除"显示悬浮窗"开关 + 响应曲线收回** — `7912ac3` 已提交，真机验证未确认。
 - [?] **position 合并修复** — 上一会话 `resolveLatestSettings()` 从本地 externalFilesDir 合并 position，`mergePositionFromLocalPublic()` 公开化。用户未确认是否生效。
 - [?] **切换模式后位置丢失** — 用户反馈"启动时调过位置大小的单踏板，切双踏板再切回单踏板，位置/大小变成默认状态"。上述 position 合并修复已尝试解决，用户未确认。
 
 ### 测试/build 输出（本次交接 run 的真实输出）
 ```
-./gradlew :app:compileDebugKotlin → BUILD SUCCESSFUL in 48s（2 个既有 warning）
-./gradlew :app:assembleDebug → BUILD SUCCESSFUL in 10s
-adb install -r app-debug.apk → Success
+./gradlew :app:compileDebugKotlin → BUILD SUCCESSFUL in 9s
+./gradlew :app:assembleDebug → BUILD SUCCESSFUL in 3s
+adb install -r app-debug.apk → Success（设备 381QYFCN22B9A）
 ./gradlew :app:installDebug → FAILED: No connected devices!（Gradle adb 与系统 adb 不一致）
 ```
 
 ## 3. 决策与理由
 
-- **移除 showOverlay 而非保留** [V]——用户实测"游戏中关掉完全没反应，只有打开游戏前关掉才有用"。代码证实：`showOverlay` 只在 `AlaMobileModule.kt` 首次 `showOverlays()` 判断一次，`rebuildFromConfigChange`/`toggleOverlays` 都不读它，是一次性门控而非运行时状态。与 `pedalMode=OFF` 语义重叠，移除后配置面更小。
-- **overlay 显示完全由 pedalMode 决定** [V]——OFF 不装 overlay，SINGLE/DUAL 装。移除 showOverlay 后 `AlaMobileModule` 无条件调 `showOverlays()`。
-- **响应曲线用 AnimatedVisibility 而非条件渲染** [V]——与单/双踏板调节项的展开/收起动画一致，`pedalMode=OFF` 时无踏板、曲线无意义。
+- **删"关于"项而非保留** [V]——用户明确要求去除关于卡片。`Route.About` 唯一入口就是设置页"关于"项，删除后成为不可达代码；但保留路由定义与 `AboutScreen.kt`，避免不可逆删除，且与其他 pager 驱动的 Route 保留模式一致。
+- **删 `onOpenAbout`/`navigator` 参数** [V]——`navigator` 在 `SettingsPager` 的唯一用途就是 push About 页，删除后成为死参数。`MainScreen` 里 `navController` 还有其他用途（OverviewPager/ConfigurePager/BackHandler），不受影响。
+- **两个 Card 组间距用外层 `spacedBy(12.dp)`** [V]——与之前 Section 间间距一致，无需额外调整。
 - **JSON 兼容无需迁移** [V]——旧配置残留 `show_overlay` key 无害（read/fromJson 不再读），`write()` 全新构造 JSONObject，写一次后旧 key 自然消失。
 
 ## 4. 失败的尝试 — 不要再试
@@ -56,17 +57,18 @@ adb install -r app-debug.apk → Success
 - ⚠️ **NDK 29 下载失败** [V]——Clash TUN TLS 干扰，用本地 NDK 26 替代。
 - ⚠️ **miuix SwitchPreference 在我们的 app 中 22% janky，KSU 同版本 0.10%** [V]——仍待排查，R8 优化差异可能。
 - ⚠️ **lint 的 NewApi 检查会拦 minSdk 26 下的高版本 API** [V]——照搬 KernelSU 代码时注意 KernelSU minSdk 更高，其 API 调用可能超出我们的 minSdk。新增高版本 API 调用时用 `values-vNN` 拆分或 `SDK_INT` 守卫。
-- ⚠️ **镜像仓库 Release Notes 时序** [V]——已修复（Notes 先于 CI 存在），但发版必须走 `/release` skill 步骤 5C：写 `RELEASE_NOTES.md` → 同步版本号 → 同步 README → commit + tag + push。手动打 tag 没写 RELEASE_NOTES.md 时 CI 会 fallback 到默认安装说明。
 - ⚠️ **LSPosed `latestReleaseTime` 只认 stable** [V]——Beta/Alpha 阶段 `latestReleaseTime` 永远是 `1970-01-01T00:00:00Z`，列表排最后。只有发 stable release 才能置顶。这是 LSPosed 生态规则，不是我们的 bug。
 
 ## 6. 下一步（有序）
 
-1. **真机验证本次改动** — 用户确认：配置页"Overlay 控件"下不再有"显示悬浮窗"开关；"线性踏板"设为"关闭"时单/双踏板调节项和整个"响应曲线" Section 一起收起；切回单/双踏板时响应曲线重新展开。
-2. **验证 position 合并修复** — 用户确认"切双踏板再切回单踏板，位置/大小是否保持"。如果仍丢回默认，需排查 `resolveLatestSettings()` 的 `mergePositionFromLocalPublic` 是否正确合并了 position。
-3. **继续排查 janky 根因** — R8 映射文件对比（KSU dex=5.2MB vs 我们 2MB），见 M40 HANDOFF。
+1. **真机验证设置页 UI 重组** — 用户确认：设置页无"日志"/"调试"小标题、无"关于"卡片；"启用日志+导出并分享日志"一组、"清除激活标记+用户协议"一组，两组间有间隔。
+2. **真机验证 M45 改动** — 用户确认：配置页"Overlay 控件"下不再有"显示悬浮窗"开关；"线性踏板"设为"关闭"时单/双踏板调节项和整个"响应曲线" Section 一起收起；切回单/双踏板时响应曲线重新展开。
+3. **验证 position 合并修复** — 用户确认"切双踏板再切回单踏板，位置/大小是否保持"。如果仍丢回默认，需排查 `resolveLatestSettings()` 的 `mergePositionFromLocalPublic` 是否正确合并了 position。
+4. **继续排查 janky 根因** — R8 映射文件对比（KSU dex=5.2MB vs 我们 2MB），见 M40 HANDOFF。
 
 ## 7. 留给用户的开放问题
 
+- 设置页 UI 重组（两组无小标题）的表现是否满意？需要真机验证。
 - 移除"显示悬浮窗"开关 + 响应曲线收回的 UI 表现是否满意？需要真机验证。
 - 切换模式后单踏板位置丢失问题是否已修复？需要用户真机验证。
 - 自定义曲线图表布局（分隔线/卡片结构/轴标签位置）是否满意？之前用户说"不改了"，但交互细节可继续调整。
