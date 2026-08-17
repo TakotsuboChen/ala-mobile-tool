@@ -56,6 +56,7 @@ gh run watch 32012990359 → ✓ build in 5m53s, 全步骤通过
 - ⚠️ **NDK 29 下载失败** [V]——Clash TUN TLS 干扰，用本地 NDK 26 替代。
 - ⚠️ **miuix SwitchPreference 在我们的 app 中 22% janky，KSU 同版本 0.10%** [V]——仍待排查，R8 优化差异可能。
 - ⚠️ **lint 的 NewApi 检查会拦 minSdk 26 下的高版本 API** [V]——照搬 KernelSU 代码时注意 KernelSU minSdk 更高，其 API 调用可能超出我们的 minSdk。新增高版本 API 调用时用 `values-vNN` 拆分或 `SDK_INT` 守卫。
+- ⚠️ **镜像仓库 Release Notes 拿不到手工 Notes** [V]——`sync-lsposed` job `needs: build`，build 一结束就从源 release 读 body 同步到镜像。手工 `gh release edit` 永远晚于 CI 内 sync，镜像永远拿到 `build.yml` 硬编码的默认安装说明。修复：Notes 先于 CI 存在——`/release` skill 发版前把 Notes 写入仓库根目录 `RELEASE_NOTES.md` 并随版本号一起提交，`build.yml` 的 `Upload to Release` 用 `body-file: RELEASE_NOTES.md`，sync 从源 release 读到的就是手工 Notes。**不要再依赖事后覆盖修镜像 body。**
 
 ## 6. 下一步（有序）
 

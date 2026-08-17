@@ -107,6 +107,26 @@ jobs:
           path: ${{ steps.rename_apk.outputs.apk_path }}
           archive: false
 
+      # Release Notes 先于 CI 存在（/release skill 发版前写入 RELEASE_NOTES.md 并随版本号提交）。
+      # 这样 Upload to Release 和 sync-lsposed 读到的都是手工 Notes，镜像仓库不再拿到默认安装说明。
+      # fallback：手动打 tag 没写 RELEASE_NOTES.md 时，生成默认安装说明，避免 CI 失败。
+      - name: Prepare release notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          if [ ! -f RELEASE_NOTES.md ]; then
+            cat > RELEASE_NOTES.md <<'EOF'
+            ## 安装
+
+            1. 确保已安装 LSPosed。
+            2. 从下方 Assets 下载 `Ala Mobile Tool v*.apk`。
+            3. 在 LSPosed 中勾选 **Ala Mobile** 作为作用域。
+            4. 启动游戏，进入游戏后点击左上角「工具」按钮显示 overlay。
+            EOF
+            echo "RELEASE_NOTES.md not found, generated default install notes"
+          else
+            echo "Using committed RELEASE_NOTES.md"
+          fi
+
       - name: Upload to Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
@@ -114,13 +134,7 @@ jobs:
           prerelease: true
           name: ${{ github.ref_name }}
           files: ${{ steps.rename_apk.outputs.apk_path }}
-          body: |
-            ## 安装
-
-            1. 确保已安装 LSPosed。
-            2. 从下方 Assets 下载 `Ala Mobile Tool v*.apk`。
-            3. 在 LSPosed 中勾选 **Ala Mobile** 作为作用域。
-            4. 启动游戏，进入游戏后点击左上角「工具」按钮显示 overlay。
+          body_path: RELEASE_NOTES.md
 
   # 发版后自动把 release 同步到官方 LSPosed 模块镜像仓库。
   # 依赖仓库 secret TARGET_REPO_TOKEN（对 Xposed-Modules-Repo/tools.alamobile.mod 有 admin 权限的 PAT）。
