@@ -3,7 +3,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/LSPosed%20API-102-green" alt="LSPosed API">
-  <img src="https://img.shields.io/badge/version-1.0.0%20Beta%203-orange" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.0%20Beta%204-orange" alt="Version">
   <img src="https://img.shields.io/badge/target-Ala%20Mobile-red" alt="Target">
 </p>
 
@@ -56,7 +56,7 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 
 #### 线性踏板（Pedal Overlay）
 - **三种拓扑**：关闭、单踏板（上半油门/下半刹车）、双踏板（独立油门/刹车控件）
-- **响应曲线**：线性 / 指数（ease-out，指数 0.66 使 ~30% 行程 → ~45% 输出），油门和刹车可分别设置
+- **响应曲线**：线性 / 自定义（多点控制点 + 保单调三次样条），油门和刹车可分别设置
 - **死区与过渡点**：单踏板模式下可调油门/刹车交界处的无效范围（0-20%）和分界线位置（20-80%）
 - **刹车优先仲裁**：双踏板模式下两指同时按下时，刹车值超过过渡点（默认 10%）则刹车优先屏蔽油门
 - **刹车方向反转**：双踏板模式下刹车填充方向可切换（默认从下往上 / 反转后从上往下）
@@ -117,7 +117,7 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 
 #### 版本门控
 - `VersionGate` 精准校验包名（原版 + 共存版）、`versionName` 和 `versionCode`
-- 非 8.0.0（200142）版本拒绝加载 native hook，避免 IL2CPP 偏移不匹配导致崩溃
+- 非 8.0.4（200146）版本拒绝加载 native hook，避免 IL2CPP 偏移不匹配导致崩溃
 
 #### 用户协议（EULA）
 - 强制确认弹窗，按版本号持久化（当前 v2），条款更新重新弹窗
@@ -182,15 +182,15 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 | | 过渡点（单踏板） | 20-80%，油门与刹车区域的分界线 |
 | | 刹车过渡点（双踏板） | 0-20%，刹车优先仲裁的触发阈值 |
 | | 刹车踏板方向反转（双踏板） | 切换填充方向 |
-| 响应曲线 | 油门响应曲线 | 线性 / 拟真（指数） |
-| | 刹车响应曲线 | 线性 / 拟真（指数） |
+| 响应曲线 | 油门响应曲线 | 线性 / 自定义（多点控制点） |
+| | 刹车响应曲线 | 线性 / 自定义（多点控制点） |
 
 ### 设置页
 
 | 功能项 | 说明 |
 |---|---|
 | 启用日志 | 记录模块运行日志 |
-| 导出并分享日志 | 导出日志文件（即将上线） |
+| 导出并分享日志 | 导出当前日志文件并分享 |
 | 清除激活标记 | 删除 Non-root 确认标记与 EULA 标记（filesDir，pm clear 可清） |
 | 用户协议 | 重新查看并确认用户协议 |
 | 关于 | 版本信息 |
@@ -201,7 +201,6 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 
 | 版本 | versionCode | 架构 |
 |---|---|---|
-| 8.0.0 | 200142 | arm64-v8a |
 | 8.0.4 | 200146 | arm64-v8a |
 
 > 其他版本请自行测试。IL2CPP 方法地址随版本变化，非匹配版本无法加载 native hook。
@@ -246,10 +245,10 @@ Ala Mobile Tool (LSPosed 模块 APK)
 
 **技术栈：**
 - 现代 libxposed API 102（min 101）
-- Kotlin 2.4.0 + Jetpack Compose + miuix KMP 0.9.3
+- Kotlin 2.4.10 + Jetpack Compose + miuix KMP 0.9.3
 - ByteDance ShadowHook 2.0.1（UNIQUE 模式）
 - C 语言 IL2CPP 运行时 inline hook
-- AGP 8.9.1 / NDK 26.1.10909125 / Gradle 8.11.1
+- AGP 9.3.1 / NDK 26.1.10909125 / Gradle 9.6.1
 
 ---
 
