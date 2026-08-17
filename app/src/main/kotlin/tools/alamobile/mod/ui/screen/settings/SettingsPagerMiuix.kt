@@ -3,7 +3,6 @@ package tools.alamobile.mod.ui.screen.settings
 import android.widget.Toast
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.add
@@ -17,7 +16,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Article
 import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.runtime.Composable
@@ -43,7 +41,6 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
-import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.preference.ArrowPreference
@@ -66,7 +63,6 @@ fun SettingsPagerMiuix(
     uiState: ConfigUiState,
     actions: ConfigViewModel,
     bottomInnerPadding: Dp,
-    onOpenAbout: () -> Unit,
 ) {
     val context = LocalContext.current
     val scrollBehavior = MiuixScrollBehavior()
@@ -107,11 +103,7 @@ fun SettingsPagerMiuix(
                         modifier = Modifier.padding(vertical = 12.dp),
                         verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)
                     ) {
-                        // ── Section 1: 日志 ──
-                        SmallTitle(
-                            text = "日志",
-                            insideMargin = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
-                        )
+                        // ── 组 1: 日志 ──
                         Card(modifier = Modifier.fillMaxWidth()) {
                             SwitchPreference(
                                 title = "启用日志",
@@ -144,11 +136,7 @@ fun SettingsPagerMiuix(
                             )
                         }
 
-                        // ── Section 2: 调试 ──
-                        SmallTitle(
-                            text = "调试",
-                            insideMargin = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
-                        )
+                        // ── 组 2: 激活 / 协议 ──
                         Card(modifier = Modifier.fillMaxWidth()) {
                             ArrowPreference(
                                 title = "清除激活标记",
@@ -181,19 +169,6 @@ fun SettingsPagerMiuix(
                                     EulaManager.clear(context)
                                     showEulaReconfirm = true
                                 }
-                            )
-                            ArrowPreference(
-                                title = "关于",
-                                summary = "Ala Mobile Tool 模块信息",
-                                startAction = {
-                                    Icon(
-                                        Icons.Rounded.Info,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = null,
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                onClick = onOpenAbout
                             )
                         }
                     }

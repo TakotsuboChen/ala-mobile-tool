@@ -123,7 +123,7 @@ fun MainScreen(
                         when (page) {
                             0 -> OverviewPager(navController, bottomInnerPadding, isCurrentPage)
                             1 -> ConfigurePager(navController, bottomInnerPadding, isCurrentPage)
-                            2 -> SettingsPager(navController, bottomInnerPadding)
+                            2 -> SettingsPager(bottomInnerPadding)
                         }
                     }
                 }
