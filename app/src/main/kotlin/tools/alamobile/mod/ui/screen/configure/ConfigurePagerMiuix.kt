@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bolt
-import androidx.compose.material.icons.rounded.DisplaySettings
 import androidx.compose.material.icons.rounded.Flip
 import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.MusicNote
@@ -188,20 +187,6 @@ fun ConfigurePagerMiuix(
                             insideMargin = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
                         )
                         Card(modifier = Modifier.fillMaxWidth()) {
-                            SwitchPreference(
-                                title = "显示悬浮窗",
-                                summary = "在游戏中显示踏板和换挡悬浮窗",
-                                startAction = {
-                                    Icon(
-                                        Icons.Rounded.DisplaySettings,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = null,
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                checked = uiState.showOverlay,
-                                onCheckedChange = actions::setShowOverlay
-                            )
                             OverlayDropdownPreference(
                                 title = "线性踏板",
                                 summary = "悬浮窗踏板替代游戏默认输入",
@@ -281,6 +266,14 @@ fun ConfigurePagerMiuix(
                         }
 
                         // ── Section 3: 响应曲线 ──
+                        // 线性踏板关闭（OFF）时整个响应曲线 Section 也收回——
+                        // 没有踏板就没有曲线可调。
+                        AnimatedVisibility(
+                            visible = uiState.pedalMode != ModConfig.PedalMode.OFF,
+                            enter = expandVertically() + fadeIn(),
+                            exit = shrinkVertically() + fadeOut()
+                        ) {
+                            Column {
                         SmallTitle(
                             text = "响应曲线",
                             insideMargin = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
@@ -355,6 +348,8 @@ fun ConfigurePagerMiuix(
                                         onPointsChange = actions::setBrakeCurvePoints,
                                     )
                                 }
+                            }
+                        }
                             }
                         }
                     }

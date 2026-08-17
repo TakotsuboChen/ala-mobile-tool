@@ -253,7 +253,7 @@ class AlaMobileModule : XposedModule() {
         val settings = if (context != null) {
             try {
                 val s = ModConfig.readFromTargetProcess(context)
-                logX(Log.INFO, TAG, "onPackageReady read config: pedalMode=${s.pedalMode} showOverlay=${s.showOverlay} enableUnlock=${s.enableUnlock} enableManualShift=${s.enableManualShift} enableTc=${s.enableTc} enableAbs=${s.enableAbs}")
+                logX(Log.INFO, TAG, "onPackageReady read config: pedalMode=${s.pedalMode} enableUnlock=${s.enableUnlock} enableManualShift=${s.enableManualShift} enableTc=${s.enableTc} enableAbs=${s.enableAbs}")
                 s
             } catch (e: Throwable) {
                 logX(Log.ERROR, TAG, "Failed to read config, using defaults: ${e.message}")
@@ -264,7 +264,6 @@ class AlaMobileModule : XposedModule() {
         val pedalMode = settings?.pedalMode ?: ModConfig.PedalMode.SINGLE
         val enableControlReplacement = pedalMode != ModConfig.PedalMode.OFF
         val enableAutoDrs = settings?.enableAutoDrs ?: false
-        val showOverlay = settings?.showOverlay ?: true
         // 手动换挡开 ⇒ 关闭游戏自动换挡（disableAutoGear 由 enableManualShift 派生）。
         // 当前 enableManualShift 默认 false，所以 disableAutoGear=false，游戏自动换挡保持原样。
         val enableManualShift = settings?.enableManualShift ?: false
@@ -333,7 +332,7 @@ class AlaMobileModule : XposedModule() {
             val ctx = getAppContext()
             logX(Log.INFO, TAG, "Delayed context: $ctx")
 
-            if (ctx != null && showOverlay) {
+            if (ctx != null) {
                 try {
                     val overlayManager = OverlayManager(ctx)
                     overlayManager.showOverlays()

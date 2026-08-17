@@ -45,7 +45,6 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
             _uiState.value = ConfigUiState(
                 pedalMode = s.pedalMode,
                 enableAutoDrs = s.enableAutoDrs,
-                showOverlay = s.showOverlay,
                 disableAutoGear = s.disableAutoGear,
                 enableManualShift = s.enableManualShift,
                 enableUnlock = s.enableUnlock,
@@ -70,7 +69,6 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
         return ConfigUiState(
             pedalMode = s.pedalMode,
             enableAutoDrs = s.enableAutoDrs,
-            showOverlay = s.showOverlay,
             disableAutoGear = s.disableAutoGear,
             enableManualShift = s.enableManualShift,
             enableUnlock = s.enableUnlock,
@@ -105,7 +103,6 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setPedalMode(v: ModConfig.PedalMode) { _uiState.value = _uiState.value.copy(pedalMode = v); scheduleSave() }
     fun setEnableAutoDrs(v: Boolean) { _uiState.value = _uiState.value.copy(enableAutoDrs = v); scheduleSave() }
-    fun setShowOverlay(v: Boolean) { _uiState.value = _uiState.value.copy(showOverlay = v); scheduleSave() }
     fun setDisableAutoGear(v: Boolean) { _uiState.value = _uiState.value.copy(disableAutoGear = v); scheduleSave() }
     fun setEnableManualShift(v: Boolean) { _uiState.value = _uiState.value.copy(enableManualShift = v); scheduleSave() }
     fun setEnableUnlock(v: Boolean) { _uiState.value = _uiState.value.copy(enableUnlock = v); scheduleSave() }
@@ -139,7 +136,6 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
 data class ConfigUiState(
     val pedalMode: ModConfig.PedalMode,
     val enableAutoDrs: Boolean,
-    val showOverlay: Boolean,
     val disableAutoGear: Boolean,
     val enableManualShift: Boolean,
     val enableUnlock: Boolean,
@@ -159,7 +155,6 @@ data class ConfigUiState(
     fun toSettings(): ModConfig.Settings = ModConfig.Settings(
         pedalMode = pedalMode,
         enableAutoDrs = enableAutoDrs,
-        showOverlay = showOverlay,
         disableAutoGear = disableAutoGear,
         enableManualShift = enableManualShift,
         enableUnlock = enableUnlock,

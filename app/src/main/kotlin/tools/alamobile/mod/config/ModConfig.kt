@@ -45,7 +45,6 @@ object ModConfig {
 
     // Feature toggles
     const val KEY_ENABLE_AUTO_DRS = "enable_auto_drs"
-    const val KEY_SHOW_OVERLAY = "show_overlay"
     const val KEY_DISABLE_AUTO_GEAR = "disable_auto_gear"
     const val KEY_ENABLE_MANUAL_SHIFT = "enable_manual_shift"
     const val KEY_ENABLE_UNLOCK = "enable_unlock"
@@ -214,7 +213,6 @@ object ModConfig {
 
     private object Defaults {
         const val ENABLE_AUTO_DRS = false
-        const val SHOW_OVERLAY = true
         const val DISABLE_AUTO_GEAR = false
         const val ENABLE_MANUAL_SHIFT = false
         const val ENABLE_UNLOCK = false
@@ -299,10 +297,6 @@ object ModConfig {
                 // 自动 DRS 功能未实现，强制读成 false，忽略任何旧配置里的 true，
                 // 避免老用户升级后开关显示"开"但实际无效果。
                 enableAutoDrs = false,
-                showOverlay = json.optBoolean(
-                    KEY_SHOW_OVERLAY,
-                    Defaults.SHOW_OVERLAY
-                ),
                 disableAutoGear = json.optBoolean(
                     KEY_DISABLE_AUTO_GEAR,
                     Defaults.DISABLE_AUTO_GEAR
@@ -379,7 +373,6 @@ object ModConfig {
         val json = JSONObject().apply {
             put(KEY_PEDAL_MODE, settings.pedalMode.value)
             put(KEY_ENABLE_AUTO_DRS, settings.enableAutoDrs)
-            put(KEY_SHOW_OVERLAY, settings.showOverlay)
             put(KEY_DISABLE_AUTO_GEAR, settings.disableAutoGear)
             put(KEY_ENABLE_MANUAL_SHIFT, settings.enableManualShift)
             put(KEY_ENABLE_UNLOCK, settings.enableUnlock)
@@ -644,7 +637,6 @@ object ModConfig {
             Settings(
                 pedalMode = migratePedalMode(j),
                 enableAutoDrs = false,
-                showOverlay = j.optBoolean(KEY_SHOW_OVERLAY, Defaults.SHOW_OVERLAY),
                 disableAutoGear = j.optBoolean(KEY_DISABLE_AUTO_GEAR, Defaults.DISABLE_AUTO_GEAR),
                 enableManualShift = j.optBoolean(KEY_ENABLE_MANUAL_SHIFT, Defaults.ENABLE_MANUAL_SHIFT),
                 enableUnlock = j.optBoolean(KEY_ENABLE_UNLOCK, Defaults.ENABLE_UNLOCK),
@@ -754,7 +746,6 @@ object ModConfig {
         return Settings(
             pedalMode = Defaults.PEDAL_MODE,
             enableAutoDrs = Defaults.ENABLE_AUTO_DRS,
-            showOverlay = Defaults.SHOW_OVERLAY,
             disableAutoGear = Defaults.DISABLE_AUTO_GEAR,
             enableManualShift = Defaults.ENABLE_MANUAL_SHIFT,
             enableUnlock = Defaults.ENABLE_UNLOCK,
@@ -781,7 +772,6 @@ object ModConfig {
     data class Settings(
         val pedalMode: PedalMode,
         val enableAutoDrs: Boolean,
-        val showOverlay: Boolean,
         val disableAutoGear: Boolean,
         val enableManualShift: Boolean,
         val enableUnlock: Boolean,

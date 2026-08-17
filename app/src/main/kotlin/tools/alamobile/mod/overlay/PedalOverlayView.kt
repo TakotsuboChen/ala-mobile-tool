@@ -35,7 +35,6 @@ class PedalOverlayView(
     private val settings: ModConfig.Settings = ModConfig.Settings(
         pedalMode = ModConfig.PedalMode.SINGLE,
         enableAutoDrs = true,
-        showOverlay = true,
         disableAutoGear = false,
         enableManualShift = false,
         enableUnlock = false,
