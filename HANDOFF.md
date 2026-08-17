@@ -1,25 +1,27 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-08-18T00:30:00+08:00 · Git HEAD: `d115618`
+生成时间: 2026-08-18T01:46:43+08:00 · Git HEAD: `2626344`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: `main` @ `d115618` (2026-08-18)
-- 漂移检查: `git rev-parse HEAD` 是否仍 = `d115618`；变了说明快照可能过期
+- 锚点: `main` @ `2626344` (2026-08-18)
+- 漂移检查: `git rev-parse HEAD` 是否仍 = `2626344`；变了说明快照可能过期
+- 待重探的 [?]: 见下方标记
 - 先读: `HANDOFF.md` + `CLAUDE.md`
 
 ## 1. 当前目标
 
-**修复 EULA 启动门控缺失 + 协议弹窗体验改进**：重构时丢失的 EULA 启动检查恢复到概览页 popupHost；协议弹窗需滚到底才能点同意；激活弹窗不再抢盖 EULA。已完成并提交、已 adb 安装。遗留：真机验证待用户确认；M45 的 position 合并修复、janky 根因仍待排查。
+**修复"清除激活标记"联动清除 EULA 同意状态的 bug**：`LsposedStatus.clearAll` 原本显式调用 `EulaManager.clear`，导致用户只想重置激活状态时协议同意标记被一并清掉、下次启动重新弹协议。已修复并提交、已 adb 安装。遗留：真机验证待用户确认；M45-M47 的真机验证项仍待确认。
 
 ## 2. 已验证状态 — 工作实际停在哪
 
-- [V] **EULA 启动门控恢复** — `d115618` 改动 `OverviewPagerMiuix.kt`：加 `eulaAccepted` state（启动时 `EulaManager.isAccepted(context)`），在 `Scaffold.popupHost` 里先渲染 `EulaDialog` 再渲染 `MiuixPopupHost()`，未同意时 `ActivationCard` 不弹激活弹窗（`eulaAccepted` 门控），点同意后 `LaunchedEffect(eulaAccepted)` 补弹激活弹窗。
-- [V] **协议弹窗滚到底才能同意** — `d115618` 改动 `EulaDialog.kt`：`rememberScrollState()` + `derivedStateOf` 计算 `hasScrolledToBottom`（`maxValue==0 || value>=maxValue`），"同意"按钮 `enabled = hasScrolledToBottom`，未到底文字"请先阅读协议"、到底变"同意"。
-- [V] **编译通过** — `./gradlew :app:compileDebugKotlin` → BUILD SUCCESSFUL（1s），EXIT_CODE=0。
-- [V] **构建通过** — `./gradlew :app:assembleDebug` → BUILD SUCCESSFUL（2s）。
-- [V] **adb 安装成功** — `adb install -r app-debug.apk` → Success（设备 `381QYFCN22B9A`）。
+- [V] **根因定位** — `LsposedStatus.kt:177`（旧行号）`clearAll` 内 `EulaManager.clear(context)` 显式调用，把激活清除与 EULA 重置耦合。存储层早已分离（`nonroot_confirmed.flag` vs `eula_accepted_version.flag`），逻辑层仍耦合。
+- [V] **修复** — `b99f83b` 改动 `LsposedStatus.kt`：移除 `clearAll` 里的 `EulaManager.clear(context)` 调用，补注释说明两者语义独立。`EulaManager.kt`：更新 `clear` 的 KDoc，去掉"由 clearAll 调用"的过时说明。
+- [V] **编译通过** — `./gradlew :app:compileDebugKotlin` → BUILD SUCCESSFUL（2s），EXIT_CODE=0。
+- [V] **构建通过** — `./gradlew :app:assembleDebug` → BUILD SUCCESSFUL（1s）。
+- [V] **adb 安装成功** — `adb install -r app/build/outputs/apk/debug/app-debug.apk` → Success。
 - [V] **工作区干净** — `git status` 无未提交改动，`main` 与 `origin/main` 同步。
+- [?] **M47 EULA 启动门控** — `d115618` 已提交，真机验证未确认。
 - [?] **M46 设置页 UI 重组** — `41ec5ee` 已提交，真机验证未确认。
 - [?] **M45 移除"显示悬浮窗"开关 + 响应曲线收回** — `7912ac3` 已提交，真机验证未确认。
 - [?] **position 合并修复** — `resolveLatestSettings()` 的 `mergePositionFromLocalPublic()` 公开化，用户未确认是否生效。
@@ -27,17 +29,15 @@
 
 ### 测试/build 输出（本次交接 run 的真实输出）
 ```
-./gradlew :app:compileDebugKotlin → BUILD SUCCESSFUL in 1s, EXIT_CODE=0
-./gradlew :app:assembleDebug → BUILD SUCCESSFUL in 2s
-adb install -r app-debug.apk → Success（设备 381QYFCN22B9A）
+./gradlew :app:compileDebugKotlin → BUILD SUCCESSFUL in 2s, EXIT_CODE=0
+./gradlew :app:assembleDebug → BUILD SUCCESSFUL in 1s
+adb install -r app/build/outputs/apk/debug/app-debug.apk → Success
 ```
 
 ## 3. 决策与理由
 
-- **EULA 门控放概览页 popupHost 而非 ConfigActivity 白屏阻断** [V]——用户明确要求"进去在概览页弹窗，不要白屏"。`OverviewPagerMiuix` 的 `Scaffold.popupHost` 先渲染 `EulaDialog` 再渲染 `MiuixPopupHost()`，EULA 叠在主界面之上。否决方案：ConfigActivity 里 `if (!eulaAccepted) EulaDialog else navDisplay`（白屏阻断，用户否决）。
-- **用 `eulaAccepted` 门控激活弹窗而非靠 zIndex** [V]——miuix `OverlayDialog` 的 zIndex 按 `nextZIndex++` 递增，后加入 dialogStates 的弹窗 zIndex 更高。`ActivationCard` 的 `LaunchedEffect` 在 EULA 之后完成检测，激活弹窗后加入、zIndex 反超盖住 EULA。用 `eulaAccepted` 参数传给 `ActivationCard`，未同意时不设 `showNonRootDialog = true`，从源头阻断。
-- **`LaunchedEffect(eulaAccepted)` 补弹激活弹窗** [V]——`LaunchedEffect(Unit)` 只执行一次，EULA 未同意时检测已完成但没弹窗。用户点同意后 `eulaAccepted` 变 true，此 effect 补弹激活弹窗（如果 status 已是 INACTIVE）。
-- **"同意"按钮文字"请先阅读协议"** [V]——6 字，不换行。试过"请先阅读完协议"（7 字，"议"挤到第二行）、"请先读完协议"（6 字）、"滑到底部解锁"（6 字），最终用户定"请先阅读协议"。
+- **从 `clearAll` 移除 `EulaManager.clear` 而非保留联动** [V]——激活标记与 EULA 同意是两个语义独立的设置项，存储层早已分离（各自 filesDir flag 文件），设置页也有独立的"用户协议"入口处理 EULA 重置。`clearAll` 联动清 EULA 是早期单入口时代的遗留，无设计意图支撑。否决方案：保留联动但在 UI 上拆提示——增加复杂度且语义仍混乱。
+- **同步更新 README 描述** [V]——README L193 原写"删除 Non-root 确认标记与 EULA 标记"，修复后不准确，改为"不碰 EULA 同意状态"。
 
 ## 4. 失败的尝试 — 不要再试
 
@@ -63,16 +63,18 @@ adb install -r app-debug.apk → Success（设备 381QYFCN22B9A）
 
 ## 6. 下一步（有序）
 
-1. **真机验证 EULA 启动门控** — 用户确认：首次/未同意状态打开模块 → 概览页弹协议（非白屏）；EULA 弹窗不被激活弹窗抢盖；"同意"按钮初始灰显"请先阅读协议"，滑到底变"同意"可点击；点同意后 EULA 消失，激活弹窗（如 INACTIVE）随后出现。
-2. **真机验证设置页"不同意"后重开** — 用户确认：设置页点"不同意"退出后重新打开模块 → 概览页弹 EULA。
-3. **真机验证 M46 设置页 UI 重组** — 用户确认：设置页无"日志"/"调试"小标题、无"关于"卡片，两组功能项布局正确。
-4. **真机验证 M45 改动** — 用户确认："显示悬浮窗"开关已移除；线性踏板关闭时响应曲线收起。
-5. **验证 position 合并修复** — 用户确认"切双踏板再切回单踏板，位置/大小是否保持"。
-6. **继续排查 janky 根因** — R8 映射文件对比（KSU dex=5.2MB vs 我们 2MB）。
+1. **真机验证本次修复** — 用户确认：设置页点"清除激活标记" → Toast"已清除激活标记" → 重开模块**不应弹协议**（EULA 仍已同意）；点"用户协议"入口才会重新弹协议确认。
+2. **真机验证 M47 EULA 启动门控** — 用户确认：首次/未同意状态打开模块 → 概览页弹协议（非白屏）；EULA 弹窗不被激活弹窗抢盖；"同意"按钮初始灰显"请先阅读协议"，滑到底变"同意"可点击；点同意后 EULA 消失，激活弹窗（如 INACTIVE）随后出现。
+3. **真机验证设置页"不同意"后重开** — 用户确认：设置页点"不同意"退出后重新打开模块 → 概览页弹 EULA。
+4. **真机验证 M46 设置页 UI 重组** — 用户确认：设置页无"日志"/"调试"小标题、无"关于"卡片，两组功能项布局正确。
+5. **真机验证 M45 改动** — 用户确认："显示悬浮窗"开关已移除；线性踏板关闭时响应曲线收起。
+6. **验证 position 合并修复** — 用户确认"切双踏板再切回单踏板，位置/大小是否保持"。
+7. **继续排查 janky 根因** — R8 映射文件对比（KSU dex=5.2MB vs 我们 2MB）。
 
 ## 7. 留给用户的开放问题
 
-- EULA 启动门控 + 滚到底才能同意的真机表现是否满意？
+- 本次修复（清除激活标记不再清 EULA）的真机表现是否满意？
+- M47 EULA 启动门控 + 滚到底才能同意的真机表现是否满意？
 - 设置页点"不同意"后退出重开是否正确弹协议？
 - M46 设置页 UI 重组（两组无小标题）的表现是否满意？
 - M45 改动（移除"显示悬浮窗"开关 + 响应曲线收回）的表现是否满意？
