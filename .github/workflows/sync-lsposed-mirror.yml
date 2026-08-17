@@ -141,3 +141,27 @@ jobs:
             fi
             echo "::notice::Synced $TAG -> $MIRROR (tag=$NEW_TAG)"
           done
+
+      # 同步 README 到镜像仓库，保留 LSPosed 规范的 Source URL 结尾。
+      # 源仓库 README 不含 Source URL 行，镜像仓库需要追加。
+      - name: Sync README to mirror
+        env:
+          GH_TOKEN: ${{ secrets.TARGET_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          SRC="${{ github.repository }}"
+          MIRROR="${{ steps.resolve.outputs.mirror }}"
+          # 读源仓库 README
+          gh api "repos/$SRC/contents/README.md" --jq '.content' | base64 -d > /tmp/readme_src.md
+          # 追加 Source URL 结尾（幂等：已存在则不重复追加）
+          if ! grep -q "Source URL:" /tmp/readme_src.md; then
+            printf '\n---\n\n**Source URL:** https://github.com/%s\n' "$SRC" >> /tmp/readme_src.md
+          fi
+          # 读镜像仓库当前 README 的 sha（PUT 需要）
+          MIRROR_SHA=$(gh api "repos/$MIRROR/contents/README.md" --jq '.sha')
+          # 用 GitHub API 更新镜像仓库 README
+          gh api -X PUT "repos/$MIRROR/contents/README.md" \
+            -f message="Sync README from $SRC" \
+            -f content="$(base64 -w0 /tmp/readme_src.md)" \
+            -f sha="$MIRROR_SHA" >/dev/null
+          echo "::notice::Synced README -> $MIRROR"
