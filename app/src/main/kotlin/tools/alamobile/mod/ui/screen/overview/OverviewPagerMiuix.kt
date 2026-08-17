@@ -53,6 +53,7 @@ import kotlinx.coroutines.withContext
 import tools.alamobile.mod.BuildConfig
 import tools.alamobile.mod.EulaManager
 import tools.alamobile.mod.LsposedStatus
+import tools.alamobile.mod.ui.EulaDialog
 import tools.alamobile.mod.ui.viewmodel.ConfigViewModel
 import tools.alamobile.mod.util.openExternalUrl
 import top.yukonga.miuix.kmp.basic.BasicComponent
@@ -67,6 +68,7 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
+import top.yukonga.miuix.kmp.utils.MiuixPopupUtils.Companion.MiuixPopupHost
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
@@ -87,11 +89,18 @@ fun OverviewPagerMiuix(
     actions: ConfigViewModel,
     bottomInnerPadding: Dp,
 ) {
+    val context = LocalContext.current
     val scrollBehavior = MiuixScrollBehavior()
     val enableBlur = tools.alamobile.mod.ui.theme.LocalEnableBlur.current
     val backdrop = tools.alamobile.mod.ui.util.rememberBlurBackdrop(enableBlur)
     val blurActive = backdrop != null
     val barColor = if (blurActive) Color.Transparent else colorScheme.surface
+
+    // EULA 启动门控：未同意当前版本协议时，在概览页 Scaffold popupHost 里先渲染 EULA 弹窗，
+    // 优先级高于激活状态弹窗（NonRootConfirmDialog）。点「同意」后才放行激活弹窗。
+    var eulaAccepted by remember {
+        mutableStateOf(EulaManager.isAccepted(context))
+    }
 
     Scaffold(
         topBar = {
@@ -103,7 +112,22 @@ fun OverviewPagerMiuix(
                 )
             }
         },
-        popupHost = { },
+        popupHost = {
+            // EULA 弹窗先于 MiuixPopupHost 渲染：zIndex 天然高于激活弹窗，
+            // 未同意时盖在激活弹窗之上；点同意后 eulaAccepted=true，EULA 消失放行激活弹窗。
+            if (!eulaAccepted) {
+                EulaDialog(
+                    sections = EulaManager.EULA_SECTIONS,
+                    footer = EulaManager.EULA_FOOTER,
+                    onAccept = {
+                        EulaManager.accept(context)
+                        eulaAccepted = true
+                    },
+                    onExit = { (context as? android.app.Activity)?.finish() }
+                )
+            }
+            MiuixPopupHost()
+        },
         contentWindowInsets = WindowInsets.systemBars.add(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal),
     ) { innerPadding ->
         Box(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
@@ -123,7 +147,7 @@ fun OverviewPagerMiuix(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        ActivationCard()
+                        ActivationCard(eulaAccepted = eulaAccepted)
                         DeviceInfoCard()
                         LinksCard()
                         Spacer(modifier = Modifier.height(12.dp))
@@ -135,7 +159,7 @@ fun OverviewPagerMiuix(
 }
 
 @Composable
-private fun ActivationCard() {
+private fun ActivationCard(eulaAccepted: Boolean) {
     val context = LocalContext.current
     // 照搬 KernelSU HomeScreen：初始状态用 null（不阻塞），LaunchedEffect 里异步加载。
     // 之前 remember{ LsposedStatus.evaluate(awaitService=false) } 虽然不做 3s 轮询，
@@ -156,7 +180,15 @@ private fun ActivationCard() {
             LsposedStatus.evaluate(context, awaitService = true)
         }
         status = evaluated
-        if (evaluated == LsposedStatus.Status.INACTIVE) {
+        if (evaluated == LsposedStatus.Status.INACTIVE && eulaAccepted) {
+            showNonRootDialog = true
+        }
+    }
+
+    // EULA 同意后补弹激活弹窗：LaunchedEffect(Unit) 只执行一次，
+    // 若 EULA 未同意时检测已完成（status=INACTIVE），用户点同意后需由此 effect 补弹。
+    LaunchedEffect(eulaAccepted) {
+        if (eulaAccepted && status == LsposedStatus.Status.INACTIVE) {
             showNonRootDialog = true
         }
     }

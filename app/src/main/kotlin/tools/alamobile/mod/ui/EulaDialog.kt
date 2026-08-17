@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -25,10 +28,11 @@ import tools.alamobile.mod.EulaManager.EulaSection
 /**
  * 用户条款确认弹窗。
  *
- * 弹出时机与激活状态弹窗（NonRootConfirmDialog）一致：在 [tools.alamobile.mod.ui.ConfigMainScreen]
- * 渲染之后、作为 OverlayDialog 弹出，且优先于激活状态弹窗显示（[configAccepted] 控制顺序）。
+ * 弹出时机：在概览页（[tools.alamobile.mod.ui.screen.overview.OverviewPagerMiuix]）的
+ * Scaffold popupHost 里渲染，优先级高于激活状态弹窗（NonRootConfirmDialog）。
+ * 未同意时激活弹窗不触发（eulaAccepted 门控），点「同意」后放行。
  *
- * 点「不同意」或按返回键触发 [onExit]（finish 退出 Activity）；点「同意」后才进入正常使用。
+ * 「同意」按钮需滚到底部阅读完才可点击；点「不同意」或按返回键触发 [onExit]（finish 退出 Activity）。
  */
 @Composable
 fun EulaDialog(
@@ -44,11 +48,18 @@ fun EulaDialog(
         content = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 // 可滚动条款正文
+                val scrollState = rememberScrollState()
+                // maxValue==0 时视口容得下（无需滚动）也视为已读完。
+                val hasScrolledToBottom by remember {
+                    derivedStateOf {
+                        scrollState.maxValue == 0 || scrollState.value >= scrollState.maxValue
+                    }
+                }
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(360.dp)
-                        .verticalScroll(rememberScrollState())
+                        .verticalScroll(scrollState)
                         .padding(horizontal = 4.dp)
                 ) {
                     // 章节：粗体小标题 + 正文
@@ -88,9 +99,10 @@ fun EulaDialog(
                     )
                     Spacer(modifier = Modifier.width(20.dp))
                     TextButton(
-                        text = "同意",
+                        text = if (hasScrolledToBottom) "同意" else "请先阅读协议",
                         onClick = onAccept,
                         modifier = Modifier.weight(1f),
+                        enabled = hasScrolledToBottom,
                         colors = ButtonDefaults.textButtonColorsPrimary()
                     )
                 }
