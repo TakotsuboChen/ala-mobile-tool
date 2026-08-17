@@ -303,6 +303,9 @@ tools/run-il2cpp-dumper.sh
 <details>
 <summary>展开查看</summary>
 
+**v1.0.0 Beta 4**（2026-08-17）
+> 新增自定义油门/刹车响应曲线编辑器（多点控制点 + 保单调三次样条）；修复配置修改后不立即生效（daemon 旧值覆盖新配置）、切换踏板模式后位置/大小丢失、native 库加载失败（移除 useLegacyPackaging）；适配 Ala Mobile 8.0.4（versionCode 200146，8.0.0 用户收到不支持警告）；底栏快速切换与切页掉帧修复。CI 自动构建 + tag 触发 Pre-release。
+
 **v1.0.0 Beta 3**（2026-08-12）
 > 配置页 UI 视觉大改。底栏切 tab 动画改为 KernelSU 式 `animateScrollBy`（连点不卡不错乱）；下滑顶栏折叠、标题居中；顶栏/底栏加毛玻璃（blurRadius=12f）；新增 miuix-blur 依赖。新增用户协议强制确认弹窗、配置页开关图标自定义、主菜单音乐替换（Hans Zimmer - F1，320kbps）、原生 TC 开关；修复 AI 车油门误控、LSPosed 激活判定误判（改 `frameworkName`）、NPatch 非 Root 配置跨进程同步、WSL2 Kotlin 编译卡死。真实设备已验证。
 
