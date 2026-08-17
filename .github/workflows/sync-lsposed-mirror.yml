@@ -130,7 +130,7 @@ jobs:
             # 幂等：镜像已有该 NEW_TAG 则更新，否则创建
             if gh release view "$NEW_TAG" --repo "$MIRROR" >/dev/null 2>&1; then
               gh release edit "$NEW_TAG" --repo "$MIRROR" \
-                --name "$NAME" --notes-file /tmp/body.md --prerelease="$PRERELEASE"
+                --title "$NAME" --notes-file /tmp/body.md --prerelease="$PRERELEASE"
               for a in $(gh release view "$NEW_TAG" --repo "$MIRROR" --json assets -q '.assets[] | select(.name|endswith(".apk")) | .name'); do
                 gh release delete-asset "$NEW_TAG" "$a" --repo "$MIRROR" || true
               done
