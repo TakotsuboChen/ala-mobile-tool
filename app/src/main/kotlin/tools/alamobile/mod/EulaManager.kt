@@ -113,8 +113,9 @@ object EulaManager {
     /**
      * 清除 EULA 接受标记（删除 filesDir flag 文件）。
      *
-     * 由 [LsposedStatus.clearAll]（设置页「清除激活标记」）调用：用户手动清除后，
-     * 下次启动会重新弹出用户协议。
+     * 由设置页「用户协议」入口直接调用：用户主动重置协议同意状态后，
+     * 立即重新弹窗确认。**不应**由 [LsposedStatus.clearAll] 联动调用——
+     * 激活标记与协议同意是两个独立的设置项。
      */
     fun clear(context: Context) {
         try {

@@ -171,10 +171,15 @@ object LsposedStatus {
         } catch (_: Throwable) {}
     }
 
-    /** "设置 → 清除激活标记"用：彻底清掉所有激活痕迹。 */
+    /**
+     * "设置 → 清除激活标记"用：彻底清掉所有激活痕迹。
+     *
+     * **只清激活状态**，不碰 EULA 同意标记——两者语义独立，设置页有单独的
+     * "用户协议"入口负责重置协议同意状态。早期版本曾在此调用 [EulaManager.clear]，
+     * 导致用户只想重置激活时协议同意状态被一并清掉（下次启动重新弹协议）。
+     */
     fun clearAll(context: Context) {
         clearNonRootConfirmed(context)
-        EulaManager.clear(context)
         // 旧版本（property/daemon module_loaded 路径）残留清理，向后兼容。
         // 新方案下这两个标记已不再写，但用户可能从旧版升级，清掉避免迷惑。
         val service = App.xposedService
