@@ -61,7 +61,7 @@ fun SupportDialog(
 
     OverlayDialog(
         show = show,
-        title = "支持开发",
+        title = "向开发者捐赠",
         onDismissRequest = {
             pendingAction = { }
             onRequestClose()

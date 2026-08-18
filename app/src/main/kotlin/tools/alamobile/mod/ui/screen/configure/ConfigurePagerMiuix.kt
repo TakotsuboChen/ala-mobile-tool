@@ -281,7 +281,7 @@ fun ConfigurePagerMiuix(
                         Card(modifier = Modifier.fillMaxWidth()) {
                             OverlayDropdownPreference(
                                 title = "油门响应曲线",
-                                summary = "油门行程到实际输出的映射方式",
+                                summary = "油门踏板控件行程到游戏原生油门的映射方式",
                                 items = ModConfig.PedalCurve.entries.map { curveName(it) },
                                 startAction = {
                                     Icon(
@@ -318,7 +318,7 @@ fun ConfigurePagerMiuix(
                             }
                             OverlayDropdownPreference(
                                 title = "刹车响应曲线",
-                                summary = "刹车行程到实际输出的映射方式",
+                                summary = "刹车踏板控件行程到游戏原生刹车的映射方式",
                                 items = ModConfig.PedalCurve.entries.map { curveName(it) },
                                 startAction = {
                                     Icon(
