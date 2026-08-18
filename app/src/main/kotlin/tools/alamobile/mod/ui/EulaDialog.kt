@@ -33,18 +33,32 @@ import tools.alamobile.mod.EulaManager.EulaSection
  * 未同意时激活弹窗不触发（eulaAccepted 门控），点「同意」后放行。
  *
  * 「同意」按钮需滚到底部阅读完才可点击；点「不同意」或按返回键触发 [onExit]（finish 退出 Activity）。
+ *
+ * 退出动画：[show] 从 true→false 时 miuix OverlayDialog 会播放退出动画（滑出+渐隐），
+ * 动画结束后触发 [onDismissFinished]，调用方在此回调里执行真正的状态清理/副作用。
+ * 之前 show 硬编码 true、靠父条件直接移除 composable，导致弹窗"啪"地消失无退出动画。
+ *
+ * @param show 控制弹窗显示/隐藏，false 时触发退出动画。
+ * @param onAccept 用户点「同意」——调用方应把 show 翻成 false（触发退出动画），
+ *   在 [onDismissFinished] 里做真正的 accept 逻辑。
+ * @param onExit 用户点「不同意」/返回键——调用方应把 show 翻成 false，
+ *   在 [onDismissFinished] 里做真正的 exit 逻辑。
+ * @param onDismissFinished 退出动画播完的回调，在此执行真正的状态变更和副作用。
  */
 @Composable
 fun EulaDialog(
     sections: List<EulaSection>,
     footer: String,
+    show: Boolean,
     onAccept: () -> Unit,
-    onExit: () -> Unit
+    onExit: () -> Unit,
+    onDismissFinished: () -> Unit
 ) {
     OverlayDialog(
-        show = true,
+        show = show,
         title = "用户协议",
         onDismissRequest = onExit,
+        onDismissFinished = onDismissFinished,
         content = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 // 可滚动条款正文

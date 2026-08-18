@@ -28,11 +28,13 @@ import androidx.compose.material.icons.rounded.CheckCircleOutline
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.VolunteerActivism
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,12 +51,19 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import tools.alamobile.mod.BuildConfig
 import tools.alamobile.mod.EulaManager
 import tools.alamobile.mod.LsposedStatus
 import tools.alamobile.mod.ui.EulaDialog
+import tools.alamobile.mod.ui.SupportDialog
+import tools.alamobile.mod.ui.UpdateDialog
 import tools.alamobile.mod.ui.viewmodel.ConfigViewModel
+import tools.alamobile.mod.update.UpdateCheckResult
+import tools.alamobile.mod.update.UpdateChecker
+import tools.alamobile.mod.update.UpdateInfo
+import tools.alamobile.mod.update.UpdatePreferences
 import tools.alamobile.mod.util.openExternalUrl
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -101,6 +110,45 @@ fun OverviewPagerMiuix(
     var eulaAccepted by remember {
         mutableStateOf(EulaManager.isAccepted(context))
     }
+    // OverlayDialog show 驱动退出动画：关闭时先把 eulaDialogVisible 翻 false 触发动画，
+    // onDismissFinished 回调里再执行真正的状态变更。
+    var eulaDialogVisible by remember { mutableStateOf(true) }
+    var pendingEulaAction by remember { mutableStateOf<() -> Unit>({ }) }
+
+    // ── 更新检查状态 ──
+    // 弹窗优先级：EULA > 激活 > 更新。更新弹窗只在 EULA 已同意时才触发。
+    var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
+    var showUpdateDialog by remember { mutableStateOf(false) }
+    var updateDialogVisible by remember { mutableStateOf(false) }
+    var isCheckingUpdate by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    // 启动时自动检查更新 + 清理旧 APK
+    LaunchedEffect(Unit) {
+        // 清理旧版本 APK（用户已安装新版本时）
+        UpdatePreferences.cleanupOldApkIfNeeded(context, BuildConfig.VERSION_CODE)
+
+        // 等 EULA 同意后再检查更新
+        if (eulaAccepted) {
+            isCheckingUpdate = true
+            val result = UpdateChecker.checkLatest(UpdatePreferences.getChannel(context))
+            isCheckingUpdate = false
+            if (result is UpdateCheckResult.HasUpdate) {
+                val info = result.info
+                if (info.latestVersionCode != null &&
+                    info.latestVersionCode > BuildConfig.VERSION_CODE
+                ) {
+                    // 检查是否被用户跳过
+                    val skipped = UpdatePreferences.getSkippedVersionCode(context)
+                    if (skipped != info.latestVersionCode) {
+                        updateInfo = info
+                        showUpdateDialog = true
+                        updateDialogVisible = true
+                    }
+                }
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -119,14 +167,43 @@ fun OverviewPagerMiuix(
                 EulaDialog(
                     sections = EulaManager.EULA_SECTIONS,
                     footer = EulaManager.EULA_FOOTER,
+                    show = eulaDialogVisible,
                     onAccept = {
-                        EulaManager.accept(context)
-                        eulaAccepted = true
+                        // 先翻 false 触发退出动画，动画结束后 onDismissFinished 执行真正 accept
+                        pendingEulaAction = {
+                            EulaManager.accept(context)
+                            eulaAccepted = true
+                        }
+                        eulaDialogVisible = false
                     },
-                    onExit = { (context as? android.app.Activity)?.finish() }
+                    onExit = {
+                        pendingEulaAction = {
+                            (context as? android.app.Activity)?.finish()
+                        }
+                        eulaDialogVisible = false
+                    },
+                    onDismissFinished = {
+                        pendingEulaAction()
+                    }
                 )
             }
             MiuixPopupHost()
+            // 更新弹窗排最后，zIndex 最低，确保不与 EULA 和激活弹窗打架。
+            if (showUpdateDialog && updateInfo != null) {
+                UpdateDialog(
+                    show = updateDialogVisible,
+                    updateInfo = updateInfo!!,
+                    onRequestClose = { updateDialogVisible = false },
+                    onDismissFinished = {
+                        showUpdateDialog = false
+                    },
+                    onSkipped = {
+                        updateInfo?.latestVersionCode?.let {
+                            UpdatePreferences.skipVersion(context, it)
+                        }
+                    }
+                )
+            }
         },
         contentWindowInsets = WindowInsets.systemBars.add(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal),
     ) { innerPadding ->
@@ -149,7 +226,55 @@ fun OverviewPagerMiuix(
                     ) {
                         ActivationCard(eulaAccepted = eulaAccepted)
                         DeviceInfoCard()
-                        LinksCard()
+                        LinksCard(
+                            onCheckUpdate = {
+                                if (!isCheckingUpdate && eulaAccepted) {
+                                    isCheckingUpdate = true
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "正在检查更新...",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                    scope.launch {
+                                        val result = UpdateChecker.checkLatest(UpdatePreferences.getChannel(context))
+                                        isCheckingUpdate = false
+                                        when (result) {
+                                            is UpdateCheckResult.Failed -> {
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "检查更新失败，请稍后重试",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                            is UpdateCheckResult.NoUpdate -> {
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "当前已是最新版本",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                            is UpdateCheckResult.HasUpdate -> {
+                                                val info = result.info
+                                                if (info.latestVersionCode == null ||
+                                                    info.latestVersionCode <= BuildConfig.VERSION_CODE
+                                                ) {
+                                                    android.widget.Toast.makeText(
+                                                        context,
+                                                        "当前已是最新版本",
+                                                        android.widget.Toast.LENGTH_SHORT
+                                                    ).show()
+                                                } else {
+                                                    // 手动检查：不管是否跳过，有新版本就弹窗
+                                                    updateInfo = info
+                                                    showUpdateDialog = true
+                                                    updateDialogVisible = true
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        )
                         Spacer(modifier = Modifier.height(12.dp))
                     }
                 }
@@ -166,6 +291,11 @@ private fun ActivationCard(eulaAccepted: Boolean) {
     // 但仍然在主线程做文件存在性检查 + SharedPreferences 读取，首次组合时会阻塞。
     var status by remember { mutableStateOf<LsposedStatus.Status?>(null) }
     var showNonRootDialog by remember { mutableStateOf(false) }
+    // OverlayDialog 的 show 驱动退出动画：关闭时先把 dialogVisible 翻 false 触发动画，
+    // onDismissFinished 回调里再清 showNonRootDialog（真正移除 composable）+ 执行副作用。
+    var dialogVisible by remember { mutableStateOf(false) }
+    // 区分关闭原因，onDismissFinished 里据此执行不同副作用。
+    var pendingAction by remember { mutableStateOf<() -> Unit>({ }) }
     val isDark = isSystemInDarkTheme()
 
     // 所有激活状态检测都在 IO 线程：awaitService=false 快速返回 + awaitService=true 轮询升级。
@@ -182,6 +312,7 @@ private fun ActivationCard(eulaAccepted: Boolean) {
         status = evaluated
         if (evaluated == LsposedStatus.Status.INACTIVE && eulaAccepted) {
             showNonRootDialog = true
+            dialogVisible = true
         }
     }
 
@@ -190,6 +321,7 @@ private fun ActivationCard(eulaAccepted: Boolean) {
     LaunchedEffect(eulaAccepted) {
         if (eulaAccepted && status == LsposedStatus.Status.INACTIVE) {
             showNonRootDialog = true
+            dialogVisible = true
         }
     }
 
@@ -219,6 +351,7 @@ private fun ActivationCard(eulaAccepted: Boolean) {
         onClick = {
             if (status == LsposedStatus.Status.INACTIVE) {
                 showNonRootDialog = true
+                dialogVisible = true
             }
         },
         showIndication = true,
@@ -261,25 +394,39 @@ private fun ActivationCard(eulaAccepted: Boolean) {
 
     if (showNonRootDialog) {
         NonRootConfirmDialog(
+            show = dialogVisible,
             onConfirm = {
-                LsposedStatus.confirmNonRoot(context)
-                status = LsposedStatus.evaluate(context, awaitService = false)
-                showNonRootDialog = false
+                // 先把 visible 翻 false 触发退出动画，动画结束后 onDismissFinished 执行真正逻辑
+                pendingAction = {
+                    LsposedStatus.confirmNonRoot(context)
+                    status = LsposedStatus.evaluate(context, awaitService = false)
+                }
+                dialogVisible = false
             },
-            onDismiss = { showNonRootDialog = false }
+            onDismiss = {
+                pendingAction = { }
+                dialogVisible = false
+            },
+            onDismissFinished = {
+                showNonRootDialog = false
+                pendingAction()
+            }
         )
     }
 }
 
 @Composable
 private fun NonRootConfirmDialog(
+    show: Boolean,
     onConfirm: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onDismissFinished: () -> Unit
 ) {
     OverlayDialog(
-        show = true,
+        show = show,
         title = "您是否安装了 LSPatch、NPatch 或 FPA 等免 Root LSPosed 框架？",
         onDismissRequest = onDismiss,
+        onDismissFinished = onDismissFinished,
         content = {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -337,8 +484,14 @@ private fun InfoRow(title: String, value: String) {
 }
 
 @Composable
-private fun LinksCard() {
+private fun LinksCard(
+    onCheckUpdate: () -> Unit
+) {
     val context = LocalContext.current
+
+    // 支持开发捐赠弹窗状态
+    var showSupportDialog by remember { mutableStateOf(false) }
+    var supportDialogVisible by remember { mutableStateOf(false) }
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -357,7 +510,7 @@ private fun LinksCard() {
                         tint = MiuixTheme.colorScheme.onBackground
                     )
                 },
-                onClick = { openExternalUrl(context, "https://github.com/TakotsuboChen/ala-mobile-tool/releases") }
+                onClick = onCheckUpdate
             )
             BasicComponent(
                 title = "QQ 群",
@@ -375,7 +528,7 @@ private fun LinksCard() {
             )
             BasicComponent(
                 title = "GitHub 源代码",
-                summary = "欢迎 Star",
+                summary = "欢迎 Star、提交 Issue 与 PR",
                 insideMargin = PaddingValues(vertical = 12.dp, horizontal = 16.dp),
                 startAction = {
                     Icon(
@@ -387,7 +540,34 @@ private fun LinksCard() {
                 },
                 onClick = { openExternalUrl(context, "https://github.com/TakotsuboChen/ala-mobile-tool") }
             )
+            BasicComponent(
+                title = "支持开发",
+                summary = "向开发者捐赠以表示支持",
+                insideMargin = PaddingValues(vertical = 12.dp, horizontal = 16.dp),
+                startAction = {
+                    Icon(
+                        imageVector = Icons.Rounded.VolunteerActivism,
+                        contentDescription = null,
+                        modifier = Modifier.padding(end = 12.dp),
+                        tint = MiuixTheme.colorScheme.onBackground
+                    )
+                },
+                onClick = {
+                    showSupportDialog = true
+                    supportDialogVisible = true
+                }
+            )
         }
+    }
+
+    if (showSupportDialog) {
+        SupportDialog(
+            show = supportDialogVisible,
+            onRequestClose = { supportDialogVisible = false },
+            onDismissFinished = {
+                showSupportDialog = false
+            }
+        )
     }
 }
 
