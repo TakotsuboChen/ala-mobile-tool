@@ -37,7 +37,9 @@ AlaMobileTool (LSPosed module APK)
 ├── OverlayManager            # Adds overlay Views via WindowManager above UnityPlayerActivity
 ├── MusicPlayer               # Main menu music replacement (MediaPlayer + APK asset extraction)
 ├── IntroSoundPlayer          # Intro V10 engine sound replacement (MediaPlayer + APK asset)
-└── libala-core.so            # ShadowHook + IL2CPP inline hooks, built for arm64-v8a only
+├── Logger / LogExporter      # Unified logging (logEnabled-gated file output) + ShareSheet export
+├── LogReceiver               # Static receiver for game→module log push (setComponent broadcast)
+└── libala-core.so            # ShadowHook + IL2CPP inline hooks + native_log, built for arm64-v8a only
 ```
 
 The module has three runtime contexts:
@@ -150,6 +152,10 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - `native/src/unlock_hook.c` — billing/unlock IL2CPP hook logic.
 - `native/src/music_hook.c` — main menu music mute + heartbeat signal.
 - `native/src/intro_hook.c` — intro V10 engine sound: mute introSound + one-shot signal.
+- `native/src/native_log.h` / `native/src/native_log.c` — shared native file logging (logcat + file, logEnabled-gated).
+- `app/src/main/kotlin/tools/alamobile/mod/util/Logger.kt` — unified Java logger (logcat + file, logEnabled-gated).
+- `app/src/main/kotlin/tools/alamobile/mod/util/LogExporter.kt` — merge module+game logs, FileProvider → ShareSheet.
+- `app/src/main/kotlin/tools/alamobile/mod/config/LogReceiver.kt` — static receiver for game→module log push via setComponent broadcast.
 - `app/src/main/kotlin/tools/alamobile/mod/MusicPlayer.kt` — main menu music replacement player.
 - `app/src/main/kotlin/tools/alamobile/mod/IntroSoundPlayer.kt` — V10 engine sound player.
 - `app/src/main/resources/META-INF/xposed/module.prop` — libxposed module metadata.
