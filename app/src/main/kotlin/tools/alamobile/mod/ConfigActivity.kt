@@ -21,8 +21,6 @@ import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDe
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
-import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
-import androidx.navigationevent.compose.rememberNavigationEventDispatcherOwner
 import tools.alamobile.mod.ui.AboutScreen
 import tools.alamobile.mod.ui.MainScreen
 import tools.alamobile.mod.ui.UiMode
@@ -96,8 +94,12 @@ class ConfigActivity : ComponentActivity() {
                 Density(systemDensity.density * uiState.pageScale, systemDensity.fontScale)
             }
 
-            // navigationevent dispatcher owner（miuix 需要）
-            val dispatcherOwner = rememberNavigationEventDispatcherOwner(parent = null)
+            // navigationevent dispatcher owner：不手动创建，用 ComponentActivity 自带的
+            // NavigationEventDispatcherOwner（activity 1.13.0 已实现，已绑定 OnBackPressedDispatcher）。
+            // LocalNavigationEventDispatcherOwner 在 Android 端是 ViewTreeLocal，从 ContextWrapper
+            // fallback 找到 Activity 的 owner，系统返回键经 Activity dispatcher → 弹窗 NavigationBackHandler。
+            // 之前手动 rememberNavigationEventDispatcherOwner(parent=null) 创建了未绑定 OnBackPressedDispatcher
+            // 的独立 dispatcher，导致弹窗收不到系统返回事件、直接 finish 退桌面。
 
             CompositionLocalProvider(
                 LocalNavigator provides navigator,
@@ -108,7 +110,6 @@ class ConfigActivity : ComponentActivity() {
                 LocalEnableFloatingBottomBarBlur provides uiState.enableFloatingBottomBarBlur,
                 LocalEnableNavigationBadge provides uiState.enableNavigationBadge,
                 tools.alamobile.mod.ui.LocalUiMode provides uiState.uiMode,
-                LocalNavigationEventDispatcherOwner provides dispatcherOwner,
             ) {
                 MiuixTheme(
                     colors = if (darkMode) darkColorScheme() else lightColorScheme()
