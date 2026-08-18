@@ -3,6 +3,7 @@ package tools.alamobile.mod.util
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.core.content.pm.PackageInfoCompat
 
 // 官版与共存版包名。与 VersionGate.SUPPORTED_PACKAGES 保持一致。
 const val OFFICIAL_PKG = "com.Vince.AlamobileFormula"
@@ -40,7 +41,7 @@ fun checkGameVersion(context: Context, packageName: String): GameVersionStatus {
             context.packageManager.getPackageInfo(packageName, 0)
         }
         val versionName = info.versionName ?: ""
-        if (versionName == ADAPTED_VERSION_NAME && info.longVersionCode == ADAPTED_VERSION_CODE) {
+        if (versionName == ADAPTED_VERSION_NAME && PackageInfoCompat.getLongVersionCode(info) == ADAPTED_VERSION_CODE) {
             GameVersionStatus.Adapted(versionName)
         } else {
             GameVersionStatus.NotAdapted(versionName)
