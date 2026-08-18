@@ -105,6 +105,12 @@ class ConfigReceiver : BroadcastReceiver() {
             val enableMusicReplace = incoming.optBoolean("enable_music_replace", false)
             tools.alamobile.mod.MusicPlayer.setEnabled(enableMusicReplace)
             Log.i(TAG, "ConfigReceiver: MusicPlayer.setEnabled=$enableMusicReplace")
+
+            // 实时同步 V10 引擎声浪开关——用户从配置页切到游戏时即时生效。
+            // 需要 native 可用（静音开场 introSound 靠 native hook）。
+            val enableV10Sound = incoming.optBoolean("enable_v10_sound", false)
+            tools.alamobile.mod.IntroSoundPlayer.setEnabled(enableV10Sound)
+            Log.i(TAG, "ConfigReceiver: IntroSoundPlayer.setEnabled=$enableV10Sound")
         } catch (e: Throwable) {
             Log.e(TAG, "ConfigReceiver: write failed", e)
         }

@@ -59,6 +59,9 @@ object ModConfig {
     // 主菜单音乐替换开关：替换为 Hans Zimmer - F1
     const val KEY_ENABLE_MUSIC_REPLACE = "enable_music_replace"
 
+    // V10 引擎声浪开关：替换开场动画的引擎声为 V10 声浪
+    const val KEY_ENABLE_V10_SOUND = "enable_v10_sound"
+
     // Pedal mapping
     const val KEY_PEDAL_MODE = "pedal_mode"
     const val KEY_PEDAL_DEADZONE = "pedal_deadzone"
@@ -221,6 +224,8 @@ object ModConfig {
         const val ENABLE_ABS = true
         // 主菜单音乐替换默认开启
         const val ENABLE_MUSIC_REPLACE = true
+        // V10 引擎声浪默认关闭
+        const val ENABLE_V10_SOUND = false
         val PEDAL_MODE = PedalMode.SINGLE
         const val PEDAL_DEADZONE = 0.05f
         const val PEDAL_TRANSITION = 0.5f
@@ -321,6 +326,10 @@ object ModConfig {
                     KEY_ENABLE_MUSIC_REPLACE,
                     Defaults.ENABLE_MUSIC_REPLACE
                 ),
+                enableV10Sound = json.optBoolean(
+                    KEY_ENABLE_V10_SOUND,
+                    Defaults.ENABLE_V10_SOUND
+                ),
                 pedalDeadzone = json.optDouble(
                     KEY_PEDAL_DEADZONE,
                     Defaults.PEDAL_DEADZONE.toDouble()
@@ -379,6 +388,7 @@ object ModConfig {
             put(KEY_ENABLE_TC, settings.enableTc)
             put(KEY_ENABLE_ABS, settings.enableAbs)
             put(KEY_ENABLE_MUSIC_REPLACE, settings.enableMusicReplace)
+            put(KEY_ENABLE_V10_SOUND, settings.enableV10Sound)
             put(KEY_PEDAL_DEADZONE, settings.pedalDeadzone.toDouble())
             put(KEY_PEDAL_TRANSITION, settings.pedalTransition.toDouble())
             put(KEY_BRAKE_TRANSITION, settings.brakeTransition.toDouble())
@@ -643,6 +653,7 @@ object ModConfig {
                 enableTc = j.optBoolean(KEY_ENABLE_TC, Defaults.ENABLE_TC),
                 enableAbs = j.optBoolean(KEY_ENABLE_ABS, Defaults.ENABLE_ABS),
                 enableMusicReplace = j.optBoolean(KEY_ENABLE_MUSIC_REPLACE, Defaults.ENABLE_MUSIC_REPLACE),
+                enableV10Sound = j.optBoolean(KEY_ENABLE_V10_SOUND, Defaults.ENABLE_V10_SOUND),
                 pedalDeadzone = j.optDouble(KEY_PEDAL_DEADZONE, Defaults.PEDAL_DEADZONE.toDouble()).toFloat(),
                 pedalTransition = j.optDouble(KEY_PEDAL_TRANSITION, Defaults.PEDAL_TRANSITION.toDouble()).toFloat(),
                 brakeTransition = j.optDouble(KEY_BRAKE_TRANSITION, Defaults.BRAKE_TRANSITION.toDouble()).toFloat(),
@@ -752,6 +763,7 @@ object ModConfig {
             enableTc = Defaults.ENABLE_TC,
             enableAbs = Defaults.ENABLE_ABS,
             enableMusicReplace = Defaults.ENABLE_MUSIC_REPLACE,
+            enableV10Sound = Defaults.ENABLE_V10_SOUND,
             pedalDeadzone = Defaults.PEDAL_DEADZONE,
             pedalTransition = Defaults.PEDAL_TRANSITION,
             brakeTransition = Defaults.BRAKE_TRANSITION,
@@ -778,6 +790,7 @@ object ModConfig {
         val enableTc: Boolean = Defaults.ENABLE_TC,
         val enableAbs: Boolean = Defaults.ENABLE_ABS,
         val enableMusicReplace: Boolean = Defaults.ENABLE_MUSIC_REPLACE,
+        val enableV10Sound: Boolean = Defaults.ENABLE_V10_SOUND,
         val pedalDeadzone: Float,
         val pedalTransition: Float,
         val brakeTransition: Float,

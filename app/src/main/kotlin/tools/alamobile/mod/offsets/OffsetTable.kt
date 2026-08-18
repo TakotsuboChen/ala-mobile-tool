@@ -93,5 +93,14 @@ object OffsetTable {
     const val HANDLE_MUSIC_VOLUME_START: Long = 0x1A52E74L
     // AudioSource.set_volume(float) — 用于静音游戏主菜单音乐
     // ⚠️ 8.0.4 中大幅变化（-0x1A32384），暗示 Unity 引擎版本升级。
+    // 注意：这个 RVA 实际指向 TweenVolume.set_volume（NGUI 补间助手），
+    // 主菜单音乐走 TweenVolume 驱动所以能用。
     const val AUDIO_SOURCE_SET_VOLUME: Long = 0x18100E8L
+
+    // IntroLogoManager (TypeDefIndex: 317) — 开场动画管理器
+    // Start() 是开场动画入口，hook 它拿"开场开始"信号 + 静音 introSound。
+    const val INTRO_LOGO_MANAGER_START: Long = 0x1A5EC2CL
+    // 真正的 AudioSource.set_volume(float) — Unity 引擎方法（非 TweenVolume）。
+    // 开场 introSound 是直接播放的 AudioSource，必须用这个而非 TweenVolume 版本。
+    const val AUDIO_SOURCE_SET_VOLUME_REAL: Long = 0x325040CL
 }

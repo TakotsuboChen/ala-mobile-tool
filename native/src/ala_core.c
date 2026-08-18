@@ -7,6 +7,7 @@
 #include "drs_hook.h"
 #include "unlock_hook.h"
 #include "music_hook.h"
+#include "intro_hook.h"
 
 #define LOG_TAG "AlaMobileTool"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -51,7 +52,9 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
                                            jboolean enable_tc, jboolean enable_abs,
                                            jlong music_volume_update,
                                            jlong music_volume_start,
-                                           jlong audio_source_set_volume) {
+                                           jlong audio_source_set_volume,
+                                           jlong intro_logo_manager_start,
+                                           jlong audio_source_set_volume_real) {
     (void) env;
     (void) clazz;
     (void) clutch_field;
@@ -128,6 +131,16 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
         LOGE("Failed to install music hooks");
     }
 
+    // V10 引擎声浪 hooks：hook IntroLogoManager.Start() 静音开场 introSound + 通知 Java 播放 V10。
+    // 开关由 Java 端 JNI 动态设置，这里只装 hook 不强制开启。
+    intro_hook_config_t intro_cfg = {
+        .intro_logo_manager_start_offset = (uintptr_t) intro_logo_manager_start,
+        .audio_source_set_volume_offset = (uintptr_t) audio_source_set_volume_real,
+    };
+    if (!intro_install_hooks(&intro_cfg)) {
+        LOGE("Failed to install intro hooks");
+    }
+
     g_state.controls_enabled = (bool) enable_controls;
     g_state.drs_enabled = (bool) enable_drs;
     g_state.disable_auto_gear = (bool) disable_auto_gear;
@@ -183,6 +196,32 @@ Java_tools_alamobile_mod_NativeBridge_initUnlock(JNIEnv *env, jclass clazz,
     if (!unlock_install_hooks(&unlock_cfg)) {
         LOGE("Failed to install unlock hooks (early)");
     }
+}
+
+// 独立的 intro hooks 早期安装入口——在 onPackageReady 早期调用，
+// 不等 15 秒延迟，让 IntroLogoManager.Start() hook 赶上开场动画。
+// pedal/music hooks 仍走原来的 15s 延迟路径（pedal 需要游戏 controller 已存在）。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_initIntro(JNIEnv *env, jclass clazz,
+                                                 jboolean enable_v10,
+                                                 jlong intro_logo_manager_start,
+                                                 jlong audio_source_set_volume_real) {
+    (void) env;
+    (void) clazz;
+
+    intro_hook_config_t intro_cfg = {
+        .intro_logo_manager_start_offset = (uintptr_t) intro_logo_manager_start,
+        .audio_source_set_volume_offset = (uintptr_t) audio_source_set_volume_real,
+    };
+
+    LOGI("initIntro: enable_v10=%d (early install before 15s delay)", enable_v10);
+
+    if (!intro_install_hooks(&intro_cfg)) {
+        LOGE("Failed to install intro hooks (early)");
+    }
+
+    // 同步开关状态——V10 开关在早期就设好，hook 触发时能静音 introSound
+    intro_set_v10_enabled((int) enable_v10);
 }
 
 JNIEXPORT void JNICALL
@@ -270,4 +309,21 @@ Java_tools_alamobile_mod_NativeBridge_isInMainMenu(JNIEnv *env, jclass clazz) {
     (void) env;
     (void) clazz;
     return music_is_in_main_menu() ? JNI_TRUE : JNI_FALSE;
+}
+
+// 设置 V10 引擎声浪开关（Java 端配置变更时调用）。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_setV10Sound(JNIEnv *env, jclass clazz, jboolean enabled) {
+    (void) env;
+    (void) clazz;
+    intro_set_v10_enabled((int) enabled);
+}
+
+// 查询开场动画是否已开始（one-shot：返回并清零）。
+// Java 端 timer 轮询此方法，拿到 true 后播放 V10 MP3。
+JNIEXPORT jboolean JNICALL
+Java_tools_alamobile_mod_NativeBridge_isIntroStarted(JNIEnv *env, jclass clazz) {
+    (void) env;
+    (void) clazz;
+    return intro_is_started() ? JNI_TRUE : JNI_FALSE;
 }

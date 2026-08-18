@@ -285,6 +285,8 @@ class AlaMobileModule : XposedModule() {
         val enableUnlock = settings?.enableUnlock ?: true
         // 主菜单音乐替换开关，默认 false
         val enableMusicReplace = settings?.enableMusicReplace ?: false
+        // V10 引擎声浪开关，默认 false
+        val enableV10Sound = settings?.enableV10Sound ?: false
 
         // forceLoad + initUnlock（deferred 后同步执行，ShadowHook 已 init）
         logX(Log.INFO, TAG, "NPatch early unlock path: forceLoad + initUnlock (deferred)")
@@ -316,6 +318,44 @@ class AlaMobileModule : XposedModule() {
             }
         } else {
             logX(Log.INFO, TAG, "enableUnlock=false, skipping early unlock hooks")
+        }
+
+        // ⚠️ V10 引擎声浪 intro hooks 早期安装——IntroLogoManager.Start() 在游戏启动
+        // ~2s 内就触发，不等 15s 延迟，否则 hook 装上时开场已过。与 initUnlock 同理。
+        // forceLoad 确保 native 库在当前 ClassLoader 可用。
+        logX(Log.INFO, TAG, "NPatch early intro path: forceLoad + initIntro (deferred)")
+        if (enableV10Sound) {
+            try {
+                if (!NativeBridge.isAvailable) {
+                    NativeBridge.forceLoad(getAppContext())
+                }
+                if (NativeBridge.isAvailable) {
+                    NativeBridge.initIntro(
+                        enableV10 = true,
+                        introLogoManagerStart = tools.alamobile.mod.offsets.OffsetTable.INTRO_LOGO_MANAGER_START,
+                        audioSourceSetVolumeReal = tools.alamobile.mod.offsets.OffsetTable.AUDIO_SOURCE_SET_VOLUME_REAL
+                    )
+                    logX(Log.INFO, TAG, "Early intro hooks installed (deferred, nativeAvail=${NativeBridge.isAvailable})")
+                } else {
+                    logX(Log.ERROR, TAG, "Early intro: NativeBridge not available after forceLoad")
+                }
+            } catch (e: Throwable) {
+                logX(Log.ERROR, TAG, "Early intro hooks failed: ${e.message}")
+            }
+        } else {
+            logX(Log.INFO, TAG, "enableV10Sound=false, skipping early intro hooks")
+        }
+
+        // IntroSoundPlayer 也在早期初始化——开场在 ~2s 触发，轮询要尽快开始。
+        val earlyCtx = getAppContext()
+        if (enableV10Sound && earlyCtx != null) {
+            try {
+                IntroSoundPlayer.init(earlyCtx)
+                IntroSoundPlayer.setEnabled(true)
+                logX(Log.INFO, TAG, "IntroSoundPlayer early initialized, v10Enabled=true")
+            } catch (e: Throwable) {
+                logX(Log.ERROR, TAG, "IntroSoundPlayer early init failed: ${e.message}")
+            }
         }
 
         val mainHandler = Handler(Looper.getMainLooper())
@@ -373,6 +413,13 @@ class AlaMobileModule : XposedModule() {
                             logX(Log.INFO, TAG, "MusicPlayer initialized, replaceEnabled=$enableMusicReplace")
                         } catch (e: Throwable) {
                             logX(Log.ERROR, TAG, "MusicPlayer init failed: ${e.message}")
+                        }
+                        try {
+                            IntroSoundPlayer.init(ctx)
+                            IntroSoundPlayer.setEnabled(enableV10Sound)
+                            logX(Log.INFO, TAG, "IntroSoundPlayer initialized, v10Enabled=$enableV10Sound")
+                        } catch (e: Throwable) {
+                            logX(Log.ERROR, TAG, "IntroSoundPlayer init failed: ${e.message}")
                         }
                     }
                     // one-shot 强制解锁兜底：只在用户开了解锁开关时调。

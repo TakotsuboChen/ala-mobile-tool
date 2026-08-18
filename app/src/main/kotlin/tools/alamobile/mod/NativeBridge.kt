@@ -229,7 +229,9 @@ object NativeBridge {
         enableAbs: Boolean,
         musicVolumeUpdate: Long,
         musicVolumeStart: Long,
-        audioSourceSetVolume: Long
+        audioSourceSetVolume: Long,
+        introLogoManagerStart: Long,
+        audioSourceSetVolumeReal: Long
     )
 
     /**
@@ -249,6 +251,17 @@ object NativeBridge {
         billingManagerIsUnlockedField: Long,
         billingManagerHasStoreConnectionField: Long,
         billingManagerHasCompletedOwnershipCheckField: Long
+    )
+
+    /**
+     * 独立的 intro hooks 早期安装——在 onPackageReady 早期调用，
+     * 不等 15 秒延迟，让 IntroLogoManager.Start() hook 赶上开场动画。
+     */
+    @JvmStatic
+    external fun initIntro(
+        enableV10: Boolean,
+        introLogoManagerStart: Long,
+        audioSourceSetVolumeReal: Long
     )
 
     @JvmStatic
@@ -283,6 +296,14 @@ object NativeBridge {
 
     @JvmStatic
     external fun isInMainMenu(): Boolean
+
+    // 设置 V10 引擎声浪开关（配置变更时调用）
+    @JvmStatic
+    external fun setV10Sound(enabled: Boolean)
+
+    // 查询开场动画是否已开始（one-shot：返回并清零）
+    @JvmStatic
+    external fun isIntroStarted(): Boolean
 
     /**
      * 主动触发一次强制解锁，不依赖 hook 触发时机。
@@ -333,7 +354,9 @@ object NativeBridge {
         enableAbs: Boolean = true,
         musicVolumeUpdate: Long = OffsetTable.HANDLE_MUSIC_VOLUME_UPDATE,
         musicVolumeStart: Long = OffsetTable.HANDLE_MUSIC_VOLUME_START,
-        audioSourceSetVolume: Long = OffsetTable.AUDIO_SOURCE_SET_VOLUME
+        audioSourceSetVolume: Long = OffsetTable.AUDIO_SOURCE_SET_VOLUME,
+        introLogoManagerStart: Long = OffsetTable.INTRO_LOGO_MANAGER_START,
+        audioSourceSetVolumeReal: Long = OffsetTable.AUDIO_SOURCE_SET_VOLUME_REAL
     ) {
         if (!isAvailable) {
             Log.w(TAG, "Native library not available, skipping initWithOffsets")
@@ -378,7 +401,9 @@ object NativeBridge {
             enableAbs,
             musicVolumeUpdate,
             musicVolumeStart,
-            audioSourceSetVolume
+            audioSourceSetVolume,
+            introLogoManagerStart,
+            audioSourceSetVolumeReal
         )
     }
 }

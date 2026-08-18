@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Flip
 import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.MusicNote
@@ -358,6 +359,20 @@ fun ConfigurePagerMiuix(
                                 },
                                 checked = uiState.enableMusicReplace,
                                 onCheckedChange = actions::setEnableMusicReplace
+                            )
+                            SwitchPreference(
+                                title = "替换开场动画背景音",
+                                summary = "更改为 V10 引擎声浪",
+                                startAction = {
+                                    Icon(
+                                        Icons.Rounded.GraphicEq,
+                                        modifier = Modifier.padding(end = 6.dp),
+                                        contentDescription = null,
+                                        tint = colorScheme.onBackground
+                                    )
+                                },
+                                checked = uiState.enableV10Sound,
+                                onCheckedChange = actions::setEnableV10Sound
                             )
                         }
                     }
