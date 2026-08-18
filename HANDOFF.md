@@ -1,32 +1,29 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-08-18T13:22:26+08:00 · Git HEAD: `7c76ab1`
+生成时间: 2026-08-18T15:20:00+08:00 · Git HEAD: `c03eae3`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: `main` @ `7c76ab1` (2026-08-18)
-- 漂移检查: `git rev-parse HEAD` 是否仍 = `7c76ab1`；变了说明快照可能过期
+- 锚点: `main` @ `c03eae3` (2026-08-18)
+- 漂移检查: `git rev-parse HEAD` 是否仍 = `c03eae3`；变了说明快照可能过期
 - 待重探的 [?]: 见下方标记
 - 先读: `HANDOFF.md` + `CLAUDE.md`
 
 ## 1. 当前目标
 
-**M49：弹窗退出动画 + 检查更新功能 + 支持开发卡片**。三个功能均已实现、编译通过、adb 安装成功、用户确认"完美"。真机验证项仍待用户逐项确认。
+**M50：概览页游戏版本检测胶囊**。在 "Ala Mobile Tool" 大标题上方空白处新增两个并排胶囊（官版在前、共存版在后），每次启动自动检测安装情况与版本适配。已实现、编译通过、adb 安装成功、用户确认 OK。
 
 ## 2. 已验证状态 — 工作实际停在哪
 
-- [V] **弹窗退出动画修复** — `EulaDialog`/`NonRootConfirmDialog`/`SupportDialog` 加 `show` 参数驱动 miuix `OverlayDialog` 退出动画。双状态模式：`dialogVisible` 翻 false 触发动画 → `onDismissFinished` 清理状态 + 执行 `pendingAction` 副作用。提交 `f30d000`。
-- [V] **概览页 UI 更新** — GitHub 源代码描述改为"欢迎 Star、提交 Issue 与 PR"；新增"支持开发"卡片 + `SupportDialog` 捐赠弹窗（收款码保存到 `Pictures/Ala Mobile Tool`）。提交 `f30d000`。
-- [V] **检查更新功能** — `UpdateChecker`（GitHub 官方 + kkgithub 镜像竞速）、`UpdateDownloader`（OkHttp 下载 + 进度回调）、`UpdatePreferences`（跳过版本/已下载 APK 记录/旧 APK 自动清理）、`UpdateDialog`（信息态/下载态）、`MarkdownText`（轻量 Markdown 渲染）。提交 `14a97e9`。
-- [V] **更新通道设置** — 设置页新增"模块更新通道"（`OverlaySpinnerPreference`：稳定版/预览版），稳定版用 `/releases/latest`（404 → NoUpdate），预览版用 `/releases?per_page=1`（含 pre-release）。新增"清除跳过更新标记"。提交 `14a97e9`。
-- [V] **404 与网络失败区分** — `fetchRelease` 返回 `Pair<Boolean, GitHubRelease?>`：`true` = 404（无更新），`false + null` = 网络失败。`UpdateCheckResult` 密封类：`HasUpdate`/`NoUpdate`/`Failed`。提交 `14a97e9`。
-- [V] **跳过语义** — 跳过仅影响自动检查（`LaunchedEffect` 里检查 `skipped != versionCode`），手动点"检查更新"有新版本就弹窗。提交 `14a97e9`。
-- [V] **避免重复下载** — 下载前检查 `UpdatePreferences.hasDownloadedApk(versionCode)`，已下载直接调起安装器，按钮显示"安装更新"。提交 `14a97e9`。
-- [V] **Release Note 高度** — `MarkdownText` 用 `heightIn(max = screenHeight * 0.6)`，内容短时全部展开，超过 60% 才滚动。提交 `14a97e9`。
-- [V] **编译通过** — `./gradlew :app:assembleDebug` → BUILD SUCCESSFUL。
-- [V] **adb 安装成功** — `adb install -r app/build/outputs/apk/debug/app-debug.apk` → Success。
-- [V] **用户确认"完美"** — 弹窗退出动画、检查更新、支持开发卡片功能均经真机验证。
+- [V] **游戏版本检测胶囊** — `VersionCapsule.kt` + `GameVersionChecker.kt` + `OverviewPagerMiuix.kt` + `AndroidManifest.xml`。两个胶囊放在 `Scaffold` 的 `topBar` 里 `TopAppBar` 上方（`Box` 叠加），左端对齐，动态计算垂直位置（状态栏高度 + (52dp - 胶囊高度)/2）。提交 `06b584c`。
+- [V] **静默查询无需权限** — `<queries>` 声明 `com.Vince.AlamobileFormula` + `com.Takotsubo.AlamobileFormula`，`getPackageInfo` 静默可见，无运行时权限请求。Android 原生无"读取应用列表"危险权限，去掉用户原需求第 3 种"未授权"状态。
+- [V] **三态显示** — 已适配=绿（同激活卡片配色 `0xFF1A3825`/`0xFFDFFAE4`）、未适配=红（同未激活 `0xFF3D1A1A`/`0xFFFAE4E4`）、未安装=黄（`0xFF3D3A1A`/`0xFFFAF4D6`），亮暗色模式同步。
+- [V] **收缩动画** — 用 `Animatable<Float>` + `LaunchedEffect(fraction)` 非对称：下滑 `fraction > 0` 时 `snapTo(0)` 即时隐藏；上滑 `fraction == 0` 时 `delay(350ms)` 等小标题 spring 淡出后 `animateTo(1)` 渐显。解决下滑/上滑与居中小标题重叠。
+- [V] **编译通过** — `./gradlew :app:assembleDebug` → BUILD SUCCESSFUL (exit 0)。
+- [V] **adb 安装成功** — `adb install -r` → Success。
+- [V] **用户确认 OK** — 胶囊位置、配色、收缩动画均经真机验证。
 - [V] **工作区干净** — `git status` 无未提交改动，`main` 与 `origin/main` 同步。
+- [?] **M49 弹窗退出动画 + 检查更新 + 支持开发** — 上一会话完成，真机验证项仍待用户逐项确认。见旧 HANDOFF.md。
 - [?] **M47 EULA 启动门控** — `d115618` 已提交，真机验证未确认。
 - [?] **M46 设置页 UI 重组** — `41ec5ee` 已提交，真机验证未确认。
 - [?] **M45 移除"显示悬浮窗"开关** — `7912ac3` 已提交，真机验证未确认。
@@ -34,57 +31,48 @@
 
 ### 测试/build 输出（本次交接 run 的真实输出）
 ```
-./gradlew :app:assembleDebug → BUILD SUCCESSFUL in 1s, UP-TO-DATE
+./gradlew :app:assembleDebug → BUILD SUCCESSFUL in 1s, 40 tasks, UP-TO-DATE, exit 0
 adb install -r app/build/outputs/apk/debug/app-debug.apk → Success
 ```
 
 ## 3. 决策与理由
 
-- **miuix `OverlayDialog` 双状态模式** [V]——`show` 参数驱动退出动画，但 `show` 硬编码 true 时直接移除 composable 会导致弹窗"啪"地消失无动画。双状态：外层 `showXxx` 控制 composable 存在，内层 `dialogVisible` 传给 `OverlayDialog.show` 控制动画。关闭时先翻内层 false 触发动画，`onDismissFinished` 里清外层。`pendingAction` lambda 暂存关闭原因对应的副作用。
-- **GitHub API 通道分流** [V]——稳定版用 `/releases/latest`（GitHub 只返回非 pre-release），预览版用 `/releases?per_page=1`。Alpha/Beta 阶段仓库只有 pre-release，`/releases/latest` 返回 404。`fetchRelease` 区分 404（NoUpdate）和网络失败（Failed）。
-- **双源竞速改顺序 await** [V]——原用 `select` 取第一个完成结果，但先完成的可能是网络失败（null），`select` 立即返回不等另一个。改为两个 `async` 各自 `withTimeoutOrNull(15s) await`，并行发出互不影响，取有 Release 的结果。
-- **轻量 Markdown 渲染** [V]——手写 `MarkdownText` 不引入第三方库，支持 GitHub Release Note 常见语法（标题/粗体/列表/代码块/链接/分隔线）。`heightIn(max = 60% 屏幕高度)` + `verticalScroll` 让内容短时自然展开。
-- **跳过仅影响自动检查** [V]——用户要求：跳过不改变新版本的性质，手动检查有新版本就弹窗。自动检查在 `LaunchedEffect` 里检查 `skipped != versionCode` 才弹窗，手动检查直接弹窗。
+- **`<queries>` 静默查询而非运行时权限** [V]——Android 原生无"读取应用列表"危险权限，`<queries>` 声明特定包名后 `getPackageInfo` 静默可见，无需用户授权。否决方案：应用内自定义对话框模拟权限请求，不自然且多余。
+- **`Box` 叠加而非 `Column` 包裹** [V]——`TopAppBar` 内部自带状态栏 inset 处理，`Column` 加 `Spacer` 会导致状态栏高度被算两次，内容下移。`Box` 让胶囊行和 `TopAppBar` 共享 `TopAppBar` 内部的 inset，胶囊用 `offset { IntOffset(0, topOffsetPx) }` 精确定位。
+- **动态计算 top offset 而非硬编码 dp** [V]——`topOffset = WindowInsets.statusBars.getTop(density) + (52dp - 胶囊高度)/2`。52dp 是 miuix `CollapsedHeight` 常量（状态栏下边缘到大标题上边缘的空间）。适配所有设备状态栏高度。否决方案：硬编码 8dp top padding，不同设备状态栏高度差异大。
+- **`Animatable` 非对称动画而非线性 `fraction` 公式** [V]——小标题 alpha 是 spring `Animatable`，不跟随 `fraction` 即时变化。线性公式 `(1 - fraction * 3)` 在上滑恢复时与小标题 spring 动画不同步，慢滑/快滑都重叠。改用 `Animatable` + `LaunchedEffect(fraction)`：下滑 `snapTo(0)` 即时隐藏，上滑 `fraction == 0` 时 `delay(350)` 等 spring 完成后渐显。否决方案：`translationY` 物理移出视区，仍因 spring 滞后重叠。
 
 ## 4. 失败的尝试 — 不要再试
 
-- [X] **`select` 取第一个完成结果用于双源竞速** — `select` 不区分成功/失败，先返回的是网络失败（null）时立即返回不等另一个源。改为各自 `withTimeoutOrNull await`。
-- [X] **`/releases/latest` 用于 Alpha/Beta 阶段** — GitHub `/releases/latest` 只返回非 pre-release，Alpha/Beta 仓库全是 pre-release 时返回 404。预览版改用 `/releases?per_page=1`。
-- [X] **`getCompleted()` 取超时未完成的 async 结果** — `getCompleted()` 在协程未完成时抛异常。改用 `withTimeoutOrNull` 各自独立 await。
-- [X] **ConfigActivity 白屏阻断式 EULA 门控** — 在 `MiuixTheme` 内 `Scaffold` content 里 `if (!eulaAccepted) EulaDialog else navDisplay`。功能正确但用户否决：要"进去在概览页弹窗"而非白屏不进去。不要再做白屏阻断。
-- [X] **靠 popupHost 渲染顺序保证 EULA zIndex 高于激活弹窗** — 先写 `EulaDialog` 再写 `MiuixPopupHost()` 不保证 EULA 在上。miuix `nextZIndex++` 让后加入的弹窗（激活弹窗）zIndex 更高。必须用 `eulaAccepted` 门控激活弹窗触发。
-- [X] **`useLegacyPackaging = true`** — M40 照搬 KernelSU 加的，导致 `libshadowhook.so not found` 的 native 加载失败。不要再加。
-- [X] **`readFromTargetProcess` 作为 rebuild 唯一配置来源** — daemon 写入滞后于广播，rebuild 读到旧 pedalMode/curve。`rebuildFromConfigChange` 和 `toggleOverlays` 必须优先用广播 JSON。不要再单用。
-- [X] **手写 SwitchRow/SliderRow → miuix preference 组件** — M38 M39 已验证，换了仍 22-38% janky。
-- [X] **关 blur / 移除 rememberContentReady / ModConfig.read 异步 / 各种 janky 优化** — 所有 M38-M40 的 janky 修复尝试均无效，详见旧 HANDOFF.md。
-- [X] **手工 `gh release edit` 事后覆盖镜像 body** — 永远晚于 CI 内 sync。不要再依赖事后覆盖，必须 Notes 先于 CI 存在。
-- [X] **`gh release edit --name`** — flag 不存在，用 `--title`。
-- [X] **`./gradlew :app:installDebug`** — 报 "No connected devices!"，Gradle adb 与系统 adb 不一致。直接用系统 `adb install -r <apk>`。
+- [X] **胶囊放在 LazyColumn 首项（与卡片在一起）** — 用户明确要求放在大标题上方的空白处，不是和卡片在一起。改到 `Scaffold` 的 `topBar`。
+- [X] **`Column` + `Spacer(windowInsetsTopHeight)` 推开状态栏** — `TopAppBar` 内部也处理状态栏 inset，状态栏高度被算两次，"Ala Mobile Tool" 和卡片整体下移。改用 `Box` 叠加。
+- [X] **硬编码 `padding(top = 8.dp)` 定位胶囊** — 不同设备状态栏高度差异大，8dp 在某设备上居中在另一设备上贴边。改用动态计算 `WindowInsets.statusBars.getTop(density)`。
+- [X] **`onSizeChanged` 测量 `TopAppBar` 展开态总高度** — 测到的是整个 `TopAppBar` 高度（含大标题），减去状态栏后远大于实际可用空间（52dp），胶囊被推到标题位置。改用 miuix `CollapsedHeight = 52.dp` 常量。
+- [X] **线性 `alpha = (1 - fraction * 3)` 驱动胶囊渐隐/渐显** — 小标题 alpha 是 spring `Animatable`，不跟随 `fraction` 即时变化。上滑恢复时 spring 动画滞后，胶囊用线性公式已开始渐显而小标题还没隐藏完，重叠。慢滑/快滑都复现。
+- [X] **`fraction` 阈值分段（`fraction < 0.15` 才渐显）** — spring 动画完成时机不可从 `fraction` 推断，任何阈值都可能在某个滑动速度下重叠。
+- [X] **`translationY` 物理移出视区 + alpha 渐隐** — spring 动画滞后导致上滑时小标题还在显示而胶囊已移回，仍重叠。
+- [X] **`spring` 动画 `animateTo(0)` 渐隐** — 动画需要时间完成，下滑时小标题已开始显示而胶囊还没完全隐藏，重叠。改用 `snapTo(0)` 即时隐藏。
 
 ## 5. 已知坑
 
-- ⚠️ **daemon 配置写入滞后于广播** [V]——`ModConfig.write` 先写 remote preferences（daemon），再发广播。daemon 异步绑定可能延迟，广播比 remote 先到。`readFromTargetProcess` 读 remote（daemon 旧值）≠ 刚写入的配置。解决方案：`rebuildFromConfigChange` 和 `toggleOverlays` 优先用广播 JSON。
-- ⚠️ **广播 JSON 不含 position 字段** [V]——ConfigActivity 不管 position（游戏进程拖拽时 `saveOverlayPosition` 写本地）。用广播 JSON 解析 `Settings` 后必须从本地 externalFilesDir 合并 position，否则重建后位置/大小丢回默认。`resolveLatestSettings()` 已处理此逻辑。
-- ⚠️ **AGP 9 不需要 kotlin-android 插件** [V]——AGP 9 内置 Kotlin 支持，`org.jetbrains.kotlin.android` 插件会报错。
-- ⚠️ **NDK 29 下载失败** [V]——Clash TUN TLS 干扰，用本地 NDK 26 替代。
-- ⚠️ **miuix SwitchPreference 在我们的 app 中 22% janky，KSU 同版本 0.10%** [V]——仍待排查，R8 优化差异可能。
-- ⚠️ **lint 的 NewApi 检查会拦 minSdk 26 下的高版本 API** [V]——照搬 KernelSU 代码时注意 KernelSU minSdk 更高，其 API 调用可能超出我们的 minSdk。新增高版本 API 调用时用 `values-vNN` 拆分或 `SDK_INT` 守卫。
-- ⚠️ **LSPosed `latestReleaseTime` 只认 stable** [V]——Beta/Alpha 阶段 `latestReleaseTime` 永远是 `1970-01-01T00:00:00Z`，列表排最后。只有发 stable release 才能置顶。
-- ⚠️ **miuix 无 `LinearProgressIndicator`** [V]——miuix-ui 库不包含此组件，用 `Text` 显示进度百分比替代。
+- ⚠️ **miuix `TopAppBar` 小标题用 spring `Animatable` 而非线性公式** [V]——`smallTitleAlpha` 和 `smallTitleTranslationY` 是 `Animatable<Float>`，在 `smallTitleVisible` 布尔值变化时用 `animateTo` 做 spring 过渡（damping 0.15 隐藏/0.3 显示）。不跟随 `collapsedFraction` 即时变化，任何用 `fraction` 线性驱动的联动动画都可能在某个滑动速度下与小标题不同步。
+- ⚠️ **miuix `TopAppBar` 内部自带状态栏 inset 处理** [V]——外层 `Column` 加 `Spacer` 会导致状态栏高度被算两次，内容下移。用 `Box` 叠加让外层元素共享 `TopAppBar` 内部 inset。
+- ⚠️ **daemon 配置写入滞后于广播** [V]——`ModConfig.write` 先写 remote preferences（daemon），再发广播。daemon 异步绑定可能延迟，广播比 remote 先到。
+- ⚠️ **广播 JSON 不含 position 字段** [V]——ConfigActivity 不管 position，用广播 JSON 解析 `Settings` 后必须从本地 externalFilesDir 合并 position。
+- ⚠️ **miuix 无 `LinearProgressIndicator`** [V]——用 `Text` 显示进度百分比替代。
+- ⚠️ **lint NewApi 检查拦 minSdk 26 下的高版本 API** [V]——照搬 KernelSU 代码时注意 minSdk 差异，用 `values-vNN` 或 `SDK_INT` 守卫。
 
 ## 6. 下一步（有序）
 
-1. **真机验证 M49 弹窗退出动画** — 用户确认：EULA/激活/支持开发弹窗关闭时有滑出动画（非瞬间消失）。
-2. **真机验证 M49 检查更新** — 切预览版 → 点"检查更新" → 弹窗 Release Note Markdown 格式正确 → 下载进度显示 → 下载完调起安装器 → 不安装返回再检查 → 按钮显示"安装更新"不重复下载。
-3. **真机验证 M49 更新通道** — 稳定点"检查更新" → Toast"当前已是最新版本"（GitHub 无正式 Release → 404 → NoUpdate）。
-4. **真机验证 M49 跳过/清除** — 弹窗点"跳过该版本" → 重开模块不自动弹 → 设置页"清除跳过更新标记" → 重开模块恢复自动弹。
-5. **真机验证 M49 支持开发** — 点"支持开发" → 弹窗显示收款码 → "保存收款码" → Toast"已保存到相册" → 相册 `Pictures/Ala Mobile Tool/PayQrcode.png` 存在。
-6. **真机验证 M47 EULA 启动门控** — 见旧 HANDOFF.md M47 验证项。
-7. **验证 position 合并修复** — 用户确认"切双踏板再切回单踏板，位置/大小是否保持"。
-8. **继续排查 janky 根因** — R8 映射文件对比（KSU dex=5.2MB vs 我们 2MB）。
+1. **真机验证 M50 胶囊** — 用户已确认基本 OK，可逐项细验：官版/共存版已适配/未适配/未安装三态显示、亮暗色配色、下滑即时隐藏、上滑延迟渐显。
+2. **真机验证 M49 各项** — 弹窗退出动画、检查更新流程、更新通道、跳过/清除、支持开发卡片（见旧 HANDOFF.md M49 验证项）。
+3. **真机验证 M47 EULA 启动门控** — 见旧 HANDOFF.md M47 验证项。
+4. **验证 position 合并修复** — 用户确认"切双踏板再切回单踏板，位置/大小是否保持"。
+5. **继续排查 janky 根因** — R8 映射文件对比（KSU dex=5.2MB vs 我们 2MB）。
 
 ## 7. 留给用户的开放问题
 
+- M50 胶囊各项表现是否满意（三态显示、配色、收缩动画）？
 - M49 各项真机表现是否满意？
 - M47 EULA 启动门控 + 滚到底才能同意的真机表现是否满意？
 - 切换踏板模式后单踏板位置丢失问题是否已修复？
