@@ -131,9 +131,9 @@ fun ConfigurePagerMiuix(
                         modifier = Modifier.padding(vertical = 12.dp),
                         verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)
                     ) {
-                        // ── Section 1: 功能开关 ──
+                        // ── Section 1: 游戏原生功能控制 ──
                         SmallTitle(
-                            text = "功能开关",
+                            text = "游戏原生功能控制",
                             insideMargin = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
                         )
                         Card(modifier = Modifier.fillMaxWidth()) {
@@ -164,20 +164,6 @@ fun ConfigurePagerMiuix(
                                 },
                                 checked = uiState.enableTc,
                                 onCheckedChange = actions::setEnableTc
-                            )
-                            SwitchPreference(
-                                title = "替换主菜单音乐",
-                                summary = "更改为 Hans Zimmer - F1",
-                                startAction = {
-                                    Icon(
-                                        Icons.Rounded.MusicNote,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = null,
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                checked = uiState.enableMusicReplace,
-                                onCheckedChange = actions::setEnableMusicReplace
                             )
                         }
 
@@ -351,6 +337,28 @@ fun ConfigurePagerMiuix(
                             }
                         }
                             }
+                        }
+
+                        // ── Section 4: 杂项 ──
+                        SmallTitle(
+                            text = "杂项",
+                            insideMargin = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            SwitchPreference(
+                                title = "替换主菜单音乐",
+                                summary = "更改为 Hans Zimmer - F1",
+                                startAction = {
+                                    Icon(
+                                        Icons.Rounded.MusicNote,
+                                        modifier = Modifier.padding(end = 6.dp),
+                                        contentDescription = null,
+                                        tint = colorScheme.onBackground
+                                    )
+                                },
+                                checked = uiState.enableMusicReplace,
+                                onCheckedChange = actions::setEnableMusicReplace
+                            )
                         }
                     }
                 }
