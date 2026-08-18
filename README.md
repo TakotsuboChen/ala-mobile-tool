@@ -128,6 +128,16 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 - 所有重操作（ShadowHook 初始化、JNI 调用、Service 绑定）延迟到 `Handler.post` 下一主循环
 - 避开 `createOrUpdateClassLoaderLocked` 内部 Resources 未初始化时序窗口
 
+#### 检查更新
+- 启动时自动检查 GitHub Releases（官方 + 镜像站竞速），有新版本自动弹窗
+- 稳定版通道仅检查正式 Release，预览版通道同时检查 Pre-release
+- Release Note 轻量 Markdown 渲染，下载进度实时显示，下载完成调起安装器
+- 支持「跳过该版本」（仅影响自动弹窗，手动检查不受限）和「清除跳过更新标记」
+- 同版本已下载的 APK 不重复下载，直接调起安装器；启动时自动清理旧版本残留 APK
+
+#### 支持开发
+- 概览页「支持开发」卡片，展示收款码，可保存到相册
+
 ### 🚧 开发中
 
 - **自动 DRS**：已完成 `drsToggle()` 拦截，telemetry 赛道数据解析待实现
