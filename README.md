@@ -104,6 +104,12 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 - 判定依据 `service.frameworkName == "LSPosed"`：LSPosed daemon 只在模块启用时推 binder，绑定即激活（参照 AdClose `onServiceBind` 思路）
 - NPatch 等非 root 框架（`frameworkName == "NPatch"`，API 101）不算 LSPOSED，自动弹窗确认（LSPatch/NPatch/FPA）
 
+#### 游戏版本检测
+- 概览页标题上方显示官版/共存版版本检测胶囊（每次启动自动检测）
+- 用 `<queries>` 声明两个游戏包名，`getPackageInfo` 静默查询，无需运行时权限
+- 已适配（8.0.4）显示绿色胶囊，未适配显示红色胶囊，未安装显示黄色胶囊
+- 下滑收缩时胶囊即时隐藏，上滑恢复后延迟渐显，避免与居中小标题重叠
+
 #### 现代 UI
 - Miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式
 - 顶栏/底栏毛玻璃（blurRadius=12f），下滑顶栏折叠
