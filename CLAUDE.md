@@ -35,6 +35,8 @@ AlaMobileTool (LSPosed module APK)
 ├── PedalOverlayView          # Dual-zone vertical throttle/brake pedal (raw Android Canvas View)
 ├── GearShiftView             # Upshift/downshift buttons (raw Android Canvas View)
 ├── OverlayManager            # Adds overlay Views via WindowManager above UnityPlayerActivity
+├── MusicPlayer               # Main menu music replacement (MediaPlayer + APK asset extraction)
+├── IntroSoundPlayer          # Intro V10 engine sound replacement (MediaPlayer + APK asset)
 └── libala-core.so            # ShadowHook + IL2CPP inline hooks, built for arm64-v8a only
 ```
 
@@ -146,6 +148,10 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - `native/src/pedal_hook.c` — throttle/brake/gear hook logic + input writer thread.
 - `native/src/drs_hook.c` — auto DRS / active aero hook logic.
 - `native/src/unlock_hook.c` — billing/unlock IL2CPP hook logic.
+- `native/src/music_hook.c` — main menu music mute + heartbeat signal.
+- `native/src/intro_hook.c` — intro V10 engine sound: mute introSound + one-shot signal.
+- `app/src/main/kotlin/tools/alamobile/mod/MusicPlayer.kt` — main menu music replacement player.
+- `app/src/main/kotlin/tools/alamobile/mod/IntroSoundPlayer.kt` — V10 engine sound player.
 - `app/src/main/resources/META-INF/xposed/module.prop` — libxposed module metadata.
 - `app/src/main/resources/META-INF/xposed/scope.list` — target package list.
 

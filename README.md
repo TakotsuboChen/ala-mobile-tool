@@ -9,7 +9,7 @@
 
 <p align="center">
   <strong>Ala Mobile 的体验增强 LSPosed 模块</strong><br>
-  线性踏板操控 &middot; 原生 TC 控制 &middot; 音乐替换 &middot; 内购解锁
+  线性踏板操控 &middot; 原生 TC 控制 &middot; 音乐替换 &middot; V10 引擎声浪 &middot; 内购解锁
 </p>
 
 ---
@@ -65,6 +65,11 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 - 将主菜单背景音乐替换为 **Hans Zimmer - F1**（320kbps）
 - 默认开启。离开主菜单自动暂停，返回自动恢复
 - 通过 native hook 静音游戏原生 `AudioSource.set_volume`，不依赖游戏设置
+
+#### V10 引擎声浪
+- 将开场动画背景音替换为 **V10 引擎声浪**
+- 默认关闭。单次播放，播完即停
+- 通过 native hook 静音游戏开场 `introSound`（真 `AudioSource.set_volume`），独立于主菜单音乐替换
 
 #### 布局编辑
 - 长按工具按钮进入编辑模式
@@ -192,6 +197,7 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 | 功能开关 | 解锁付费内容 | 强制解锁 DLC 和 IAP（默认关闭） |
 | | 牵引力控制（TC） | 启用原生 TC（默认开启） |
 | | 替换主菜单音乐 | 更换为 Hans Zimmer - F1（默认开启） |
+| | 替换开场动画背景音 | 更改为 V10 引擎声浪（默认关闭） |
 | Overlay 控件 | 线性踏板 | 拓扑选择：关闭 / 单踏板 / 双踏板 |
 | | 死区（单踏板） | 0-20%，踏板过渡区域附近的无效范围 |
 | | 过渡点（单踏板） | 20-80%，油门与刹车区域的分界线 |
@@ -244,6 +250,7 @@ Ala Mobile Tool (LSPosed 模块 APK)
 ├── OverlayManager          # WindowManager 覆盖层管理
 ├── OverlayEditView         # 编辑模式拖拽/缩放层
 ├── MusicPlayer             # 主菜单音乐播放器（MediaPlayer + 轮询）
+├── IntroSoundPlayer        # V10 引擎声浪播放器（MediaPlayer + 轮询）
 ├── ConfigProvider          # 跨进程配置 IPC（ContentProvider）
 ├── ConfigReceiver          # 配置广播接收器
 ├── BillingHook             # Java 层内购解锁（Xposed hook）
@@ -254,7 +261,8 @@ Ala Mobile Tool (LSPosed 模块 APK)
     ├── pedal_hook          # 油门/刹车/换挡 + writer 线程
     ├── drs_hook            # DRS 拦截
     ├── unlock_hook         # BillingManager 解锁（主路径）
-    └── music_hook          # 主菜单音乐静音 + 心跳检测
+    ├── music_hook          # 主菜单音乐静音 + 心跳检测
+    └── intro_hook          # 开场 V10 引擎声：静音 introSound + one-shot 信号
 ```
 
 **技术栈：**
