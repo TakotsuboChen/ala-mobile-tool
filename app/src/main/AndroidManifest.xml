@@ -69,6 +69,19 @@
             android:exported="true" />
 
         <!--
+            静态注册 LogReceiver：游戏进程通过定向广播推送日志内容到模块进程。
+            静态注册确保模块进程不存活时，系统自动拉起进程接收广播（与运行时注册不同，
+            后者在进程被杀后 receiver 消失）。exported=true 因为广播来自游戏进程（不同 uid）。
+        -->
+        <receiver
+            android:name=".config.LogReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="tools.alamobile.mod.PUSH_GAME_LOG" />
+            </intent-filter>
+        </receiver>
+
+        <!--
             FileProvider 用于分享/安装下载的 APK 更新包。
             download_path 指向 app cache/download 目录，保存的 APK 通过
             ACTION_INSTALL_PACKAGE + content URI 调起系统安装器。

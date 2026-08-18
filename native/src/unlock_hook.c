@@ -1,104 +1,25 @@
 #include "unlock_hook.h"
-#include <android/log.h>
+#include "native_log.h"
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <inttypes.h>
 #include <link.h>
 #include <malloc.h>
-#include <pthread.h>
-#include <stdarg.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <time.h>
 #include <unistd.h>
 #include "shadowhook.h"
 
 #define LOG_TAG "AlaMobileTool"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
-#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
-
-// NPatch 日志文件只能记 Java 层 xposedInterface.log() 的输出，
-// 不记 native __android_log_print（logcat 才有）。NPatch 用户多为小白，
-// 要求他们抓 adb logcat 不现实。所以 native 关键诊断日志同步写一份
-// 到 NPatch 日志目录下的 ala_native.log，用户用 NPatch 导出日志时
-// 这个文件也能被一起带出来（同一目录）。
-//
-// 路径推导：读 /proc/self/cmdline 拿进程名（main 进程 = 包名，
-// 子进程 = 包名:Suffix），strip 冒号后得包名，拼成
-// /sdcard/Android/media/<pkg>/npatch/log/ala_native.log。
-// 游戏进程对自己的外部 media 目录天然可写，无需权限。
-static char g_log_path[256] = {0};
-static pthread_mutex_t g_log_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-static void resolve_log_path(void) {
-    if (g_log_path[0] != '\0') return;
-    char cmdline[256] = {0};
-    int fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
-    if (fd < 0) return;
-    ssize_t n = read(fd, cmdline, sizeof(cmdline) - 1);
-    close(fd);
-    if (n <= 0) return;
-    cmdline[n] = '\0';
-    // strip :suffix (子进程)
-    char *colon = strchr(cmdline, ':');
-    if (colon) *colon = '\0';
-    snprintf(g_log_path, sizeof(g_log_path),
-             "/sdcard/Android/media/%s/npatch/log/ala_native.log", cmdline);
-}
-
-// 把一行日志写入 NPatch 日志目录下的 ala_native.log。
-// 同时仍打 logcat（adb 调试时方便）。带时间戳和 tid。
-static void npatch_log(int prio, const char *tag, const char *fmt, ...) {
-    char buf[1024];
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
-
-    // logcat
-    __android_log_print(prio, tag, "%s", buf);
-
-    // 文件
-    resolve_log_path();
-    if (g_log_path[0] == '\0') return;
-    pthread_mutex_lock(&g_log_mutex);
-    int f = open(g_log_path, O_WRONLY | O_CREAT | O_APPEND, 0666);
-    if (f >= 0) {
-        char line[1200];
-        struct timespec ts;
-        clock_gettime(CLOCK_REALTIME, &ts);
-        struct tm tm;
-        localtime_r(&ts.tv_sec, &tm);
-        int ms = (int)(ts.tv_nsec / 1000000);
-        const char *prio_str = (prio == ANDROID_LOG_INFO) ? "I" :
-                               (prio == ANDROID_LOG_WARN) ? "W" :
-                               (prio == ANDROID_LOG_ERROR) ? "E" : "D";
-        snprintf(line, sizeof(line),
-                 "[%04d-%02d-%02dT%02d:%02d:%02d.%03d pid=%d tid=%d][%s/%s] %s\n",
-                 tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-                 tm.tm_hour, tm.tm_min, tm.tm_sec, ms,
-                 (int)getpid(), (int)gettid(), prio_str, tag, buf);
-        write(f, line, strlen(line));
-        close(f);
-    }
-    pthread_mutex_unlock(&g_log_mutex);
-}
-
-// 重定向关键宏到 npatch_log（同时打 logcat + 写文件）。
-#undef LOGI
-#undef LOGD
-#undef LOGE
-#undef LOGW
-#define LOGI(...) npatch_log(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define LOGD(...) npatch_log(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
-#define LOGE(...) npatch_log(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
-#define LOGW(...) npatch_log(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
+// 宏重定向到 native_log（同时打 logcat + 写文件，受 logEnabled 控制）。
+#define LOGI(...) NLOGI(__VA_ARGS__)
+#define LOGD(...) NLOGD(__VA_ARGS__)
+#define LOGE(...) NLOGE(__VA_ARGS__)
+#define LOGW(...) NLOGW(__VA_ARGS__)
 
 static unlock_hook_config_t g_config = {0};
 

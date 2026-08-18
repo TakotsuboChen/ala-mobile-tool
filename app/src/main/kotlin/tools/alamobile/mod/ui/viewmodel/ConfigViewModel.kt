@@ -120,7 +120,12 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
     fun setBrakeCurve(v: ModConfig.PedalCurve) { _uiState.value = _uiState.value.copy(brakeCurve = v); scheduleSave() }
     fun setThrottleCurvePoints(v: List<ModConfig.CurvePoint>) { _uiState.value = _uiState.value.copy(throttleCurvePoints = v); scheduleSave() }
     fun setBrakeCurvePoints(v: List<ModConfig.CurvePoint>) { _uiState.value = _uiState.value.copy(brakeCurvePoints = v); scheduleSave() }
-    fun setLogEnabled(v: Boolean) { _uiState.value = _uiState.value.copy(logEnabled = v); scheduleSave() }
+    fun setLogEnabled(v: Boolean) {
+        _uiState.value = _uiState.value.copy(logEnabled = v)
+        // 立即生效模块进程的 Logger，不必等 App 重启重新读配置
+        tools.alamobile.mod.util.Logger.setEnabled(v)
+        scheduleSave()
+    }
 
     /** 立即 flush（供 onServiceBind 等需要立刻落盘的场景）。 */
     fun flushNow() {

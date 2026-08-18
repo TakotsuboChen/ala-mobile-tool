@@ -15,6 +15,7 @@ import tools.alamobile.mod.config.ConfigReceiver
 import tools.alamobile.mod.config.ModConfig
 import tools.alamobile.mod.hook.BillingHook
 import tools.alamobile.mod.overlay.OverlayManager
+import tools.alamobile.mod.util.Logger
 import tools.alamobile.mod.util.isSupportedVersion
 import java.io.File
 
@@ -32,14 +33,13 @@ class AlaMobileModule : XposedModule() {
             private set
 
         /**
-         * 通过 XposedInterface 写日志到 NPatch 日志文件（Android/media/.../npatch/log/）。
-         * XposedInterface.log() 直接调 XposedBridge.log() → XposedLogPrinter → 写文件，
-         * 不走 XLog 白名单过滤，所以即使用户 tag 不是 "NPatch" 也能写入。
-         * 同时 fallback 到 android.util.Log 确保 logcat 也能看到。
+         * 统一日志入口：logcat 始终输出 + Logger 文件写入（受 logEnabled 控制）。
+         * 同时保留 xposedInterface.log() 路径写 NPatch 日志目录（NPatch 导出时会带）。
          */
         fun logX(priority: Int, tag: String, msg: String) {
-            xposedInterface?.log(priority, tag, msg)
-            android.util.Log.println(priority, tag, msg)
+            Logger.log(priority, tag, msg)
+            // 保留 NPatch 日志路径——NPatch 导出日志时会带这个目录
+            try { xposedInterface?.log(priority, tag, msg) } catch (_: Throwable) {}
         }
 
         /**
@@ -272,6 +272,18 @@ class AlaMobileModule : XposedModule() {
         // tclEnable/absEnable，让游戏自带 TC/ABS 在非手柄模式下也生效。
         val enableTc = settings?.enableTc ?: true
         val enableAbs = settings?.enableAbs ?: true
+
+        // 初始化 Logger：游戏进程用 externalFilesDir 写日志文件。
+        // logEnabled 开关控制文件写入，logcat 始终输出。
+        val enableLog = settings?.logEnabled ?: false
+        val loggerCtx = context ?: getAppContext()
+        if (loggerCtx != null) {
+            Logger.init(loggerCtx, isModuleProcess = false)
+            Logger.setEnabled(enableLog)
+        }
+        if (NativeBridge.isAvailable) {
+            NativeBridge.setLogEnabled(enableLog)
+        }
         // ⚠️ enableUnlock 兜底：settings==null（context 还没可用，NPatch 下 onPackageReady
         // 早期常 context=null）时默认 true，不默认 false。
         // 根因：NPatch 启动慢，context 要 15s 才可用，但 BillingManager.Awake() 在 ~2s
@@ -438,6 +450,29 @@ class AlaMobileModule : XposedModule() {
                 // 第一个 ClassLoader 自己的 onPackageReady 流程不被自己拦掉
                 markNativeInstalled()
                 logX(Log.INFO, TAG, "Native hooks installed (isAvailable=${NativeBridge.isAvailable})")
+
+                // 游戏进程启动后把自己的日志推到模块进程缓存，
+                // 供 ConfigActivity 的"导出并分享日志"读取（跨进程文件不可直接读）。
+                // 放在 15s 延迟末尾确保日志已产生一定量。
+                try {
+                    val extDir = ctx?.getExternalFilesDir(null)
+                    if (extDir != null) {
+                        val javaLogFile = java.io.File(extDir, "ala_tool.log")
+                        val nativeLogFile = java.io.File(extDir, "ala_tool_native.log")
+                        val javaLog = if (javaLogFile.exists()) javaLogFile.readText() else ""
+                        val nativeLog = if (nativeLogFile.exists()) nativeLogFile.readText() else ""
+                        if (javaLog.isNotEmpty() || nativeLog.isNotEmpty()) {
+                            // 通过非定向广播把日志推到模块进程的 LogReceiver。
+                            // LSPosed 下 ContentProvider 和定向广播都因包可见性不可达，
+                            // Remote Preferences 在 Hook 进程只读。非定向广播不查包可见性，
+                            // 系统分发给所有匹配的静态 receiver。
+                            val pushed = tools.alamobile.mod.config.LogReceiver.send(ctx!!, javaLog, nativeLog)
+                            logX(Log.INFO, TAG, "Pushed game logs via broadcast (java=${javaLog.length} native=${nativeLog.length} success=$pushed)")
+                        }
+                    }
+                } catch (e: Throwable) {
+                    logX(Log.WARN, TAG, "Push game logs failed: ${e.message}")
+                }
             } catch (e: Throwable) {
                 logX(Log.ERROR, TAG, "Failed to install native hooks: ${e.message}")
             }
@@ -453,5 +488,18 @@ class AlaMobileModule : XposedModule() {
         } catch (e: Throwable) {
             null
         }
+    }
+
+    /** 把字符串按 chunkSize 分块，供 Remote Preferences 存储。 */
+    private fun chunkString(s: String, chunkSize: Int): List<String> {
+        if (s.isEmpty()) return emptyList()
+        val chunks = ArrayList<String>((s.length + chunkSize - 1) / chunkSize)
+        var i = 0
+        while (i < s.length) {
+            val end = minOf(i + chunkSize, s.length)
+            chunks.add(s.substring(i, end))
+            i = end
+        }
+        return chunks
     }
 }

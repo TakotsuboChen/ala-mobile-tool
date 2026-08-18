@@ -1,8 +1,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <jni.h>
-#include <android/log.h>
 
+#include "native_log.h"
 #include "pedal_hook.h"
 #include "drs_hook.h"
 #include "unlock_hook.h"
@@ -10,8 +10,8 @@
 #include "intro_hook.h"
 
 #define LOG_TAG "AlaMobileTool"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define LOGI(...) NLOGI(__VA_ARGS__)
+#define LOGE(...) NLOGE(__VA_ARGS__)
 
 typedef struct {
     bool native_initialized;
@@ -326,4 +326,13 @@ Java_tools_alamobile_mod_NativeBridge_isIntroStarted(JNIEnv *env, jclass clazz) 
     (void) env;
     (void) clazz;
     return intro_is_started() ? JNI_TRUE : JNI_FALSE;
+}
+
+// 设置 native 层日志开关（logcat 始终打，文件写入受此控制）。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_setLogEnabled(JNIEnv *env, jclass clazz, jboolean enabled) {
+    (void) env;
+    (void) clazz;
+    native_log_set_enabled(enabled ? 1 : 0);
+    NLOGI("native log enabled=%d", enabled ? 1 : 0);
 }

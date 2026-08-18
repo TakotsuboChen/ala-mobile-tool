@@ -3,6 +3,7 @@ package tools.alamobile.mod.hook
 import android.util.Log
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModuleInterface
+import tools.alamobile.mod.util.Logger
 
 /**
  * BillingBridge Hook - 绕过 Google Play 验证
@@ -17,15 +18,17 @@ object BillingHook {
     private const val TAG = "BillingHook"
 
     fun install(xposedInterface: XposedInterface, packageLoadedParam: XposedModuleInterface.PackageLoadedParam) {
-        // 辅助：同时写 logcat 和 NPatch 日志文件（XposedBridge.log → XposedLogPrinter → file）
+        // 辅助：通过 Logger 写 logcat + 文件（受 logEnabled 控制），
+        // 同时保留 xposedInterface.log() 写 NPatch 日志目录。
         fun log(priority: Int, msg: String) {
-            android.util.Log.println(priority, TAG, msg)
+            Logger.log(priority, TAG, msg)
             try { xposedInterface.log(priority, TAG, msg) } catch (_: Throwable) {}
         }
-        fun logw(msg: String) { log(android.util.Log.WARN, msg) }
+        fun logw(msg: String) { log(Log.WARN, msg) }
         fun loge(msg: String, e: Throwable? = null) {
-            android.util.Log.e(TAG, msg, e)
-            try { xposedInterface.log(android.util.Log.ERROR, TAG, if (e != null) "$msg\n${android.util.Log.getStackTraceString(e)}" else msg) } catch (_: Throwable) {}
+            val full = if (e != null) "$msg\n${Log.getStackTraceString(e)}" else msg
+            Logger.log(Log.ERROR, TAG, full)
+            try { xposedInterface.log(Log.ERROR, TAG, full) } catch (_: Throwable) {}
         }
 
         try {

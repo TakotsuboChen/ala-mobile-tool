@@ -1,5 +1,5 @@
 #include "pedal_hook.h"
-#include <android/log.h>
+#include "native_log.h"
 #include <dlfcn.h>
 #include <inttypes.h>
 #include <pthread.h>
@@ -8,8 +8,8 @@
 #include <unistd.h>
 
 #define LOG_TAG "AlaMobileTool"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define LOGI(...) NLOGI(__VA_ARGS__)
+#define LOGE(...) NLOGE(__VA_ARGS__)
 
 #include "shadowhook.h"
 

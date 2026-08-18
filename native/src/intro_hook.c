@@ -1,5 +1,5 @@
 #include "intro_hook.h"
-#include <android/log.h>
+#include "native_log.h"
 #include <dlfcn.h>
 #include <inttypes.h>
 #include <pthread.h>
@@ -13,9 +13,9 @@
 #include "shadowhook.h"
 
 #define LOG_TAG "AlaMobileTool"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define LOGI(...) NLOGI(__VA_ARGS__)
+#define LOGW(...) NLOGW(__VA_ARGS__)
+#define LOGE(...) NLOGE(__VA_ARGS__)
 
 static intro_hook_config_t g_config = {0};
 static volatile int g_hooks_installed = 0;

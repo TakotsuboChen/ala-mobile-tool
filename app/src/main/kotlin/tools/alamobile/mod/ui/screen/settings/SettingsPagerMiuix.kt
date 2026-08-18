@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -30,10 +31,12 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import tools.alamobile.mod.EulaManager
 import tools.alamobile.mod.LsposedStatus
 import tools.alamobile.mod.ui.EulaDialog
 import tools.alamobile.mod.update.UpdatePreferences
+import tools.alamobile.mod.util.LogExporter
 import tools.alamobile.mod.ui.theme.LocalEnableBlur
 import tools.alamobile.mod.ui.util.BlurredBar
 import tools.alamobile.mod.ui.util.rememberBlurBackdrop
@@ -69,6 +72,7 @@ fun SettingsPagerMiuix(
     bottomInnerPadding: Dp,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val scrollBehavior = MiuixScrollBehavior()
     val enableBlur = LocalEnableBlur.current
     val backdrop = rememberBlurBackdrop(enableBlur)
@@ -172,7 +176,14 @@ fun SettingsPagerMiuix(
                                     )
                                 },
                                 onClick = {
-                                    Toast.makeText(context, "日志导出功能即将上线", Toast.LENGTH_SHORT).show()
+                                    scope.launch {
+                                        val uri = LogExporter.export(context)
+                                        if (uri != null) {
+                                            LogExporter.share(context, uri)
+                                        } else {
+                                            Toast.makeText(context, "没有可导出的日志", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
                                 }
                             )
                         }

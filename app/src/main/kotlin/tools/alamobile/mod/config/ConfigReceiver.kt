@@ -111,6 +111,37 @@ class ConfigReceiver : BroadcastReceiver() {
             val enableV10Sound = incoming.optBoolean("enable_v10_sound", false)
             tools.alamobile.mod.IntroSoundPlayer.setEnabled(enableV10Sound)
             Log.i(TAG, "ConfigReceiver: IntroSoundPlayer.setEnabled=$enableV10Sound")
+
+            // 实时同步日志开关——logEnabled 控制文件写入，logcat 始终输出。
+            val logEnabled = incoming.optBoolean("log_enabled", false)
+            tools.alamobile.mod.util.Logger.setEnabled(logEnabled)
+            if (tools.alamobile.mod.NativeBridge.isAvailable) {
+                tools.alamobile.mod.NativeBridge.setLogEnabled(logEnabled)
+            }
+            Log.i(TAG, "ConfigReceiver: logEnabled=$logEnabled")
+
+            // 游戏进程把自己的日志文件内容推到模块进程，
+            // 供 ConfigActivity 的"导出并分享日志"读取（跨进程文件不可直接读）。
+            // 通过 Remote Preferences 分块存储（LSPosed + NPatch 通用）。
+            try {
+                val extDir = context.getExternalFilesDir(null)
+                if (extDir != null) {
+                    val javaLogFile = java.io.File(extDir, "ala_tool.log")
+                    val nativeLogFile = java.io.File(extDir, "ala_tool_native.log")
+                    val javaLog = if (javaLogFile.exists()) javaLogFile.readText() else ""
+                    val nativeLog = if (nativeLogFile.exists()) nativeLogFile.readText() else ""
+                    if (javaLog.isNotEmpty() || nativeLog.isNotEmpty()) {
+                        // Remote Preferences 分块存储
+                        val prefs = (context.getSystemService("xposed") as? Any)
+                        // ConfigReceiver 没有 XposedModule 的 getRemotePreferences，
+                        // 用广播 fallback（NPatch 下可用）
+                        val pushed = LogReceiver.send(context, javaLog, nativeLog)
+                        Log.i(TAG, "ConfigReceiver: pushed game logs via broadcast (java=${javaLog.length} native=${nativeLog.length} success=$pushed)")
+                    }
+                }
+            } catch (e: Throwable) {
+                Log.w(TAG, "ConfigReceiver: push game logs failed: ${e.message}")
+            }
         } catch (e: Throwable) {
             Log.e(TAG, "ConfigReceiver: write failed", e)
         }

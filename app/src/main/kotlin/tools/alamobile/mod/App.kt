@@ -9,6 +9,7 @@ import android.util.Log
 import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
 import org.json.JSONObject
+import tools.alamobile.mod.config.ModConfig
 
 /**
  * 模块进程的 Application，负责连接 Xposed 框架的 XposedService。
@@ -147,6 +148,15 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
                 doServiceBinding()
             }
         } else {
+            // 模块进程：初始化 Logger（用 filesDir 写日志文件）
+            tools.alamobile.mod.util.Logger.init(this, isModuleProcess = true)
+            try {
+                val settings = ModConfig.read(this)
+                tools.alamobile.mod.util.Logger.setEnabled(settings.logEnabled)
+            } catch (_: Throwable) {
+                // 配置读失败不阻塞 service binding
+            }
+            // LogReceiver 通过 manifest 静态注册，系统在广播到达时自动拉起模块进程。
             doServiceBinding()
         }
     }

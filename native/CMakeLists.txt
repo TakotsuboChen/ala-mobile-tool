@@ -18,6 +18,7 @@ add_library(
     ala-core
     SHARED
     src/ala_core.c
+    src/native_log.c
     src/il2cpp_hooks.c
     src/pedal_hook.c
     src/drs_hook.c

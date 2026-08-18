@@ -306,6 +306,14 @@ object NativeBridge {
     external fun isIntroStarted(): Boolean
 
     /**
+     * 设置 native 层日志开关。
+     * logcat 始终输出，文件写入受此开关控制。
+     * 配置变更时由 ConfigReceiver / AlaMobileModule 调用。
+     */
+    @JvmStatic
+    external fun setLogEnabled(enabled: Boolean)
+
+    /**
      * 主动触发一次强制解锁，不依赖 hook 触发时机。
      * 在 15s 延迟路径中作为 one-shot 调用：通过 get_Instance() 获取 BillingManager
      * 单例指针，直接调 SetUnlocked(true) 解锁 + OnAlreadyOwned 辅助。
