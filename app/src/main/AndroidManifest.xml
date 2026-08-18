@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!--
         NPatch 配置同步：模块进程（ConfigActivity）通过 ContentResolver.call
@@ -63,6 +65,21 @@
             android:name=".config.ConfigProvider"
             android:authorities="tools.alamobile.mod.config"
             android:exported="true" />
+
+        <!--
+            FileProvider 用于分享/安装下载的 APK 更新包。
+            download_path 指向 app cache/download 目录，保存的 APK 通过
+            ACTION_INSTALL_PACKAGE + content URI 调起系统安装器。
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

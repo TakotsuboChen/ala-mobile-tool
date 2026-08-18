@@ -150,6 +150,10 @@ dependencies {
 
     // Native hooks
     implementation(libs.shadowhook)
+
+    // Network
+    implementation(libs.okhttp)
+    implementation(libs.kotlinx.serialization.json)
 }
 
 kotlin {

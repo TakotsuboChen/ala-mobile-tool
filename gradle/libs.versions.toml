@@ -13,6 +13,8 @@ ndk = "26.1.10909125"
 libxposed-api = "102.0.0"
 libxposed-service = "102.0.0"
 shadowhook = "2.0.1"
+okhttp = "4.12.0"
+kotlinx-serialization-json = "1.7.3"
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -53,3 +55,7 @@ miuix-blur = { module = "top.yukonga.miuix.kmp:miuix-blur-android", version.ref 
 
 # Native hooks
 shadowhook = { group = "com.bytedance.android", name = "shadowhook", version.ref = "shadowhook" }
+
+# Network
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinx-serialization-json" }
