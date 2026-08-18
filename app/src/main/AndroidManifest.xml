@@ -25,6 +25,8 @@
     -->
     <queries>
         <package android:name="top.nkbe.npatch" />
+        <package android:name="com.Vince.AlamobileFormula" />
+        <package android:name="com.Takotsubo.AlamobileFormula" />
     </queries>
 
     <application

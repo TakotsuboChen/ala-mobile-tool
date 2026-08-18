@@ -1,6 +1,9 @@
 package tools.alamobile.mod.ui.screen.overview
 
 import android.os.Build
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,6 +14,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.add
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,13 +27,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.CheckCircleOutline
-import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.VolunteerActivism
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,18 +36,29 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathNode
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CheckCircleOutline
+import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.VolunteerActivism
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -64,6 +73,10 @@ import tools.alamobile.mod.update.UpdateCheckResult
 import tools.alamobile.mod.update.UpdateChecker
 import tools.alamobile.mod.update.UpdateInfo
 import tools.alamobile.mod.update.UpdatePreferences
+import tools.alamobile.mod.util.COEXISTENCE_PKG
+import tools.alamobile.mod.util.GameVersionStatus
+import tools.alamobile.mod.util.OFFICIAL_PKG
+import tools.alamobile.mod.util.checkGameVersion
 import tools.alamobile.mod.util.openExternalUrl
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -123,10 +136,22 @@ fun OverviewPagerMiuix(
     var isCheckingUpdate by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
+    // ── 游戏版本检测状态 ──
+    // 每次启动 ConfigActivity 都自动检测官版/共存版安装情况与版本适配。
+    // null 表示检测中（胶囊不显示，避免闪烁）。
+    var officialStatus by remember { mutableStateOf<GameVersionStatus?>(null) }
+    var coexistenceStatus by remember { mutableStateOf<GameVersionStatus?>(null) }
+
     // 启动时自动检查更新 + 清理旧 APK
     LaunchedEffect(Unit) {
         // 清理旧版本 APK（用户已安装新版本时）
         UpdatePreferences.cleanupOldApkIfNeeded(context, BuildConfig.VERSION_CODE)
+
+        // 游戏版本检测（IO 线程，PackageManager 查询）
+        val official = withContext(Dispatchers.IO) { checkGameVersion(context, OFFICIAL_PKG) }
+        val coexistence = withContext(Dispatchers.IO) { checkGameVersion(context, COEXISTENCE_PKG) }
+        officialStatus = official
+        coexistenceStatus = coexistence
 
         // 等 EULA 同意后再检查更新
         if (eulaAccepted) {
@@ -153,11 +178,62 @@ fun OverviewPagerMiuix(
     Scaffold(
         topBar = {
             tools.alamobile.mod.ui.util.BlurredBar(backdrop) {
-                TopAppBar(
-                    color = barColor,
-                    title = "Ala Mobile Tool",
-                    scrollBehavior = scrollBehavior,
-                )
+                Box {
+                    // TopAppBar 在底层，保持原有布局（含内部状态栏 inset 处理）不受影响。
+                    TopAppBar(
+                        color = barColor,
+                        title = "Ala Mobile Tool",
+                        scrollBehavior = scrollBehavior,
+                    )
+                    // 游戏版本检测胶囊行：叠加在 TopAppBar 之上，位于大标题上方空白处，左端对齐。
+                    // 动态计算 top offset：
+                    //   可用空间 = CollapsedHeight(52dp) - 胶囊高度
+                    //   topOffset = 状态栏高度 + 可用空间 / 2
+                    // 读取设备实际状态栏高度，适配所有设备。
+                    //
+                    // 收缩/恢复动画用 Animatable 做非对称过渡，避免与小标题 spring 动画重叠：
+                    //   下滑（fraction > 0）：snapTo(0) 即时隐藏，不给小标题重叠的机会。
+                    //   上滑恢复（fraction == 0）：延迟 350ms 等小标题 spring 完全淡出后 animateTo(1)。
+                    //     fraction 持续变化时 delay 被反复取消，直到 fraction 停在 0 后 delay 才等完。
+                    if (officialStatus != null && coexistenceStatus != null) {
+                        val fraction = scrollBehavior.state.collapsedFraction
+                        val capsuleAlpha = remember { Animatable(1f) }
+                        LaunchedEffect(fraction) {
+                            if (fraction > 0f) {
+                                // 下滑收缩：即时隐藏
+                                capsuleAlpha.snapTo(0f)
+                            } else {
+                                // 上滑恢复（fraction == 0）：延迟后渐显，等小标题淡出
+                                kotlinx.coroutines.delay(350)
+                                capsuleAlpha.animateTo(1f, spring(dampingRatio = 1f, stiffness = 300f))
+                            }
+                        }
+                        val density = LocalDensity.current
+                        val statusBarHeightPx = WindowInsets.statusBars.getTop(density)
+                        val collapsedHeightPx = with(density) { 52.dp.roundToPx() }
+                        val capsuleHeightPx = with(density) { 24.dp.roundToPx() }
+                        val availableSpace = (collapsedHeightPx - capsuleHeightPx).coerceAtLeast(0)
+                        val topOffsetPx = statusBarHeightPx + availableSpace / 2
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 12.dp)
+                                .offset { IntOffset(0, topOffsetPx) }
+                                .graphicsLayer { alpha = capsuleAlpha.value },
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            VersionCapsule(
+                                label = "官版",
+                                status = officialStatus!!
+                            )
+                            VersionCapsule(
+                                label = "共存版",
+                                status = coexistenceStatus!!
+                            )
+                        }
+                    }
+                }
             }
         },
         popupHost = {
