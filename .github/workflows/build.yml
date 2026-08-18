@@ -115,13 +115,13 @@ jobs:
         run: |
           if [ ! -f RELEASE_NOTES.md ]; then
             cat > RELEASE_NOTES.md <<'EOF'
-            ## 安装
+          ## 安装
 
-            1. 确保已安装 LSPosed。
-            2. 从下方 Assets 下载 `Ala Mobile Tool v*.apk`。
-            3. 在 LSPosed 中勾选 **Ala Mobile** 作为作用域。
-            4. 启动游戏，进入游戏后点击左上角「工具」按钮显示 overlay。
-            EOF
+          1. 确保已安装 LSPosed。
+          2. 从下方 Assets 下载 `Ala Mobile Tool v*.apk`。
+          3. 在 LSPosed 中勾选 **Ala Mobile** 作为作用域。
+          4. 启动游戏，进入游戏后点击左上角「工具」按钮显示 overlay。
+          EOF
             echo "RELEASE_NOTES.md not found, generated default install notes"
           else
             echo "Using committed RELEASE_NOTES.md"
