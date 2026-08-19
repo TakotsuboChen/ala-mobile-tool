@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
@@ -51,6 +52,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import tools.alamobile.mod.config.ModConfig
@@ -436,7 +438,8 @@ private fun SliderPreference(
 
 private fun curveName(curve: ModConfig.PedalCurve): String = when (curve) {
     ModConfig.PedalCurve.LINEAR -> "不修改（线性）"
-    ModConfig.PedalCurve.CUSTOM -> "自定义"}
+    ModConfig.PedalCurve.CUSTOM -> "自定义"
+}
 
 /**
  * 自定义响应曲线编辑器：多控制点曲线图。
@@ -490,14 +493,21 @@ private fun CurveEditor(
         )
         // 图表容器：ChartCanvas 占一个正方形（含留白），外面用 Box 包住并在
         // 四周标注"行程/输出"文字，不随拖拽刷新。
+        // 在平板/横屏上父容器宽度可能很大，正方形边长 = 宽度会撑爆屏幕一半。
+        // 这里加 heightIn(max = 屏幕高度 50%)：aspectRatio(1f) 会让边长取
+        // min(可用宽度, 高度上限)，宽屏时边长 = 屏幕高度 50%，仍是正方形、
+        // 居中显示；内部文字/线宽/padding 全部保持原 dp 不缩放。
+        val screenHeightDp = LocalConfiguration.current.screenHeightDp.dp
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 8.dp)
+                .padding(top = 8.dp),
+            contentAlignment = androidx.compose.ui.Alignment.Center
         ) {
             // 坐标轴标签（绘制在 Canvas 上，避免额外节点）。
             ChartCanvas(
                 modifier = Modifier
+                    .heightIn(max = screenHeightDp * 0.5f)
                     .aspectRatio(1f)
                     .pointerInput(localPoints) {
                         // pointerInput scope 里 this.size 是 IntSize，转成 Float Size。
