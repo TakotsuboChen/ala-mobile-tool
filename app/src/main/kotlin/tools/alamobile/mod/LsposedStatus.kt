@@ -1,6 +1,8 @@
 package tools.alamobile.mod
 
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
 
 /**
@@ -36,6 +38,9 @@ import android.util.Log
 object LsposedStatus {
 
     private const val TAG = "AlaMobileTool"
+
+    /** NPatch 管理器包名。Android 11+ 包可见性已在 AndroidManifest <queries> 声明。 */
+    const val NPATCH_PKG = "top.nkbe.npatch"
 
     /** 激活状态。UI 据此渲染卡片标题、描述、颜色与点击行为。 */
     enum class Status {
@@ -107,6 +112,32 @@ object LsposedStatus {
 
         Log.i(TAG, "evaluate: no path matched → INACTIVE")
         return Status.INACTIVE
+    }
+
+    /**
+     * 检测 NPatch 管理器是否已安装。
+     *
+     * 与 [tools.alamobile.mod.util.checkGameVersion] 同款静默查询模式：
+     * 依赖 AndroidManifest <queries> 已声明 `top.nkbe.npatch`（API 30+ 包可见性）。
+     * 未安装 / 查询失败一律返回 false，不抛异常。
+     */
+    fun isNpatchInstalled(context: Context): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.getPackageInfo(
+                    NPATCH_PKG,
+                    PackageManager.PackageInfoFlags.of(0)
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo(NPATCH_PKG, 0)
+            }
+            true
+        } catch (_: PackageManager.NameNotFoundException) {
+            false
+        } catch (_: Throwable) {
+            false
+        }
     }
 
     /** 本进程是否执行过 onModuleLoaded（markActivated 设的进程级 property，仅目标进程）。 */

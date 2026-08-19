@@ -369,6 +369,9 @@ private fun ActivationCard(eulaAccepted: Boolean) {
     // 之前 remember{ LsposedStatus.evaluate(awaitService=false) } 虽然不做 3s 轮询，
     // 但仍然在主线程做文件存在性检查 + SharedPreferences 读取，首次组合时会阻塞。
     var status by remember { mutableStateOf<LsposedStatus.Status?>(null) }
+    // NPatch 管理器是否已安装。未安装时不允许弹 Non-root 确认弹窗，
+    // 点击卡片改为 Toast 提示"未检测到 LSPosed 或 NPatch 框架"。
+    var npatchInstalled by remember { mutableStateOf(false) }
     var showNonRootDialog by remember { mutableStateOf(false) }
     // OverlayDialog 的 show 驱动退出动画：关闭时先把 dialogVisible 翻 false 触发动画，
     // onDismissFinished 回调里再清 showNonRootDialog（真正移除 composable）+ 执行副作用。
@@ -379,6 +382,11 @@ private fun ActivationCard(eulaAccepted: Boolean) {
 
     // 所有激活状态检测都在 IO 线程：awaitService=false 快速返回 + awaitService=true 轮询升级。
     LaunchedEffect(Unit) {
+        // NPatch 管理器安装检测（IO 线程，PackageManager 查询）。
+        npatchInstalled = withContext(Dispatchers.IO) {
+            LsposedStatus.isNpatchInstalled(context)
+        }
+
         // 先快速返回一个初始值（IO 线程），再异步升级到准确值
         val initial = withContext(Dispatchers.IO) {
             LsposedStatus.evaluate(context, awaitService = false)
@@ -389,7 +397,9 @@ private fun ActivationCard(eulaAccepted: Boolean) {
             LsposedStatus.evaluate(context, awaitService = true)
         }
         status = evaluated
-        if (evaluated == LsposedStatus.Status.INACTIVE && eulaAccepted) {
+        // 只有检测到 NPatch 已安装才自动弹 Non-root 确认弹窗；
+        // 未安装时点击卡片走 Toast 提示路径。
+        if (evaluated == LsposedStatus.Status.INACTIVE && eulaAccepted && npatchInstalled) {
             showNonRootDialog = true
             dialogVisible = true
         }
@@ -416,8 +426,9 @@ private fun ActivationCard(eulaAccepted: Boolean) {
 
     // EULA 同意后补弹激活弹窗：LaunchedEffect(Unit) 只执行一次，
     // 若 EULA 未同意时检测已完成（status=INACTIVE），用户点同意后需由此 effect 补弹。
+    // 同样要求 NPatch 已安装才弹。
     LaunchedEffect(eulaAccepted) {
-        if (eulaAccepted && status == LsposedStatus.Status.INACTIVE) {
+        if (eulaAccepted && status == LsposedStatus.Status.INACTIVE && npatchInstalled) {
             showNonRootDialog = true
             dialogVisible = true
         }
@@ -437,7 +448,7 @@ private fun ActivationCard(eulaAccepted: Boolean) {
     val descText = when (status) {
         null -> "正在检测模块激活状态"
         LsposedStatus.Status.LSPOSED -> "模块已通过 LSPosed 加载"
-        LsposedStatus.Status.NONROOT -> "模块已通过 Non-root LSPosed 加载"
+        LsposedStatus.Status.NONROOT -> "模块已通过 NPatch 免 Root 框架加载"
         LsposedStatus.Status.INACTIVE -> "点击确认是否使用了免 Root 框架"
     }
 
@@ -448,8 +459,16 @@ private fun ActivationCard(eulaAccepted: Boolean) {
         colors = CardDefaults.defaultColors(color = cardColor),
         onClick = {
             if (status == LsposedStatus.Status.INACTIVE) {
-                showNonRootDialog = true
-                dialogVisible = true
+                if (npatchInstalled) {
+                    showNonRootDialog = true
+                    dialogVisible = true
+                } else {
+                    android.widget.Toast.makeText(
+                        context,
+                        "未检测到 LSPosed 或 NPatch 框架，请确认是否已安装",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
             }
         },
         showIndication = true,
@@ -526,26 +545,34 @@ private fun NonRootConfirmDialog(
 ) {
     OverlayDialog(
         show = show,
-        title = "您是否安装了 LSPatch、NPatch 或 FPA 等免 Root LSPosed 框架？",
+        title = "NPatch 作用域确认",
         onDismissRequest = onDismiss,
         onDismissFinished = onDismissFinished,
         content = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                TextButton(
-                    text = "否",
-                    onClick = onDismiss,
-                    modifier = Modifier.weight(1f)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // 正文左对齐，与 EulaDialog 的条款正文排版一致。
+                Text(
+                    text = "您是否已经在 NPatch 管理器中对游戏开启了本模块的作用域？",
+                    fontSize = 14.sp
                 )
-                Spacer(modifier = Modifier.width(20.dp))
-                TextButton(
-                    text = "是",
-                    onClick = onConfirm,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.textButtonColorsPrimary()
-                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    TextButton(
+                        text = "否",
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(20.dp))
+                    TextButton(
+                        text = "是",
+                        onClick = onConfirm,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.textButtonColorsPrimary()
+                    )
+                }
             }
         }
     )

@@ -134,9 +134,9 @@ fun ConfigurePagerMiuix(
                         modifier = Modifier.padding(vertical = 12.dp),
                         verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)
                     ) {
-                        // ── Section 1: 游戏原生功能控制 ──
+                        // ── Section 1: 游戏原生特性控制 ──
                         SmallTitle(
-                            text = "游戏原生功能控制",
+                            text = "游戏原生特性控制",
                             insideMargin = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
                         )
                         Card(modifier = Modifier.fillMaxWidth()) {
@@ -178,7 +178,7 @@ fun ConfigurePagerMiuix(
                         Card(modifier = Modifier.fillMaxWidth()) {
                             OverlayDropdownPreference(
                                 title = "线性踏板",
-                                summary = "悬浮窗踏板替代游戏默认输入",
+                                summary = "悬浮窗踏板覆盖游戏输入",
                                 items = ModConfig.PedalMode.entries.map { modeName(it) },
                                 startAction = {
                                     Icon(
