@@ -107,7 +107,7 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 #### LSPosed 激活检测
 - 概览页实时显示激活状态（已激活 / 未激活）
 - 判定依据 `service.frameworkName == "LSPosed"`：LSPosed daemon 只在模块启用时推 binder，绑定即激活（参照 AdClose `onServiceBind` 思路）
-- NPatch 等非 root 框架（`frameworkName == "NPatch"`，API 101）不算 LSPOSED，自动弹窗确认（LSPatch/NPatch/FPA）
+- NPatch 等非 root 框架（`frameworkName == "NPatch"`，API 101）不算 LSPOSED；检测到 NPatch 已安装才弹"作用域确认"弹窗，未安装时点击激活卡片 Toast 提示
 
 #### 游戏版本检测
 - 概览页标题上方显示官版/共存版版本检测胶囊（每次启动自动检测）
@@ -197,7 +197,7 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 
 | 分类 | 功能项 | 说明 |
 |---|---|---|
-| 游戏原生功能控制 | 解锁付费内容 | 强制解锁 DLC 和 IAP（默认关闭） |
+| 游戏原生特性控制 | 解锁付费内容 | 强制解锁 DLC 和 IAP（默认关闭） |
 | | 牵引力控制（TC） | 启用原生 TC（默认开启） |
 | Overlay 控件 | 线性踏板 | 拓扑选择：关闭 / 单踏板 / 双踏板 |
 | | 死区（单踏板） | 0-20%，踏板过渡区域附近的无效范围 |
