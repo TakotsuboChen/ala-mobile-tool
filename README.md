@@ -3,7 +3,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/LSPosed%20API-102-green" alt="LSPosed API">
-  <img src="https://img.shields.io/badge/version-1.0.0%20Beta%205-orange" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.0-green" alt="Version">
   <img src="https://img.shields.io/badge/target-Ala%20Mobile-red" alt="Target">
 </p>
 
@@ -64,24 +64,25 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 #### 主菜单音乐替换
 - 将主菜单背景音乐替换为 **Hans Zimmer - F1**（320kbps）
 - 默认开启。离开主菜单自动暂停，返回自动恢复
-- 通过 native hook 静音游戏原生 `AudioSource.set_volume`，不依赖游戏设置
+- 通过 Native Hook 静音游戏原生 `AudioSource.set_volume`，不依赖游戏设置
 
 #### V10 引擎声浪
 - 将开场动画背景音替换为 **V10 引擎声浪**
 - 默认关闭。单次播放，播完即停
-- 通过 native hook 静音游戏开场 `introSound`（真 `AudioSource.set_volume`），独立于主菜单音乐替换
+- 通过 Native Hook 静音游戏开场 `introSound`（真 `AudioSource.set_volume`），独立于主菜单音乐替换
 
 #### 布局编辑
 - 长按工具按钮进入编辑模式
-- 拖拽移动 + 四角缩放各 overlay 位置
+- 拖拽移动 + 四角缩放各 Overlay 位置
 - 长按编辑层重置到出厂默认位置
 - 单踏板 / 双踏板模式的位置分别持久化，互不干扰
 
 #### 内购解锁（Unlock / IAP Bypass）
-- 双重锁定路径：**Native inline hook**（主路径）+ **Java 层 Xposed hook**（辅助路径）
+- 双重锁定路径：**Native inline Hook**（主路径）+ **Java 层 Xposed Hook**（辅助路径）
 - native 路径：`BillingManager.Awake` + `GetInstance`（兜底）+ 15 秒延迟 `forceUnlockNow` one-shot
 - Java 路径：`BillingBridge.checkOwned` / `checkOwnedInternal` → 注入 `OnAlreadyOwned` 消息
 - 首次解锁弹窗后写 `/data/data/<pkg>/files/ala_unlock_done.flag`，后续启动不再弹窗
+- 解锁走 `SetUnlocked(true)` 完整路径写 PlayerPrefs（`AnciTuttu`），修复「标记文件残留但 PlayerPrefs 丢失」导致车库车锁着的问题
 - **关闭解锁开关时**仍 hook `Awake` 预设 `IsUnlocked=true` + 阻挡 `OnOwnedNone`/`OnPurchaseFailed` 弹窗，
   防止正版用户每次冷启动看到"Fresh unlock"弹窗，同时让游戏正常走 Google Play 查询流程
 
@@ -92,22 +93,27 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 #### 配置即时生效
 - 三路配置同步：**Remote Preferences**（LSPosed daemon SQLite）→ **ConfigProvider**（ContentProvider）→ **定向广播**
 - 游戏不运行时改配置：下次启动从 daemon 读取最新值，不再丢失
-- 游戏运行时改配置：广播即时推送，overlay 重建生效
+- 游戏运行时改配置：广播即时推送，Overlay 重建生效
+
+#### 日志系统
+- 「启用日志」开关（默认关闭），`logEnabled` 统一门控 Java 层 `Logger` 与 native 层 `native_log` 两侧
+- 模块进程与游戏进程日志写入统一文件，设置页一键导出并分享（FileProvider + ShareSheet）
+- 游戏→模块日志经定向广播（`setComponent`）推送，规避包可见性与 IntentFirewall 限制
 
 #### AI 车隔离
 - 通过 `IRDSPlayerControls.Update()` 捕获玩家车 controller（该组件只挂在玩家车 GameObject 上）
 - writer 线程只写 `g_player_controller`（由 `IRDSPlayerControls` 设置），不受 AI 车干扰
-- 油门/刹车 hook 中 `is_player_controller` 检查 `playerControls` 字段（偏移 0x108）过滤 AI 车
+- 油门/刹车 Hook 中 `is_player_controller` 检查 `playerControls` 字段（偏移 0x108）过滤 AI 车
 
 #### 多框架兼容
-- 支持 **LSPosed**（root）和 **NPatch**（非 root）框架
+- 支持 **LSPosed**（Root）和 **NPatch**（非 Root）框架
 - NPatch 路径：通过 `content://top.nkbe.npatch.remote` ContentProvider 拿 remote service binder 读写配置
 - LSPosed 共存版：`System.setProperty` 进程级标记避免双 ClassLoader 重复注入
 
 #### LSPosed 激活检测
 - 概览页实时显示激活状态（已激活 / 未激活）
 - 判定依据 `service.frameworkName == "LSPosed"`：LSPosed daemon 只在模块启用时推 binder，绑定即激活（参照 AdClose `onServiceBind` 思路）
-- NPatch 等非 root 框架（`frameworkName == "NPatch"`，API 101）不算 LSPOSED；检测到 NPatch 已安装才弹"作用域确认"弹窗，未安装时点击激活卡片 Toast 提示
+- NPatch 等非 Root 框架（`frameworkName == "NPatch"`，API 101）不算 LSPOSED；检测到 NPatch 已安装才弹"作用域确认"弹窗，未安装时点击激活卡片 Toast 提示
 
 #### 游戏版本检测
 - 概览页标题上方显示官版/共存版版本检测胶囊（每次启动自动检测）
@@ -122,13 +128,13 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 
 #### Tool Button（工具按钮）
 - 96×96dp 圆角矩形按钮，前景为 App 图标（Base64 内嵌，绕过跨进程资源访问限制）
-- 单击：切换 overlay 展开/折叠
+- 单击：切换 Overlay 展开/折叠
 - 长按：进入编辑模式
 - 拖动：移动按钮自身位置（**不持久化**，每次打开游戏重置到默认位置）
 
 #### 版本门控
 - `VersionGate` 精准校验包名（原版 + 共存版）、`versionName` 和 `versionCode`
-- 非 8.0.4（200146）版本拒绝加载 native hook，避免 IL2CPP 偏移不匹配导致崩溃
+- 非 8.0.4（200146）版本拒绝加载 Native Hook，避免 IL2CPP 偏移不匹配导致崩溃
 
 #### 用户协议（EULA）
 - 强制确认弹窗，按版本号持久化（当前 v2），条款更新重新弹窗
@@ -136,7 +142,7 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 - 协议同意前激活弹窗不可见，保证协议优先
 - 协议弹窗需滚到底部阅读完才能点击「同意」
 
-#### vivo/Android 16 兼容
+#### vivo/iQOO OriginOS 兼容
 - 所有重操作（ShadowHook 初始化、JNI 调用、Service 绑定）延迟到 `Handler.post` 下一主循环
 - 避开 `createOrUpdateClassLoaderLocked` 内部 Resources 未初始化时序窗口
 
@@ -153,8 +159,8 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 ### 🚧 开发中
 
 - **自动 DRS**：已完成 `drsToggle()` 拦截，telemetry 赛道数据解析待实现
-- **手动换挡**：`DoGearShifting` hook 导致起步失败，需重新实现
-- **原生 ABS 控制**：`HandleABS` 被编译器内联到 carController，hook 不触发。当前通过写 `absEnable` 字段（偏移 0xC4）实现，待找到未被内联的正确入口点后再做开关
+- **手动换挡**：`DoGearShifting` Hook 导致起步失败，需重新实现
+- **原生 ABS 控制**：`HandleABS` 被编译器内联到 carController，Hook 不触发。当前通过写 `absEnable` 字段（偏移 0xC4）实现，待找到未被内联的正确入口点后再做开关
 
 ---
 
@@ -162,7 +168,7 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 
 ### 前提条件
 
-- 一部已 root 的 Android 手机，安装了 **LSPosed**（或兼容分支）框架
+- 一部已 Root 的 Android 手机，安装了 **LSPosed**（或兼容分支）框架
 - 已安装 **Ala Mobile 8.0.4**（versionCode 200146）
 
 ### 步骤
@@ -171,11 +177,11 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 2. 安装 APK 到手机
 3. 打开 **LSPosed Manager**，在模块列表中找到 **Ala Mobile Tool** 并启用
 4. 在作用域中勾选 **Ala Mobile**（原版 `com.Vince.AlamobileFormula` 或共存版 `com.Takotsubo.AlamobileFormula`）
-5. 启动游戏，进入后点击左上角工具按钮显示 overlay
+5. 启动游戏，进入后点击左上角工具按钮显示 Overlay
 
 > 💡 **首次使用**：建议先进入模块设置界面（打开模块 App）确认配置，再进入游戏。
 
-### 非 root 用户（NPatch）
+### 非 Root 用户（NPatch）
 
 1. 安装 [NPatch](https://github.com/nkbe/npatch) 框架、共存版游戏与模块
 2. 在 NPatch 中 Ala Mobile 的模块作用域勾选 Ala Mobile Tool
@@ -214,8 +220,8 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 | 功能项 | 说明 |
 |---|---|
 | 模块更新通道 | 稳定版（仅正式 Release）或预览版（含 Pre-release） |
-| 启用日志 | 记录模块运行日志 |
-| 导出并分享日志 | 导出当前日志文件并分享 |
+| 启用日志 | 开关日志记录（logEnabled 统一门控 Java/native 文件输出，默认关闭） |
+| 导出并分享日志 | 合并模块与游戏进程日志，经 FileProvider 分享 |
 | 清除激活标记 | 删除 Non-root 确认标记与旧版激活残留（filesDir，pm clear 可清）；不碰 EULA 同意状态 |
 | 清除跳过更新标记 | 恢复被跳过版本的自动弹窗提示 |
 | 用户协议 | 重新查看并确认用户协议 |
@@ -228,15 +234,15 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 |---|---|---|
 | 8.0.4 | 200146 | arm64-v8a |
 
-> 其他版本请自行测试。IL2CPP 方法地址随版本变化，非匹配版本无法加载 native hook。
+> 已做版本门控，其他版本不会生效。IL2CPP 方法地址随版本变化，非匹配版本无法加载 Native Hook。
 
 ---
 
 ## 已知问题
 
 - 自动 DRS 仅完成 `drsToggle()` 拦截，赛道数据自动判断尚未实现
-- 手动换挡因 `DoGearShifting` hook 导致起步失败，**已暂时禁用**，待重新实现
-- ABS 原生 hook（`HandleABS`）被编译器内联，当前通过写字段（偏移 0xC4）替代，开关尚未实现
+- 手动换挡因 `DoGearShifting` Hook 导致起步失败，**已暂时禁用**，待重新实现
+- ABS 原生 Hook（`HandleABS`）被编译器内联，当前通过写字段（偏移 0xC4）替代，开关尚未实现
 - **弯道「顿挫」通常来自游戏内置的刹车辅助**，与模块无关，请在游戏设置中关闭辅助功能
 - 共存版（重打包改包名）需配合双 ClassLoader 守卫，当前版本已修复
 
@@ -258,7 +264,7 @@ Ala Mobile Tool (LSPosed 模块 APK)
 ├── IntroSoundPlayer        # V10 引擎声浪播放器（MediaPlayer + 轮询）
 ├── ConfigProvider          # 跨进程配置 IPC（ContentProvider）
 ├── ConfigReceiver          # 配置广播接收器
-├── BillingHook             # Java 层内购解锁（Xposed hook）
+├── BillingHook             # Java 层内购解锁（Xposed Hook）
 ├── LsposedStatus           # 激活状态判定（frameworkName 区分框架 + Non-root 弹窗确认）
 ├── EulaManager             # 用户协议管理
 ├── VersionGate             # 版本门控
@@ -274,7 +280,7 @@ Ala Mobile Tool (LSPosed 模块 APK)
 - 现代 libxposed API 102（min 101）
 - Kotlin 2.4.10 + Jetpack Compose + miuix KMP 0.9.3
 - ByteDance ShadowHook 2.0.1（UNIQUE 模式）
-- C 语言 IL2CPP 运行时 inline hook
+- C 语言 IL2CPP 运行时 inline Hook
 - AGP 9.3.1 / NDK 26.1.10909125 / Gradle 9.6.1
 
 ---
@@ -301,7 +307,7 @@ tools/run-il2cpp-dumper.sh
 ## 路线图
 
 - [ ] 自动 DRS：赛道 telemetry 解析 + 自动开关
-- [ ] 手动换挡：重新实现 `DoGearShifting` hook
+- [ ] 手动换挡：重新实现 `DoGearShifting` Hook
 - [ ] 原生 ABS 开关：找到未被内联的正确入口点后接入
 - [ ] 工具按钮位置持久化开关
 - [ ] 多语言支持
@@ -328,6 +334,9 @@ tools/run-il2cpp-dumper.sh
 
 <details>
 <summary>展开查看</summary>
+
+**v1.0.0**（2026-08-19，正式版，versionCode 100300）
+> 首个正式版本。新增完整日志系统（logEnabled 开关统一门控 Java/native 文件输出 + 一键导出分享）；NPatch 激活确认流程收窄（激活弹窗收敛为「NPatch 作用域确认」，仅检测到 NPatch 已安装才弹出，未安装点击激活卡片 Toast 提示）；解锁持久化加固（走 `SetUnlocked(true)` 完整路径写 PlayerPrefs，修复标记文件残留导致车库车锁着的问题）。修复响应曲线图表在平板/横屏下高度溢出撑爆卡片、LSPosed 激活检测轮询超时误弹免 Root 弹窗。
 
 **v1.0.0 Beta 5**（2026-08-18）
 > 新增 V10 引擎声浪替换开场动画背景音、应用内检查更新（GitHub 官方+镜像竞速，Markdown Release Note 渲染，下载+安装+跳过版本）、更新通道设置（稳定版/预览版）、概览页游戏版本检测胶囊（官版/共存版适配状态）；恢复 EULA 启动门控（滚到底才能同意）；弹窗退出动画；支持开发卡片+捐赠弹窗；QQ 群卡片直接拉起 QQ App。配置页重组：功能开关改名游戏原生功能控制（仅解锁+TC），主菜单音乐与 V10 声浪移至杂项分类；设置页重组为模块更新通道/日志/激活协议三组，新增清除跳过更新标记；线性踏板关闭时响应曲线整组收回；移除显示悬浮窗开关。修复弹窗系统返回键不关闭直接退桌面（删除手动 NavigationEventDispatcherOwner）、清除激活标记误清 EULA 同意状态。

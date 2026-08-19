@@ -17,8 +17,8 @@ android {
         applicationId = "tools.alamobile.mod"
         minSdk = 26
         targetSdk = 35
-        versionCode = 100250
-        versionName = "1.0.0 Beta 5"
+        versionCode = 100300
+        versionName = "1.0.0"
     }
 
     signingConfigs {

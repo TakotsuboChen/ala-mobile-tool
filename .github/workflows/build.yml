@@ -100,6 +100,14 @@ jobs:
           echo "Renamed $src → $dst"
           echo "apk_path=${dst}" >> "$GITHUB_OUTPUT"
           echo "apk_name=${apk_name}" >> "$GITHUB_OUTPUT"
+          # 阶段自动推导：Alpha/Beta 发 Pre-release，正式版发正式 Release。
+          # 与版本命名规则保持一致（versionName 含阶段后缀 ⇔ prerelease）。
+          # 避免之前硬编码 prerelease:true 导致正式版被误发成 Pre-release 的问题。
+          if [[ "$ver" == *"Beta"* || "$ver" == *"Alpha"* || "$ver" == *"Pre"* ]]; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v7
@@ -131,7 +139,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
         with:
-          prerelease: true
+          prerelease: ${{ steps.rename_apk.outputs.is_prerelease == 'true' }}
           name: ${{ github.ref_name }}
           files: ${{ steps.rename_apk.outputs.apk_path }}
           body_path: RELEASE_NOTES.md
