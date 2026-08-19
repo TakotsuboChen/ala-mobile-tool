@@ -10,6 +10,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.net.ProxySelector
 import java.util.concurrent.TimeUnit
 
 /**
@@ -81,22 +82,27 @@ object UpdateChecker {
     // GitHub 官方 API 和镜像站，同时请求取先到的
     // 稳定版通道用 /releases/latest（只返回非 pre-release）
     // 预览版通道用 /releases?per_page=1（含 pre-release）
+    // 注意：kkgithub.com 的 /api/v3/ 路径已不可用（404），
+    // 改用 gh-proxy.com 代理 api.github.com。
     private fun apiUrl(channel: Int) = if (channel == UpdatePreferences.CHANNEL_STABLE) {
         "https://api.github.com/repos/$REPO/releases/latest"
     } else {
         "https://api.github.com/repos/$REPO/releases?per_page=1"
     }
     private fun mirrorUrl(channel: Int) = if (channel == UpdatePreferences.CHANNEL_STABLE) {
-        "https://kkgithub.com/api/v3/repos/$REPO/releases/latest"
+        "https://gh-proxy.com/https://api.github.com/repos/$REPO/releases/latest"
     } else {
-        "https://kkgithub.com/api/v3/repos/$REPO/releases?per_page=1"
+        "https://gh-proxy.com/https://api.github.com/repos/$REPO/releases?per_page=1"
     }
 
     private val json = Json { ignoreUnknownKeys = true }
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        // 显式走系统代理：OkHttp 默认不配 ProxySelector 时，在 Clash/Surge TUN
+        // 模式下可能绕过系统代理，导致"挂全局梯子也下不动"。
+        .proxySelector(ProxySelector.getDefault())
         .build()
 
     /**

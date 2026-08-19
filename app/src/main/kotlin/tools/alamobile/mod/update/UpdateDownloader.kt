@@ -6,6 +6,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.net.ProxySelector
 import java.util.concurrent.TimeUnit
 
 /**
@@ -31,16 +32,41 @@ interface DownloadCallback {
 /**
  * 下载更新 APK。
  *
- * 同时尝试官方下载 URL 和镜像站 URL（把 `github.com` 替换为 `kkgithub.com`），
- * 哪个先连上用哪个。下载到 `cacheDir/download/` 目录。
+ * 依次尝试 GitHub 官方 URL 和多个国内代理镜像，哪个成功用哪个。
+ * 下载到 `cacheDir/download/` 目录。
+ *
+ * 代理镜像说明：
+ * - `kkgithub.com` 只镜像 git/页面内容，**不镜像 release asset 下载**（返回 404），
+ *   所以不能用于下载。
+ * - `gh-proxy.com` / `ghproxy.net` / `ghproxy.com` 是 GitHub release asset 代理，
+ *   实测可达（2026-08）。
+ *
+ * OkHttp 代理说明：
+ * - 显式设置 [ProxySelector.getDefault()]，让 OkHttp 走系统 VPN/HTTP 代理。
+ * - 不显式设置时 OkHttp 在某些 TUN 模式下可能绕过系统代理，导致挂梯子也下不动。
  *
  * 下载过程在 IO 线程，通过 [DownloadCallback] 回调主线程进度。
  */
 object UpdateDownloader {
 
+    /**
+     * 国内 GitHub release asset 代理镜像列表（按优先级排序）。
+     *
+     * 使用方式：在原始 GitHub URL 前拼接代理前缀。
+     * 例如 `https://gh-proxy.com/https://github.com/...`。
+     */
+    private val PROXY_PREFIXES = listOf(
+        "https://gh-proxy.com/",
+        "https://ghproxy.net/",
+        "https://ghproxy.com/",
+    )
+
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        // 显式走系统代理：OkHttp 默认不配 ProxySelector 时，在 Clash/Surge TUN
+        // 模式下可能绕过系统代理，导致"挂全局梯子也下不动"。
+        .proxySelector(ProxySelector.getDefault())
         .build()
 
     /**
@@ -60,10 +86,8 @@ object UpdateDownloader {
         val dir = UpdatePreferences.getDownloadDirectory(context)
         val outputFile = File(dir, fileName)
 
-        // 镜像 URL：把 github.com 替换为 kkgithub.com
-        val mirrorUrl = downloadUrl.replace("github.com", "kkgithub.com")
-
-        val urls = listOf(downloadUrl, mirrorUrl)
+        // URL 尝试顺序：官方 → 各代理镜像
+        val urls = listOf(downloadUrl) + PROXY_PREFIXES.map { "$it$downloadUrl" }
 
         var lastError: String? = null
         for (url in urls) {

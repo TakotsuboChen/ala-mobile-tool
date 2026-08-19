@@ -15,3 +15,4 @@ Ala Mobile Tool 首个正式版本。自 Beta 5 以来新增完整日志系统�
 - 修复了响应曲线图表在平板/横屏下高度溢出撑爆卡片的问题（高度钳制到屏幕 50%）
 - 修复了 LSPosed 激活检测轮询超时误弹免 Root 弹窗的问题（改为事件驱动）
 - 修复了解锁标记文件残留但 PlayerPrefs 丢失时车库车辆锁着的问题（解锁走 `SetUnlocked(true)` 完整路径重写 PlayerPrefs）
+- 修复了应用内检查更新下载不动的问题（`kkgithub.com` 不镜像 release asset，改用 `gh-proxy.com` 等多代理 fallback；OkHttp 显式走系统代理，修复挂梯子也不生效的问题）
