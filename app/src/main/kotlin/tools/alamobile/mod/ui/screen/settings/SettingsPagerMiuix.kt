@@ -31,7 +31,9 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import tools.alamobile.mod.EulaManager
 import tools.alamobile.mod.LsposedStatus
 import tools.alamobile.mod.ui.EulaDialog
@@ -177,7 +179,9 @@ fun SettingsPagerMiuix(
                                 },
                                 onClick = {
                                     scope.launch {
-                                        val uri = LogExporter.export(context)
+                                        val uri = withContext(Dispatchers.IO) {
+                                            LogExporter.export(context)
+                                        }
                                         if (uri != null) {
                                             LogExporter.share(context, uri)
                                         } else {

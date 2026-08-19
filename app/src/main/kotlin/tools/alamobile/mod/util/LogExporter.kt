@@ -8,6 +8,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 /**
  * 日志导出工具：收集模块进程 + 游戏进程的 Java/native 日志，
@@ -32,6 +33,62 @@ object LogExporter {
     )
 
     /**
+     * 请求游戏进程重新推送最新日志，轮询等待缓存文件更新后返回。
+     *
+     * 日志推送是"推"模式（游戏进程 → 模块进程），只在两个时机推送：
+     * 1) 15s 延迟末尾 2) ConfigReceiver 收到配置更新/REQUEST_LOGS 时。
+     * 用户点"导出日志"时可能距上次推送已过很久，BillingManager.Awake() 等
+     * 后续 hook 日志已产生但未推送。这里发 REQUEST_LOGS 广播触发 ConfigReceiver
+     * 重新推送最新日志文件，然后轮询等待缓存文件更新。
+     *
+     * 同步策略：记录发送广播前的缓存文件 lastModified，发广播后每 200ms 检查一次，
+     * 缓存文件更新了（说明新日志分片已拼接收齐）就立即继续；超时 [timeoutMs]
+     *（默认 10 秒）就放弃，用旧缓存导出。游戏没运行时广播无人接收，直接超时用旧缓存。
+     */
+    private suspend fun requestFreshLogs(context: Context, timeoutMs: Long = 10000) {
+        try {
+            val cachedJava = File(context.cacheDir, "game_java.log")
+            val cachedNative = File(context.cacheDir, "game_native.log")
+            val oldJavaTime = cachedJava.lastModified()
+            val oldNativeTime = cachedNative.lastModified()
+
+            // 发 REQUEST_LOGS 广播让游戏进程 ConfigReceiver 重新推送最新日志。
+            // ConfigReceiver 是动态注册的（运行在游戏进程），用 setPackage 定向
+            // 到游戏包——与配置更新广播同理，模块进程通过 <queries> 声明可见游戏包。
+            for (pkg in GAME_PACKAGES) {
+                val intent = Intent("tools.alamobile.mod.REQUEST_LOGS")
+                    .setPackage(pkg)
+                    .addFlags(0x0020) // FLAG_RECEIVER_INCLUDE_BACKGROUND
+                context.sendBroadcast(intent)
+                android.util.Log.i("AlaMobileTool", "LogExporter: sent REQUEST_LOGS to $pkg")
+            }
+
+            // 轮询等待缓存文件更新——用 delay 挂起不阻塞主线程。
+            // 分片广播从游戏进程回到模块进程的延迟不固定（flyme 后台调度），
+            // 固定 sleep 可能太短（用了旧缓存）或太长（用户等太久）。
+            val pollInterval = 200L
+            val deadline = System.currentTimeMillis() + timeoutMs
+            var waited = 0L
+            while (System.currentTimeMillis() < deadline) {
+                delay(pollInterval)
+                waited += pollInterval
+                val newJavaTime = cachedJava.lastModified()
+                val newNativeTime = cachedNative.lastModified()
+                // 两个文件都更新了（或游戏没运行两者都不存在）→ 完成
+                val javaUpdated = newJavaTime > oldJavaTime || !cachedJava.exists()
+                val nativeUpdated = newNativeTime > oldNativeTime || !cachedNative.exists()
+                if (javaUpdated && nativeUpdated) {
+                    android.util.Log.i("AlaMobileTool", "LogExporter: fresh logs received after ${waited}ms (java=${cachedJava.length()} native=${cachedNative.length()})")
+                    return
+                }
+            }
+            android.util.Log.w("AlaMobileTool", "LogExporter: REQUEST_LOGS timed out after ${waited}ms, using cached logs")
+        } catch (e: Throwable) {
+            android.util.Log.w("AlaMobileTool", "LogExporter: requestFreshLogs failed: ${e.message}")
+        }
+    }
+
+    /**
      * 收集所有日志文件，合并到一个文件，返回 FileProvider URI。
      *
      * 读取策略（Android 11+ scoped storage 兼容）：
@@ -46,7 +103,10 @@ object LogExporter {
      *
      * @return URI 供分享；null 表示没有任何可导出的日志
      */
-    fun export(context: Context): Uri? {
+    suspend fun export(context: Context): Uri? {
+        // 先请求游戏进程推送最新日志（如果游戏在运行），等待广播往返。
+        requestFreshLogs(context)
+
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val outFile = File(context.cacheDir, "logs/ala_tool_log_$timestamp.txt")
         outFile.parentFile?.mkdirs()

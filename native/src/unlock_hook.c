@@ -276,7 +276,16 @@ static void hook_awake(void *this_ptr) {
         return;
     }
 
-    // 始终设字段（幂等，重复设 true 无副作用）。
+    // 先调 SetUnlocked(true)，让它自己设 IsUnlocked + 写 PlayerPrefs("AnciTuttu",1)。
+    // 不预设 IsUnlocked=true —— SetUnlocked 内部有 if (!IsUnlocked) 检查：
+    //   - PlayerPrefs 有值时 IsUnlocked 初始已是 true → SetUnlocked 跳过 → 不弹窗
+    //   - PlayerPrefs 无值时 IsUnlocked 初始是 false → SetUnlocked 走完整逻辑
+    //     → 写 PlayerPrefs + 触发 OnUnlockedChanged → 弹窗（合理的"重新解锁"行为）
+    // 这修复了"标记文件残留但 PlayerPrefs 丢失"的 bug：之前 has_unlocked_before()
+    // 返回 true → 跳过 SetUnlocked → PlayerPrefs 没被重新写入 → 车库看到车锁着。
+    force_unlock_direct(this_ptr);
+
+    // SetUnlocked 已设 IsUnlocked=true，这里补设其余字段（幂等）。
     bool *is_unlocked = (bool *)((uint8_t *)this_ptr + g_config.billing_manager_is_unlocked_field_offset);
     bool *has_store_connection = (bool *)((uint8_t *)this_ptr + g_config.billing_manager_has_store_connection_field_offset);
     bool *has_completed_check = (bool *)((uint8_t *)this_ptr + g_config.billing_manager_has_completed_ownership_check_field_offset);
@@ -287,16 +296,18 @@ static void hook_awake(void *this_ptr) {
 
     LOGI("Set BillingManager fields: IsUnlocked=true, HasStoreConnection=true, HasCompletedOwnershipCheck=true");
 
-    // 首次解锁才调 SetUnlocked + OnAlreadyOwned（触发 Unity 弹窗 + 持久化）。
-    // 已解锁过（标记文件存在）就只设字段，不调 Unity 侧逻辑 → 不弹窗。
-    // 标记文件在 /data/data/<pkg>/files/ala_unlock_done.flag，清数据会删。
+    // OnAlreadyOwned 只在首次解锁时调（触发 Unity 侧"已拥有"回调）。
+    // has_unlocked_before() 控制是否调 OnAlreadyOwned —— 标记文件存在时跳过，
+    // 避免重复调 OnAlreadyOwned（Unity 侧可能崩或重复弹窗）。
+    // 注意：SetUnlocked 不受 has_unlocked_before() 控制 —— 每次都调，
+    // 让 SetUnlocked 内部的 if (!IsUnlocked) 检查决定是否写 PlayerPrefs。
     if (has_unlocked_before()) {
-        LOGI("Already unlocked before, skipping SetUnlocked/OnAlreadyOwned (no popup)");
+        LOGI("Already unlocked before, skipping OnAlreadyOwned (no extra popup)");
+        mark_unlocked_done();  // 确保标记文件存在
         return;
     }
 
-    LOGI("First-time unlock, calling SetUnlocked + OnAlreadyOwned (will show popup)");
-    force_unlock_direct(this_ptr);
+    LOGI("First-time unlock, calling OnAlreadyOwned (will show popup)");
     force_unlock_via_on_already_owned(this_ptr);
     mark_unlocked_done();
 
@@ -351,7 +362,11 @@ static void *hook_get_instance(void) {
         return instance;
     }
 
-    // 直接强制解锁字段 + 调 OnAlreadyOwned，逻辑同 hook_awake。
+    // 先调 SetUnlocked(true) 让它写 PlayerPrefs —— 不预设 IsUnlocked，让
+    // SetUnlocked 内部 if (!IsUnlocked) 决定是否走完整逻辑。与 hook_awake 同理。
+    force_unlock_direct(instance);
+
+    // 补设其余字段（幂等）。
     bool *is_unlocked = (bool *)((uint8_t *)instance + g_config.billing_manager_is_unlocked_field_offset);
     bool *has_store_connection = (bool *)((uint8_t *)instance + g_config.billing_manager_has_store_connection_field_offset);
     bool *has_completed_check = (bool *)((uint8_t *)instance + g_config.billing_manager_has_completed_ownership_check_field_offset);
@@ -362,15 +377,14 @@ static void *hook_get_instance(void) {
 
     LOGI("GetInstance: Set fields IsUnlocked=true, HasStoreConnection=true, HasCompletedOwnershipCheck=true");
 
-    // 首次解锁才调 SetUnlocked + OnAlreadyOwned（触发 Unity 弹窗）。
-    // 已解锁过（标记文件存在）就只设字段 → 不弹窗。
+    // OnAlreadyOwned 只在首次解锁时调（标记文件控制），避免重复弹窗。
     if (has_unlocked_before()) {
-        LOGI("GetInstance: Already unlocked before, skipping SetUnlocked/OnAlreadyOwned (no popup)");
+        LOGI("GetInstance: Already unlocked before, skipping OnAlreadyOwned (no extra popup)");
+        mark_unlocked_done();
         return instance;
     }
 
-    LOGI("GetInstance: First-time unlock, calling SetUnlocked + OnAlreadyOwned (will show popup)");
-    force_unlock_direct(instance);
+    LOGI("GetInstance: First-time unlock, calling OnAlreadyOwned (will show popup)");
     force_unlock_via_on_already_owned(instance);
     mark_unlocked_done();
 
@@ -658,25 +672,8 @@ bool unlock_force_now(void) {
         return false;
     }
 
-    // 设字段（幂等）
-    bool *is_unlocked = (bool *)((uint8_t *)instance + g_config.billing_manager_is_unlocked_field_offset);
-    bool *has_store_connection = (bool *)((uint8_t *)instance + g_config.billing_manager_has_store_connection_field_offset);
-    bool *has_completed_check = (bool *)((uint8_t *)instance + g_config.billing_manager_has_completed_ownership_check_field_offset);
-    *is_unlocked = true;
-    *has_store_connection = true;
-    *has_completed_check = true;
-    LOGI("unlock_force_now: Set fields IsUnlocked=true, HasStoreConnection=true, HasCompletedOwnershipCheck=true");
-
-    // 首次解锁才调 SetUnlocked + OnAlreadyOwned（触发 Unity 弹窗）。
-    // 已解锁过（标记文件存在）就只设字段 → 不弹窗。
-    if (has_unlocked_before()) {
-        LOGI("unlock_force_now: Already unlocked before, skipping SetUnlocked/OnAlreadyOwned (no popup)");
-        return true;
-    }
-
-    LOGI("unlock_force_now: First-time unlock, calling SetUnlocked + OnAlreadyOwned (will show popup)");
-
-    // 调 SetUnlocked(true)
+    // 先调 SetUnlocked(true) 让它写 PlayerPrefs —— 不预设 IsUnlocked，让
+    // SetUnlocked 内部 if (!IsUnlocked) 决定是否走完整逻辑。与 hook_awake 同理。
     uintptr_t set_unlocked_offset = g_config.billing_manager_set_unlocked_offset;
     if (set_unlocked_offset == 0) {
         set_unlocked_offset = 0x1874780; // Ala Mobile 8.0.4 (200146)
@@ -686,6 +683,24 @@ bool unlock_force_now(void) {
     LOGI("unlock_force_now: calling SetUnlocked(true) on BillingManager %p", instance);
     set_unlocked(instance, true);
     LOGI("unlock_force_now: SetUnlocked called successfully");
+
+    // 补设字段（幂等）
+    bool *is_unlocked = (bool *)((uint8_t *)instance + g_config.billing_manager_is_unlocked_field_offset);
+    bool *has_store_connection = (bool *)((uint8_t *)instance + g_config.billing_manager_has_store_connection_field_offset);
+    bool *has_completed_check = (bool *)((uint8_t *)instance + g_config.billing_manager_has_completed_ownership_check_field_offset);
+    *is_unlocked = true;
+    *has_store_connection = true;
+    *has_completed_check = true;
+    LOGI("unlock_force_now: Set fields IsUnlocked=true, HasStoreConnection=true, HasCompletedOwnershipCheck=true");
+
+    // OnAlreadyOwned 只在首次解锁时调（标记文件控制），避免重复弹窗。
+    if (has_unlocked_before()) {
+        LOGI("unlock_force_now: Already unlocked before, skipping OnAlreadyOwned (no extra popup)");
+        mark_unlocked_done();
+        return true;
+    }
+
+    LOGI("unlock_force_now: First-time unlock, calling OnAlreadyOwned (will show popup)");
 
     // 也调 OnAlreadyOwned 辅助
     uintptr_t on_already_owned_offset = g_config.billing_manager_on_already_owned_offset;

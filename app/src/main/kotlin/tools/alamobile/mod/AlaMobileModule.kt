@@ -234,6 +234,7 @@ class AlaMobileModule : XposedModule() {
             try {
                 val receiver = ConfigReceiver()
                 val filter = android.content.IntentFilter(ConfigReceiver.ACTION_CONFIG_UPDATE)
+                filter.addAction(ConfigReceiver.ACTION_REQUEST_LOGS)
                 // RECEIVER_EXPORTED：广播来自模块进程（不同应用），跨应用派发，
                 // 必须用 EXPORTED 标志（Android 13+ 强制要求）。用 ContextCompat
                 // 重载：内部按 SDK_INT 自动分发旧/新 API，且对 lint 的
@@ -462,12 +463,13 @@ class AlaMobileModule : XposedModule() {
                         val javaLog = if (javaLogFile.exists()) javaLogFile.readText() else ""
                         val nativeLog = if (nativeLogFile.exists()) nativeLogFile.readText() else ""
                         if (javaLog.isNotEmpty() || nativeLog.isNotEmpty()) {
-                            // 通过非定向广播把日志推到模块进程的 LogReceiver。
+                            // 通过 setComponent 显式广播把完整日志分片推到模块进程的 LogReceiver。
                             // LSPosed 下 ContentProvider 和定向广播都因包可见性不可达，
-                            // Remote Preferences 在 Hook 进程只读。非定向广播不查包可见性，
-                            // 系统分发给所有匹配的静态 receiver。
+                            // Remote Preferences 在 Hook 进程只读。显式组件广播不查包可见性，
+                            // 绕过 Android 11+ 限制和 AOSP 隐式广播跳过后台静态 receiver 逻辑。
+                            // 日志分片传输（每片 256KB），接收端拼接完整日志——不截断。
                             val pushed = tools.alamobile.mod.config.LogReceiver.send(ctx!!, javaLog, nativeLog)
-                            logX(Log.INFO, TAG, "Pushed game logs via broadcast (java=${javaLog.length} native=${nativeLog.length} success=$pushed)")
+                            logX(Log.INFO, TAG, "Pushed game logs via chunked broadcast (java=${javaLog.length} native=${nativeLog.length} success=$pushed)")
                         }
                     }
                 } catch (e: Throwable) {
@@ -488,18 +490,5 @@ class AlaMobileModule : XposedModule() {
         } catch (e: Throwable) {
             null
         }
-    }
-
-    /** 把字符串按 chunkSize 分块，供 Remote Preferences 存储。 */
-    private fun chunkString(s: String, chunkSize: Int): List<String> {
-        if (s.isEmpty()) return emptyList()
-        val chunks = ArrayList<String>((s.length + chunkSize - 1) / chunkSize)
-        var i = 0
-        while (i < s.length) {
-            val end = minOf(i + chunkSize, s.length)
-            chunks.add(s.substring(i, end))
-            i = end
-        }
-        return chunks
     }
 }
