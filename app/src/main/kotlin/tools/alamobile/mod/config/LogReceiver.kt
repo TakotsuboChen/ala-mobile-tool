@@ -98,7 +98,7 @@ class LogReceiver : BroadcastReceiver() {
                         .putExtra(EXTRA_CHUNK_TOTAL, chunks.size)
                         .putExtra(EXTRA_SESSION_ID, sessionId)
                         .putExtra(EXTRA_CHUNK_DATA, chunk)
-                        .addFlags(0x0020) // FLAG_RECEIVER_INCLUDE_BACKGROUND — 强制投递给后台静态 receiver
+                        .addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES) // 强制投递给后台静态 receiver
                     context.sendBroadcast(intent)
                 } catch (e: Throwable) {
                     Log.w(TAG, "LogReceiver.send: chunk $index/${chunks.size} ($type) failed: ${e.message}")

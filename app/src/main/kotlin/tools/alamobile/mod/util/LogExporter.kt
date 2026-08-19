@@ -58,7 +58,7 @@ object LogExporter {
             for (pkg in GAME_PACKAGES) {
                 val intent = Intent("tools.alamobile.mod.REQUEST_LOGS")
                     .setPackage(pkg)
-                    .addFlags(0x0020) // FLAG_RECEIVER_INCLUDE_BACKGROUND
+                    .addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
                 context.sendBroadcast(intent)
                 android.util.Log.i("AlaMobileTool", "LogExporter: sent REQUEST_LOGS to $pkg")
             }
