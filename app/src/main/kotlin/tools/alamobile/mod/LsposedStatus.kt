@@ -180,6 +180,10 @@ object LsposedStatus {
      */
     fun clearAll(context: Context) {
         clearNonRootConfirmed(context)
+        // 清内存中的 xposedService 引用——进程不重启时 service 仍在内存，
+        // 下次 evaluate 立即命中 LSPOSED，"清除"形同虚设。清掉后 evaluate
+        // 才会真正走完整检测流程（下次 service 重新绑上时自然恢复）。
+        App.clearService()
         // 旧版本（property/daemon module_loaded 路径）残留清理，向后兼容。
         // 新方案下这两个标记已不再写，但用户可能从旧版升级，清掉避免迷惑。
         val service = App.xposedService

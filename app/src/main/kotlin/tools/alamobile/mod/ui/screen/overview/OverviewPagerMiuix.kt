@@ -34,6 +34,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,6 +65,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import tools.alamobile.mod.BuildConfig
 import tools.alamobile.mod.EulaManager
+import tools.alamobile.mod.App
 import tools.alamobile.mod.LsposedStatus
 import tools.alamobile.mod.ui.EulaDialog
 import tools.alamobile.mod.ui.SupportDialog
@@ -393,6 +395,25 @@ private fun ActivationCard(eulaAccepted: Boolean) {
         }
     }
 
+    // 事件驱动刷新：订阅 App.lsposedServiceBound，service 无论多晚绑上都触发
+    // 重新 evaluate。根治"3s 轮询超时→INACTIVE→弹窗，但 service 随后绑上"的
+    // 时序问题——service 绑上时 emit true → 重新 evaluate → LSPOSED 覆盖
+    // INACTIVE/NONROOT 并清掉 nonroot flag，弹窗若已弹出也会因状态变化失去意义。
+    val lsposedBound by App.lsposedServiceBound.collectAsState()
+    LaunchedEffect(lsposedBound) {
+        if (lsposedBound) {
+            val evaluated = withContext(Dispatchers.IO) {
+                LsposedStatus.evaluate(context, awaitService = false)
+            }
+            if (evaluated == LsposedStatus.Status.LSPOSED) {
+                status = LsposedStatus.Status.LSPOSED
+                // LSPosed 真激活覆盖 Non-root：关掉弹窗（若在显示），清掉 nonroot flag。
+                showNonRootDialog = false
+                dialogVisible = false
+            }
+        }
+    }
+
     // EULA 同意后补弹激活弹窗：LaunchedEffect(Unit) 只执行一次，
     // 若 EULA 未同意时检测已完成（status=INACTIVE），用户点同意后需由此 effect 补弹。
     LaunchedEffect(eulaAccepted) {
@@ -476,7 +497,11 @@ private fun ActivationCard(eulaAccepted: Boolean) {
                 // 先把 visible 翻 false 触发退出动画，动画结束后 onDismissFinished 执行真正逻辑
                 pendingAction = {
                     LsposedStatus.confirmNonRoot(context)
-                    status = LsposedStatus.evaluate(context, awaitService = false)
+                    // 用 awaitService=true 重新检测：若 LSPosed service 恰好刚绑上
+                    //（3s 轮询窗口内），会优先返回 LSPOSED 并清掉刚写的 nonroot
+                    // flag——这正是"LSPosed 状态高于一切"的语义：检测到 LSPosed
+                    // 真激活就覆盖 Non-root，不保留 Non-root 已激活状态。
+                    status = LsposedStatus.evaluate(context, awaitService = true)
                 }
                 dialogVisible = false
             },

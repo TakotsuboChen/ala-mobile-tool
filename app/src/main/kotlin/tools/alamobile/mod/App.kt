@@ -8,6 +8,9 @@ import android.os.IBinder
 import android.util.Log
 import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
 import tools.alamobile.mod.config.ModConfig
 
@@ -75,6 +78,39 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
         @Volatile
         var xposedService: XposedService? = null
             private set
+
+        /**
+         * LSPosed service 绑定状态流（仅 frameworkName == "LSPosed" 时 emit true）。
+         *
+         * [LsposedStatus.evaluate] 靠轮询等异步绑定有固定超时窗口——daemon 推
+         * binder 的延迟超过 3s 时轮询已结束，UI 卡在 INACTIVE 弹免 Root 弹窗；
+         * 但 service 在用户读弹窗期间绑上，点"是"后二次 evaluate 才看到，造成
+         * "点是→变 LSPosed 激活"的困惑。
+         *
+         * 这个 Flow 让 [ActivationCard] 事件驱动刷新：service 无论多晚绑上，
+         * emit → UI 重新 evaluate → 从 INACTIVE/NONROOT 刷新到 LSPOSED 并清掉
+         * nonroot flag。不再依赖固定时长轮询。
+         */
+        private val _lsposedServiceBound = MutableStateFlow(false)
+        val lsposedServiceBound: StateFlow<Boolean> = _lsposedServiceBound.asStateFlow()
+
+        /**
+         * 清掉内存中的 [xposedService] 引用（不调 onServiceDied，不通知框架）。
+         *
+         * 供 [LsposedStatus.clearAll] 用：用户在设置页点"清除激活标记"时，
+         * 仅清持久标记（nonroot flag / property / remote key）不够——进程不
+         * 重启时 [xposedService] 仍在内存，下次 [LsposedStatus.evaluate] 立即
+         * 命中路径 2 返回 LSPOSED，"清除"形同虚设。清掉它后 evaluate 才会真正
+         * 走完整检测流程（下次 service 异步重新绑上时自然恢复 LSPOSED）。
+         *
+         * **不调 [onServiceDied]**：那会向框架注销死亡回调，副作用超出"清激活
+         * 标记"的语义。这里只是置 null，让 [evaluate] 不再看到旧引用。
+         */
+        fun clearService() {
+            xposedService = null
+            _lsposedServiceBound.value = false
+            Log.i(TAG, "App: xposedService cleared by LsposedStatus.clearAll")
+        }
 
         /**
          * 主动从 NPatch 管理器的 RemoteApiProvider 拿可写 IXposedService binder。
@@ -177,6 +213,13 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
     override fun onServiceBind(service: XposedService) {
         xposedService = service
         Log.i(TAG, "App: XposedService bound (LSPosed daemon path)")
+        // 通知 UI：LSPosed service 绑上了。只有真 LSPosed 框架才 emit true，
+        // NPatch 的 API 101 binder 不算 LSPOSED（evaluate 会落 Non-root 路径）。
+        try {
+            _lsposedServiceBound.value = service.frameworkName == "LSPosed"
+        } catch (e: Throwable) {
+            Log.w(TAG, "App: onServiceBind frameworkName read failed", e)
+        }
         // service 绑上时把 filesDir 里的最新配置 flush 到 remote prefs。
         //
         // 兜底场景：用户在 ConfigActivity 改配置时 xposedService 还没绑上
@@ -219,6 +262,7 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
         // 只清 LSPosed 路径绑上的 —— NPatch 路径的 service 也走同一变量，
         // 但 NPatch 管理器进程死亡时 service binder 也会 die，这里清掉合理。
         xposedService = null
+        _lsposedServiceBound.value = false
         Log.w(TAG, "App: XposedService died")
     }
 }
