@@ -8,9 +8,15 @@ import android.os.IBinder
 import android.util.Log
 import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import tools.alamobile.mod.config.ModConfig
 
@@ -51,6 +57,20 @@ import tools.alamobile.mod.config.ModConfig
  * ConfigActivity.onCreate 时 [.xposedService] 可能仍为 null —— [ModConfig.write] 必须
  * fallback：service 为 null 时仍写 filesDir + 发广播（旧方案兜底，零回归）。
  */
+/**
+ * XposedService 连接状态（三态密封接口，参照 AdClose ServiceManager.ConnectionState）。
+ *
+ * 激活检测的核心状态——UI 订阅 [App.connectionState] 事件驱动刷新：
+ * - [Connecting]：已注册 listener，等待 daemon 推 binder
+ * - [Connected]：onServiceBind 回调，frameworkName 区分 LSPosed / NPatch
+ * - [Disconnected]：onServiceDied / 超时 / clearService
+ */
+sealed interface ConnectionState {
+    data object Connecting : ConnectionState
+    data class Connected(val service: XposedService) : ConnectionState
+    data object Disconnected : ConnectionState
+}
+
 class App : Application(), XposedServiceHelper.OnServiceListener {
 
     companion object {
@@ -80,19 +100,25 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
             private set
 
         /**
-         * LSPosed service 绑定状态流（仅 frameworkName == "LSPosed" 时 emit true）。
-         *
-         * [LsposedStatus.evaluate] 靠轮询等异步绑定有固定超时窗口——daemon 推
-         * binder 的延迟超过 3s 时轮询已结束，UI 卡在 INACTIVE 弹免 Root 弹窗；
-         * 但 service 在用户读弹窗期间绑上，点"是"后二次 evaluate 才看到，造成
-         * "点是→变 LSPosed 激活"的困惑。
-         *
-         * 这个 Flow 让 [ActivationCard] 事件驱动刷新：service 无论多晚绑上，
-         * emit → UI 重新 evaluate → 从 INACTIVE/NONROOT 刷新到 LSPOSED 并清掉
-         * nonroot flag。不再依赖固定时长轮询。
+         * 协程 scope，用于 service 绑定超时兜底（参照 AdClose ServiceManager.scope）。
+         * 用 Default dispatcher，不依赖主线程 Handler——主线程阻塞时不影响超时。
          */
-        private val _lsposedServiceBound = MutableStateFlow(false)
-        val lsposedServiceBound: StateFlow<Boolean> = _lsposedServiceBound.asStateFlow()
+        private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+        /**
+         * XposedService 连接状态流（三态，参照 AdClose ServiceManager）。
+         *
+         * 初始值 [ConnectionState.Connecting]——App.onCreate 调 doServiceBinding
+         * 注册 listener 时就进入 Connecting，UI 首次组合直接看到"检测中"。
+         *
+         * - [ConnectionState.Connecting]：已注册 listener，等待 daemon 推 binder
+         * - [ConnectionState.Connected]：onServiceBind 回调，存 service 实例
+         * - [ConnectionState.Disconnected]：onServiceDied（仅当前 service 死）/ 1.5s 超时 / clearService
+         *
+         * UI 订阅此 Flow 事件驱动刷新激活状态，不再轮询 [xposedService]。
+         */
+        private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Connecting)
+        val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
         /**
          * 清掉内存中的 [xposedService] 引用（不调 onServiceDied，不通知框架）。
@@ -108,7 +134,7 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
          */
         fun clearService() {
             xposedService = null
-            _lsposedServiceBound.value = false
+            _connectionState.value = ConnectionState.Disconnected
             Log.i(TAG, "App: xposedService cleared by LsposedStatus.clearAll")
         }
 
@@ -208,29 +234,68 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
         // RemoteApiProvider 拿可写 service binder。LSPosed 路径下此调用失败
         // （Provider 不可见 / isKnownModule 校验不过），静默吞掉。
         bindNpatchRemoteService(this)
+        // 1.5s 超时兜底（参照 AdClose CONNECT_TIMEOUT_MS）：协程 delay，不依赖
+        // 主线程 Handler——主线程阻塞时超时仍准时触发。用 update 原子检查：
+        // 仅在仍为 Connecting 时才设 Disconnected，已 Connected 则不动。
+        scope.launch {
+            delay(1500)
+            _connectionState.update { currentState ->
+                if (currentState is ConnectionState.Connecting) {
+                    Log.i(TAG, "App: service connection timed out (1.5s), likely not activated")
+                    ConnectionState.Disconnected
+                } else {
+                    currentState
+                }
+            }
+        }
     }
 
     override fun onServiceBind(service: XposedService) {
-        xposedService = service
-        Log.i(TAG, "App: XposedService bound (LSPosed daemon path)")
-        // 通知 UI：LSPosed service 绑上了。只有真 LSPosed 框架才 emit true，
-        // NPatch 的 API 101 binder 不算 LSPOSED（evaluate 会落 Non-root 路径）。
-        try {
-            _lsposedServiceBound.value = service.frameworkName == "LSPosed"
-        } catch (e: Throwable) {
-            Log.w(TAG, "App: onServiceBind frameworkName read failed", e)
+        // 用 update 原子操作。LSPosed 优先级高于 NPatch：
+        // - 已有 LSPosed → 忽略一切新 binder（NPatch 不能覆盖 LSPosed）
+        // - 当前 NPatch，新来 LSPosed → 升级覆盖（LSPosed 优先）
+        // - 当前 NPatch，新来 NPatch → 忽略（防重复）
+        // - Connecting/Disconnected → 接受
+        //
+        // **关键语义**：NPatch service 绑定只是配置读写通道（bindNpatchRemoteService
+        // 拿可写 binder 写 remote prefs），**不是激活信号**。激活检测只认
+        // frameworkName == "LSPosed"（UI 侧判断），NPatch 走 Non-root 手动确认。
+        val newName = try { service.frameworkName } catch (_: Throwable) { "Unknown" }
+        var shouldUpdate = false
+        _connectionState.update { currentState ->
+            when (currentState) {
+                is ConnectionState.Connected -> {
+                    val currentName = try { currentState.service.frameworkName } catch (_: Throwable) { "Unknown" }
+                    if (currentName == "LSPosed") {
+                        currentState  // 已有 LSPosed，忽略
+                    } else if (newName == "LSPosed") {
+                        shouldUpdate = true
+                        ConnectionState.Connected(service)  // NPatch→LSPosed 升级
+                    } else {
+                        currentState  // NPatch→NPatch，忽略
+                    }
+                }
+                else -> {
+                    shouldUpdate = true
+                    ConnectionState.Connected(service)
+                }
+            }
         }
-        // service 绑上时把 filesDir 里的最新配置 flush 到 remote prefs。
-        //
-        // 兜底场景：用户在 ConfigActivity 改配置时 xposedService 还没绑上
-        //（XposedServiceHelper 异步绑定延迟，或 LSPosed daemon 推 binder 时机
-        // 不确定），ModConfig.write 只写了 filesDir + 广播，remote 没写。等
-        // service 异步绑上时，这里把 filesDir 的最新配置补写到 remote——
-        // 游戏不运行时改的配置就不会丢失。
-        //
-        // filesDir 的 JSON 始终是最新值（ModConfig.write 每次都写 filesDir），
-        // 重复 flush 无害：RemotePreferences.doCommit 只在有 diff 时推。
-        flushLocalConfigToRemote(service)
+        if (shouldUpdate) {
+            xposedService = service
+            Log.i(TAG, "App: XposedService bound (framework=$newName)")
+            // service 绑上时把 filesDir 里的最新配置 flush 到 remote prefs。
+            //
+            // 兜底场景：用户在 ConfigActivity 改配置时 xposedService 还没绑上
+            //（XposedServiceHelper 异步绑定延迟，或 LSPosed daemon 推 binder 时机
+            // 不确定），ModConfig.write 只写了 filesDir + 广播，remote 没写。等
+            // service 异步绑上时，这里把 filesDir 的最新配置补写到 remote——
+            // 游戏不运行时改的配置就不会丢失。
+            //
+            // filesDir 的 JSON 始终是最新值（ModConfig.write 每次都写 filesDir），
+            // 重复 flush 无害：RemotePreferences.doCommit 只在有 diff 时推。
+            flushLocalConfigToRemote(service)
+        }
     }
 
     /**
@@ -259,10 +324,24 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
     }
 
     override fun onServiceDied(service: XposedService) {
-        // 只清 LSPosed 路径绑上的 —— NPatch 路径的 service 也走同一变量，
-        // 但 NPatch 管理器进程死亡时 service binder 也会 die，这里清掉合理。
-        xposedService = null
-        _lsposedServiceBound.value = false
-        Log.w(TAG, "App: XposedService died")
+        // 参照 AdClose ServiceManager.onServiceDied：用 update 原子操作，
+        // 仅当当前绑定的 service === deadService 时才设 Disconnected。
+        // 这防止了 bindNpatchRemoteService 引入的第二个 service binder
+        // 在后台死亡时误触 Disconnected——NPatch 管理器进程被系统杀时，
+        // NPatch service binder 死亡触发 onServiceDied，但当前可能已切到
+        // LSPosed service，不应该掉激活。
+        var isDisconnected = false
+        _connectionState.update { currentState ->
+            if (currentState is ConnectionState.Connected && currentState.service === service) {
+                isDisconnected = true
+                ConnectionState.Disconnected
+            } else {
+                currentState
+            }
+        }
+        if (isDisconnected) {
+            xposedService = null
+            Log.w(TAG, "App: XposedService died")
+        }
     }
 }

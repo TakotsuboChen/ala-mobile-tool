@@ -35,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,11 +62,17 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.VolunteerActivism
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import tools.alamobile.mod.BuildConfig
 import tools.alamobile.mod.EulaManager
 import tools.alamobile.mod.App
+import tools.alamobile.mod.ConnectionState
 import tools.alamobile.mod.LsposedStatus
 import tools.alamobile.mod.ui.EulaDialog
 import tools.alamobile.mod.ui.SupportDialog
@@ -366,8 +373,7 @@ fun OverviewPagerMiuix(
 private fun ActivationCard(eulaAccepted: Boolean) {
     val context = LocalContext.current
     // 照搬 KernelSU HomeScreen：初始状态用 null（不阻塞），LaunchedEffect 里异步加载。
-    // 之前 remember{ LsposedStatus.evaluate(awaitService=false) } 虽然不做 3s 轮询，
-    // 但仍然在主线程做文件存在性检查 + SharedPreferences 读取，首次组合时会阻塞。
+    // evaluate() 是纯同步快速检测（文件存在性检查），首次组合时在 IO 线程执行。
     var status by remember { mutableStateOf<LsposedStatus.Status?>(null) }
     // NPatch 管理器是否已安装。未安装时不允许弹 Non-root 确认弹窗，
     // 点击卡片改为 Toast 提示"未检测到 LSPosed 或 NPatch 框架"。
@@ -378,60 +384,94 @@ private fun ActivationCard(eulaAccepted: Boolean) {
     var dialogVisible by remember { mutableStateOf(false) }
     // 区分关闭原因，onDismissFinished 里据此执行不同副作用。
     var pendingAction by remember { mutableStateOf<() -> Unit>({ }) }
+    // 首次检测完成标记：LaunchedEffect(Unit) 顺序执行首次检测后置 true，
+    // LaunchedEffect(connectionState) 据此跳过首次（避免重复弹窗）。
+    var firstCheckDone by remember { mutableStateOf(false) }
     val isDark = isSystemInDarkTheme()
 
-    // 所有激活状态检测都在 IO 线程：awaitService=false 快速返回 + awaitService=true 轮询升级。
+    // 首次检测 + 弹窗：顺序执行（恢复原来的弹窗逻辑），用 connectionState
+    // 等待 service 稳定，替代原来的 evaluate(awaitService=true) 3s 轮询。
+    // npatchInstalled 在弹窗前已设置，无竞态。
     LaunchedEffect(Unit) {
         // NPatch 管理器安装检测（IO 线程，PackageManager 查询）。
         npatchInstalled = withContext(Dispatchers.IO) {
             LsposedStatus.isNpatchInstalled(context)
         }
-
-        // 先快速返回一个初始值（IO 线程），再异步升级到准确值
-        val initial = withContext(Dispatchers.IO) {
-            LsposedStatus.evaluate(context, awaitService = false)
+        // 等 connectionState 稳定（Connecting → Connected/Disconnected），最多 2s。
+        // 参照 AdClose AppRepository: withTimeoutOrNull { connectionState.first { !is Connecting } }。
+        // 协程挂起不阻塞线程，service 在 2s 内绑上则返回 Connected，超时则 null。
+        // 等 connectionState 稳定（service 绑上或 2s 超时），然后 evaluate 检查 App.xposedService。
+        // evaluate 内部判断 frameworkName=="LSPosed" → LSPOSED，NPatch → 走手动确认路径。
+        withTimeoutOrNull(2000L) {
+            App.connectionState.first { it !is ConnectionState.Connecting }
         }
-        status = initial
-
-        val evaluated = withContext(Dispatchers.IO) {
-            LsposedStatus.evaluate(context, awaitService = true)
-        }
+        val evaluated = withContext(Dispatchers.IO) { LsposedStatus.evaluate(context) }
         status = evaluated
-        // 只有检测到 NPatch 已安装才自动弹 Non-root 确认弹窗；
-        // 未安装时点击卡片走 Toast 提示路径。
+        firstCheckDone = true
+        // 弹窗条件与原逻辑一致：INACTIVE + EULA 已同意 + NPatch 已安装。
         if (evaluated == LsposedStatus.Status.INACTIVE && eulaAccepted && npatchInstalled) {
             showNonRootDialog = true
             dialogVisible = true
         }
     }
 
-    // 事件驱动刷新：订阅 App.lsposedServiceBound，service 无论多晚绑上都触发
-    // 重新 evaluate。根治"3s 轮询超时→INACTIVE→弹窗，但 service 随后绑上"的
-    // 时序问题——service 绑上时 emit true → 重新 evaluate → LSPOSED 覆盖
-    // INACTIVE/NONROOT 并清掉 nonroot flag，弹窗若已弹出也会因状态变化失去意义。
-    val lsposedBound by App.lsposedServiceBound.collectAsState()
-    LaunchedEffect(lsposedBound) {
-        if (lsposedBound) {
-            val evaluated = withContext(Dispatchers.IO) {
-                LsposedStatus.evaluate(context, awaitService = false)
+    // 事件驱动：service 后续变化时刷新 status + 弹窗。
+    // firstCheckDone 守护：首次检测由 LaunchedEffect(Unit) 负责，这里跳过首次。
+    val connectionState by App.connectionState.collectAsState()
+    LaunchedEffect(connectionState) {
+        if (!firstCheckDone) return@LaunchedEffect
+        when (val state = connectionState) {
+            is ConnectionState.Connected -> {
+                // service 绑上/升级 → 重新 evaluate（检查 App.xposedService）
+                val evaluated = withContext(Dispatchers.IO) { LsposedStatus.evaluate(context) }
+                status = evaluated
+                if (evaluated == LsposedStatus.Status.LSPOSED) {
+                    showNonRootDialog = false
+                    dialogVisible = false
+                } else if (evaluated == LsposedStatus.Status.INACTIVE && eulaAccepted && npatchInstalled) {
+                    showNonRootDialog = true
+                    dialogVisible = true
+                }
             }
-            if (evaluated == LsposedStatus.Status.LSPOSED) {
-                status = LsposedStatus.Status.LSPOSED
-                // LSPosed 真激活覆盖 Non-root：关掉弹窗（若在显示），清掉 nonroot flag。
-                showNonRootDialog = false
-                dialogVisible = false
+            is ConnectionState.Disconnected -> {
+                val evaluated = withContext(Dispatchers.IO) { LsposedStatus.evaluate(context) }
+                status = evaluated
+                if (evaluated == LsposedStatus.Status.INACTIVE && eulaAccepted && npatchInstalled) {
+                    showNonRootDialog = true
+                    dialogVisible = true
+                }
             }
+            is ConnectionState.Connecting -> { }
         }
     }
 
-    // EULA 同意后补弹激活弹窗：LaunchedEffect(Unit) 只执行一次，
-    // 若 EULA 未同意时检测已完成（status=INACTIVE），用户点同意后需由此 effect 补弹。
-    // 同样要求 NPatch 已安装才弹。
+    // EULA 同意后补弹：eulaAccepted 从 false→true 时若仍 INACTIVE，触发弹窗。
     LaunchedEffect(eulaAccepted) {
         if (eulaAccepted && status == LsposedStatus.Status.INACTIVE && npatchInstalled) {
             showNonRootDialog = true
             dialogVisible = true
         }
+    }
+
+    // onResume 重新检测：后台缓存恢复时 service 状态可能已变。
+    // 只刷新 status，不触发弹窗（弹窗由 ConnectionState 事件驱动）。
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                scope.launch {
+                    val evaluated = withContext(Dispatchers.IO) {
+                        LsposedStatus.evaluate(context)
+                    }
+                    if (evaluated != status) {
+                        status = evaluated
+                    }
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // status 为 null 时显示加载态，避免 null 检查导致的颜色闪烁。
@@ -516,11 +556,10 @@ private fun ActivationCard(eulaAccepted: Boolean) {
                 // 先把 visible 翻 false 触发退出动画，动画结束后 onDismissFinished 执行真正逻辑
                 pendingAction = {
                     LsposedStatus.confirmNonRoot(context)
-                    // 用 awaitService=true 重新检测：若 LSPosed service 恰好刚绑上
-                    //（3s 轮询窗口内），会优先返回 LSPOSED 并清掉刚写的 nonroot
-                    // flag——这正是"LSPosed 状态高于一切"的语义：检测到 LSPosed
-                    // 真激活就覆盖 Non-root，不保留 Non-root 已激活状态。
-                    status = LsposedStatus.evaluate(context, awaitService = true)
+                    // 重新检测：若 LSPosed service 已绑上（ConnectionState.Connected），
+                    // LaunchedEffect(connectionState) 会优先刷新到 LSPOSED 并清掉刚写的
+                    // nonroot flag——这正是"LSPosed 状态高于一切"的语义。
+                    status = LsposedStatus.evaluate(context)
                 }
                 dialogVisible = false
             },

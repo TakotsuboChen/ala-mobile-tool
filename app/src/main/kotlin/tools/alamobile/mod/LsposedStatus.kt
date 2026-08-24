@@ -33,7 +33,8 @@ import android.util.Log
  * 之后 LSPosed 关了 → 不保留 Non-root 已激活状态，必须重新点选。
  *
  * 异步时序：[App.xposedService] 在 ConfigActivity.onCreate 时可能仍为 null
- * （XposedServiceHelper 异步绑定）。`awaitService` 参数提供 3s 轮询兜底。
+ * （XposedServiceHelper 异步绑定）。service 绑定状态由 [App.connectionState]
+ * StateFlow 事件驱动，UI 订阅后在 Connected 时刷新为已激活。
  */
 object LsposedStatus {
 
@@ -53,19 +54,21 @@ object LsposedStatus {
     }
 
     /**
-     * 判定当前激活状态。
+     * 判定当前激活状态（纯同步快速检测，无轮询）。
      *
      * **判定优先级**：
      * 1. `hasModuleLoadedFlag()` —— 目标进程（游戏进程）路径：`onModuleLoaded`
      *    执行过，markActivated 设了进程级 property。模块被真正启用时才有。
      * 2. `isLsposedService(App.xposedService)` —— ConfigActivity 进程路径：
-     *    LSPosed daemon 只在模块启用时推 binder，`App.onServiceBind` 赋值。
-     *    `frameworkName == "LSPosed"` 确认是真 LSPosed（排除 NPatch 的
-     *    API 101 binder）。
+     *    LSPosed daemon 已绑定（`frameworkName == "LSPosed"`）。
+     *    NPatch service（`frameworkName == "NPatch"`）不算激活，走路径 3。
      * 3. `readNonRootConfirmed()` —— 用户在弹窗里确认了 Non-root 框架。
      * 4. 默认 `INACTIVE`。
+     *
+     * service 异步绑定由 [App.connectionState] StateFlow 事件驱动补充：
+     * service 绑上时 UI 重新调本方法，路径 2 命中 → LSPOSED。
      */
-    fun evaluate(context: Context, awaitService: Boolean = false): Status {
+    fun evaluate(context: Context): Status {
         // 1) 目标进程路径：onModuleLoaded 执行过（游戏进程被真正注入）。
         if (hasModuleLoadedFlag()) {
             Log.i(TAG, "evaluate: hasModuleLoadedFlag=true → LSPOSED")
@@ -74,11 +77,10 @@ object LsposedStatus {
         }
         Log.i(TAG, "evaluate: hasModuleLoadedFlag=false, continue")
 
-        // 2) ConfigActivity 进程路径：LSPosed daemon 已绑定（frameworkName 确认真 LSPosed）。
-        //    App.xposedService 由 App.onServiceBind 赋值，只在 LSPosed daemon 推 binder 时调到。
-        //    异步绑定可能晚于首次读检测——轮询等待最多 ~3s。
+        // 2) ConfigActivity 进程路径：LSPosed daemon 已绑定。
+        //    App.xposedService 由 App.onServiceBind 赋值。只认 frameworkName=="LSPosed"，
+        //    NPatch service 不算激活（NPatch 是纯手动确认，走路径 3）。
         val service = App.xposedService
-        Log.i(TAG, "evaluate: App.xposedService=${service} (awaitService=${awaitService})")
         if (service != null) {
             if (isLsposedService(service)) {
                 Log.i(TAG, "evaluate: frameworkName=LSPosed → LSPOSED")
@@ -86,22 +88,6 @@ object LsposedStatus {
                 return Status.LSPOSED
             }
             Log.i(TAG, "evaluate: service is not LSPosed framework → fall through")
-        } else if (awaitService) {
-            Log.i(TAG, "evaluate: service==null, starting awaitService poll (3s)")
-            val deadline = System.currentTimeMillis() + 3000
-            while (System.currentTimeMillis() < deadline) {
-                val s = App.xposedService
-                if (s != null) {
-                    if (isLsposedService(s)) {
-                        Log.i(TAG, "evaluate: poll got LSPosed service → LSPOSED")
-                        clearNonRootConfirmed(context)
-                        return Status.LSPOSED
-                    }
-                    break
-                }
-                try { Thread.sleep(100) } catch (_: InterruptedException) { break }
-            }
-            Log.i(TAG, "evaluate: awaitService poll finished, no LSPosed service")
         }
 
         // 3) Non-root 用户确认标记 —— 用户在弹窗里选了"是"。
@@ -147,21 +133,8 @@ object LsposedStatus {
     /**
      * 判断绑定到的 service 是否来自**真正的 LSPosed（root）框架**。
      *
-     * 依据 `frameworkName`（框架自己上报的标识）：
-     * - 真 LSPosed daemon 返回 `"LSPosed"`。
-     * - NPatch 的 `XposedServiceBinder.getFrameworkName()` 返回 `"NPatch"`（API 101）。
-     *
-     * 用 frameworkName 而非 apiVersion / getScope / getRunningTargets 的原因：
-     * - `apiVersion`：NPatch 正式版只到 101，但未来升级可能到 102，靠版本号猜
-     *   框架不可靠。
-     * - `getScope()`：scope 存 daemon SQLite，关开关不清，NPatch 也会返回记忆的
-     *   scope → 误判 LSPOSED。
-     * - `getRunningTargets()`：返回**当前正在注入**的目标，游戏没在跑时为空数组，
-     *   会把"开关开着但游戏没跑"误判成未激活（本会话踩过）。
-     * - `frameworkName` 是框架直接上报的、语义明确的字段，最可靠。
-     *
-     * 异常处理：读 frameworkName 失败时保守返回 false——避免框架标识读不到时
-     * 误判为已激活（"未激活→已激活"比"已激活→未激活"更误导用户）。
+     * `frameworkName == "LSPosed"` 确认真 LSPosed，排除 NPatch 的 binder
+     *（`frameworkName == "NPatch"`，不算激活——NPatch 是纯手动确认）。
      */
     private fun isLsposedService(service: io.github.libxposed.service.XposedService): Boolean {
         return try {
