@@ -58,6 +58,9 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
                 throttleTransition = s.throttleTransition,
                 pedalPriority = s.pedalPriority,
                 pedalInvert = s.pedalInvert,
+                overlayAlpha = s.overlayAlpha,
+                overlayBorderWidth = s.overlayBorderWidth,
+                overlayCornerRadius = s.overlayCornerRadius,
                 throttleCurve = s.throttleCurve,
                 brakeCurve = s.brakeCurve,
                 throttleCurvePoints = s.throttleCurvePoints,
@@ -85,6 +88,9 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
             throttleTransition = s.throttleTransition,
             pedalPriority = s.pedalPriority,
             pedalInvert = s.pedalInvert,
+            overlayAlpha = s.overlayAlpha,
+            overlayBorderWidth = s.overlayBorderWidth,
+            overlayCornerRadius = s.overlayCornerRadius,
             throttleCurve = s.throttleCurve,
             brakeCurve = s.brakeCurve,
             throttleCurvePoints = s.throttleCurvePoints,
@@ -122,6 +128,9 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
     fun setThrottleTransition(v: Float) { _uiState.value = _uiState.value.copy(throttleTransition = v); scheduleSave() }
     fun setPedalPriority(v: ModConfig.PedalPriority) { _uiState.value = _uiState.value.copy(pedalPriority = v); scheduleSave() }
     fun setPedalInvert(v: ModConfig.PedalInvert) { _uiState.value = _uiState.value.copy(pedalInvert = v); scheduleSave() }
+    fun setOverlayAlpha(v: Float) { _uiState.value = _uiState.value.copy(overlayAlpha = v); scheduleSave() }
+    fun setOverlayBorderWidth(v: Float) { _uiState.value = _uiState.value.copy(overlayBorderWidth = v); scheduleSave() }
+    fun setOverlayCornerRadius(v: Float) { _uiState.value = _uiState.value.copy(overlayCornerRadius = v); scheduleSave() }
     fun setThrottleCurve(v: ModConfig.PedalCurve) { _uiState.value = _uiState.value.copy(throttleCurve = v); scheduleSave() }
     fun setBrakeCurve(v: ModConfig.PedalCurve) { _uiState.value = _uiState.value.copy(brakeCurve = v); scheduleSave() }
     fun setThrottleCurvePoints(v: List<ModConfig.CurvePoint>) { _uiState.value = _uiState.value.copy(throttleCurvePoints = v); scheduleSave() }
@@ -163,6 +172,9 @@ data class ConfigUiState(
     val throttleTransition: Float,
     val pedalPriority: ModConfig.PedalPriority,
     val pedalInvert: ModConfig.PedalInvert,
+    val overlayAlpha: Float,
+    val overlayBorderWidth: Float,
+    val overlayCornerRadius: Float,
     val throttleCurve: ModConfig.PedalCurve,
     val brakeCurve: ModConfig.PedalCurve,
     val throttleCurvePoints: List<ModConfig.CurvePoint>,
@@ -185,6 +197,9 @@ data class ConfigUiState(
         throttleTransition = throttleTransition,
         pedalPriority = pedalPriority,
         pedalInvert = pedalInvert,
+        overlayAlpha = overlayAlpha,
+        overlayBorderWidth = overlayBorderWidth,
+        overlayCornerRadius = overlayCornerRadius,
         throttleCurve = throttleCurve,
         brakeCurve = brakeCurve,
         throttleCurvePoints = throttleCurvePoints,

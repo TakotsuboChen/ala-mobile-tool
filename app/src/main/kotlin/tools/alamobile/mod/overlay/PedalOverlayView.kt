@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
@@ -87,15 +88,27 @@ class PedalOverlayView(
     }
 
     private val throttlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(160, 0, 255, 0)
+        color = Color.argb(alphaOf(settings.overlayAlpha), 0, 255, 0)
     }
     private val brakePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(160, 255, 0, 0)
+        color = Color.argb(alphaOf(settings.overlayAlpha), 255, 0, 0)
     }
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
+        color = Color.argb(alphaOf(settings.overlayAlpha), 255, 255, 255)
         style = Paint.Style.STROKE
-        strokeWidth = 4f
+        strokeWidth = settings.overlayBorderWidth * resources.displayMetrics.density
+    }
+
+    // 圆角裁剪路径（preallocate 避免每帧分配）。
+    private val clipPath = Path()
+
+    // 输入是"透明度"比例（0=不透明，1=完全透明），返回 paint alpha 值。
+    private fun alphaOf(transparency: Float): Int = ((1f - transparency.coerceIn(0f, 1f)) * 255f).toInt()
+
+    private fun cornerRadiusPx(): Float {
+        val ratio = settings.overlayCornerRadius.coerceIn(0f, 1f)
+        if (ratio <= 0f) return 0f
+        return ratio * (minOf(width, height) / 2f)
     }
 
     // raw = 手指实际位移归一值（0..1），用于 onDraw 绘制，保证视觉跟手。
@@ -107,15 +120,37 @@ class PedalOverlayView(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val corner = cornerRadiusPx()
+        val hasBorder = settings.overlayBorderWidth > 0f
+        // 填充内缩量 = 边框宽度，使填充边缘与边框内边缘重合，
+        // 避免半透明边框透出填充色。
+        val fillInset = if (hasBorder) borderPaint.strokeWidth else 0f
+
+        // 裁剪：有圆角或有边框时都需要裁剪填充区域。
+        val needClip = corner > 0f || hasBorder
+        if (needClip) {
+            canvas.save()
+            clipPath.reset()
+            if (corner > 0f) {
+                val fc = (corner - fillInset).coerceAtLeast(0f)
+                clipPath.addRoundRect(fillInset, fillInset, w - fillInset, h - fillInset, fc, fc, Path.Direction.CW)
+            } else {
+                clipPath.addRect(fillInset, fillInset, w - fillInset, h - fillInset, Path.Direction.CW)
+            }
+            canvas.clipPath(clipPath)
+        }
+
         // 用 raw 值绘制填充——手指摸到哪，填充到哪，视觉跟手。
         // mapped 值只送 native，不影响视觉。
         when (role) {
             PedalRole.SINGLE -> {
-                val centerY = height * settings.pedalTransition
+                val centerY = h * settings.pedalTransition
                 val throttleHeight = centerY * rawThrottle
-                val brakeHeight = (height - centerY) * rawBrake
-                canvas.drawRect(0f, centerY - throttleHeight, width.toFloat(), centerY, throttlePaint)
-                canvas.drawRect(0f, centerY, width.toFloat(), centerY + brakeHeight, brakePaint)
+                val brakeHeight = (h - centerY) * rawBrake
+                canvas.drawRect(0f, centerY - throttleHeight, w, centerY, throttlePaint)
+                canvas.drawRect(0f, centerY, w, centerY + brakeHeight, brakePaint)
             }
             PedalRole.THROTTLE -> {
                 // 默认（pedalInvert 不含 throttle）：raw=1-t（手指顶部=满油门）。
@@ -125,11 +160,11 @@ class PedalOverlayView(
                 // 绿色锚在顶部，随 raw 增大从顶部向下生长——手指往底部拉
                 // 绿色从顶往下涨到手指位置，"从上往下拉"。
                 if (settings.pedalInvert.invertThrottle) {
-                    val h = height * rawThrottle
-                    canvas.drawRect(0f, 0f, width.toFloat(), h, throttlePaint)
+                    val fillH = h * rawThrottle
+                    canvas.drawRect(0f, 0f, w, fillH, throttlePaint)
                 } else {
-                    val h = height * rawThrottle
-                    canvas.drawRect(0f, height - h, width.toFloat(), height.toFloat(), throttlePaint)
+                    val fillH = h * rawThrottle
+                    canvas.drawRect(0f, h - fillH, w, h, throttlePaint)
                 }
             }
             PedalRole.BRAKE -> {
@@ -141,15 +176,28 @@ class PedalOverlayView(
                 // 红色从顶往下涨到手指位置，"从上往下拉"。
                 // 两种方向 raw 都送 native mapped，游戏内输入同步反转。
                 if (settings.pedalInvert.invertBrake) {
-                    val bottom = height * rawBrake
-                    canvas.drawRect(0f, 0f, width.toFloat(), bottom, brakePaint)
+                    val bottom = h * rawBrake
+                    canvas.drawRect(0f, 0f, w, bottom, brakePaint)
                 } else {
-                    val top = height * (1f - rawBrake)
-                    canvas.drawRect(0f, top, width.toFloat(), height.toFloat(), brakePaint)
+                    val top = h * (1f - rawBrake)
+                    canvas.drawRect(0f, top, w, h, brakePaint)
                 }
             }
         }
-        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), borderPaint)
+
+        // 边框在 restore 之后画：stroke 沿圆角路径描边，若在 clip 内画，
+        // 外半圈会被裁掉，边框看起来只有一半粗细。
+        if (needClip) canvas.restore()
+
+        if (hasBorder) {
+            val inset = borderPaint.strokeWidth / 2f
+            if (corner > 0f) {
+                val bc = (corner - inset).coerceAtLeast(0f)
+                canvas.drawRoundRect(inset, inset, w - inset, h - inset, bc, bc, borderPaint)
+            } else {
+                canvas.drawRect(inset, inset, w - inset, h - inset, borderPaint)
+            }
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {

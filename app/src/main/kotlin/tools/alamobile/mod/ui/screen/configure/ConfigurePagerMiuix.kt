@@ -36,6 +36,9 @@ import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Straighten
 import androidx.compose.material.icons.rounded.SwapVert
+import androidx.compose.material.icons.rounded.Opacity
+import androidx.compose.material.icons.rounded.BorderOuter
+import androidx.compose.material.icons.rounded.RoundedCorner
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -296,6 +299,35 @@ fun ConfigurePagerMiuix(
                                     )
                                 }
                             }
+
+                            // ── Overlay 视觉属性（所有踏板模式通用）──
+                            SliderPreference(
+                                title = "控件透明度",
+                                summary = "整个控件的透明度",
+                                value = uiState.overlayAlpha,
+                                onValueChange = actions::setOverlayAlpha,
+                                valueRange = 0f..1f,
+                                displayFormat = { String.format("%.0f%%", it * 100) },
+                                icon = Icons.Rounded.Opacity
+                            )
+                            SliderPreference(
+                                title = "边框粗细",
+                                summary = "控件边框宽度，0 表示不显示边框",
+                                value = uiState.overlayBorderWidth,
+                                onValueChange = actions::setOverlayBorderWidth,
+                                valueRange = 0f..10f,
+                                displayFormat = { String.format("%.1f dp", it) },
+                                icon = Icons.Rounded.BorderOuter
+                            )
+                            SliderPreference(
+                                title = "边框圆角",
+                                summary = "圆角半径 = 比例 × 短边/2，0% 时为直角",
+                                value = uiState.overlayCornerRadius,
+                                onValueChange = actions::setOverlayCornerRadius,
+                                valueRange = 0f..1f,
+                                displayFormat = { String.format("%.0f%%", it * 100) },
+                                icon = Icons.Rounded.RoundedCorner
+                            )
                         }
 
                         // ── Section 3: 响应曲线 ──

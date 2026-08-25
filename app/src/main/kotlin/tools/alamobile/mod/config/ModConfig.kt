@@ -80,6 +80,10 @@ object ModConfig {
     // 分段线性插值。空列表 = 只有两端点 = 线性。
     const val KEY_THROTTLE_CURVE_POINTS = "throttle_curve_points"
     const val KEY_BRAKE_CURVE_POINTS = "brake_curve_points"
+    // Overlay 视觉属性（透明度/边框粗细/圆角），作用于踏板和换挡控件。
+    const val KEY_OVERLAY_ALPHA = "overlay_alpha"
+    const val KEY_OVERLAY_BORDER_WIDTH = "overlay_border_width"
+    const val KEY_OVERLAY_CORNER_RADIUS = "overlay_corner_radius"
 
     // Legacy keys (kept only for one-way migration on read)
     const val KEY_LEGACY_ENABLE_CONTROL_REPLACEMENT = "enable_control_replacement"
@@ -304,6 +308,10 @@ object ModConfig {
         val PEDAL_PRIORITY = PedalPriority.BRAKE_VALUE
         // 踏板方向反转：默认 OFF（手指顶部=满，填充从底往上）。
         val PEDAL_INVERT = PedalInvert.OFF
+        // Overlay 视觉属性默认值：透明度 50%、边框 5dp、圆角比例 50%。
+        const val OVERLAY_ALPHA = 0.5f
+        const val OVERLAY_BORDER_WIDTH = 5.0f
+        const val OVERLAY_CORNER_RADIUS = 0.5f
         val THROTTLE_CURVE = PedalCurve.LINEAR
         val BRAKE_CURVE = PedalCurve.LINEAR
         // 自定义曲线控制点列表默认空 = 线性（只有两端点）。
@@ -418,6 +426,9 @@ object ModConfig {
                     json.optString(KEY_PEDAL_PRIORITY, Defaults.PEDAL_PRIORITY.value)
                 ),
                 pedalInvert = migratePedalInvert(json),
+                overlayAlpha = json.optDouble(KEY_OVERLAY_ALPHA, Defaults.OVERLAY_ALPHA.toDouble()).toFloat(),
+                overlayBorderWidth = json.optDouble(KEY_OVERLAY_BORDER_WIDTH, Defaults.OVERLAY_BORDER_WIDTH.toDouble()).toFloat(),
+                overlayCornerRadius = json.optDouble(KEY_OVERLAY_CORNER_RADIUS, Defaults.OVERLAY_CORNER_RADIUS.toDouble()).toFloat(),
                 throttleCurve = PedalCurve.from(
                     json.optString(KEY_THROTTLE_CURVE, json.optString(KEY_LEGACY_PEDAL_CURVE, Defaults.THROTTLE_CURVE.value))
                 ),
@@ -470,6 +481,9 @@ object ModConfig {
             put(KEY_THROTTLE_TRANSITION, settings.throttleTransition.toDouble())
             put(KEY_PEDAL_PRIORITY, settings.pedalPriority.value)
             put(KEY_PEDAL_INVERT, settings.pedalInvert.value)
+            put(KEY_OVERLAY_ALPHA, settings.overlayAlpha.toDouble())
+            put(KEY_OVERLAY_BORDER_WIDTH, settings.overlayBorderWidth.toDouble())
+            put(KEY_OVERLAY_CORNER_RADIUS, settings.overlayCornerRadius.toDouble())
             put(KEY_THROTTLE_CURVE, settings.throttleCurve.value)
             put(KEY_BRAKE_CURVE, settings.brakeCurve.value)
             put(KEY_THROTTLE_CURVE_POINTS, writeCurvePoints(settings.throttleCurvePoints))
@@ -737,6 +751,9 @@ object ModConfig {
                 throttleTransition = j.optDouble(KEY_THROTTLE_TRANSITION, Defaults.THROTTLE_TRANSITION.toDouble()).toFloat(),
                 pedalPriority = PedalPriority.from(j.optString(KEY_PEDAL_PRIORITY, Defaults.PEDAL_PRIORITY.value)),
                 pedalInvert = migratePedalInvert(j),
+                overlayAlpha = j.optDouble(KEY_OVERLAY_ALPHA, Defaults.OVERLAY_ALPHA.toDouble()).toFloat(),
+                overlayBorderWidth = j.optDouble(KEY_OVERLAY_BORDER_WIDTH, Defaults.OVERLAY_BORDER_WIDTH.toDouble()).toFloat(),
+                overlayCornerRadius = j.optDouble(KEY_OVERLAY_CORNER_RADIUS, Defaults.OVERLAY_CORNER_RADIUS.toDouble()).toFloat(),
                 throttleCurve = PedalCurve.from(
                     j.optString(KEY_THROTTLE_CURVE, j.optString(KEY_LEGACY_PEDAL_CURVE, Defaults.THROTTLE_CURVE.value))
                 ),
@@ -861,6 +878,9 @@ object ModConfig {
             throttleTransition = Defaults.THROTTLE_TRANSITION,
             pedalPriority = Defaults.PEDAL_PRIORITY,
             pedalInvert = Defaults.PEDAL_INVERT,
+            overlayAlpha = Defaults.OVERLAY_ALPHA,
+            overlayBorderWidth = Defaults.OVERLAY_BORDER_WIDTH,
+            overlayCornerRadius = Defaults.OVERLAY_CORNER_RADIUS,
             throttleCurve = Defaults.THROTTLE_CURVE,
             brakeCurve = Defaults.BRAKE_CURVE,
             throttleCurvePoints = Defaults.THROTTLE_CURVE_POINTS,
@@ -890,6 +910,12 @@ object ModConfig {
         val throttleTransition: Float = Defaults.THROTTLE_TRANSITION,
         val pedalPriority: PedalPriority = Defaults.PEDAL_PRIORITY,
         val pedalInvert: PedalInvert = Defaults.PEDAL_INVERT,
+        // Overlay 视觉属性。cornerRadiusPx = ratio * min(width,height)/2：
+        // 100% → 短边完全合拢为半圆。全部带默认值——PedalOverlayView 37 行的
+        // 部分 Settings 构造（14 字段）无需改动即可编译。
+        val overlayAlpha: Float = Defaults.OVERLAY_ALPHA,
+        val overlayBorderWidth: Float = Defaults.OVERLAY_BORDER_WIDTH,
+        val overlayCornerRadius: Float = Defaults.OVERLAY_CORNER_RADIUS,
         val throttleCurve: PedalCurve,
         val brakeCurve: PedalCurve,
         val throttleCurvePoints: List<CurvePoint> = Defaults.THROTTLE_CURVE_POINTS,

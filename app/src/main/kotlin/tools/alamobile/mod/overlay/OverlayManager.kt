@@ -262,7 +262,7 @@ class OverlayManager(context: Context) {
         // 当前换挡开关 UI 禁用，这里加运行时守卫防 JSON 手动编辑或
         // 未来 UI bug 导致两者同时 true。
         if (settings.enableManualShift && settings.pedalMode != ModConfig.PedalMode.DUAL) {
-            gearView = GearShiftView(appContext).apply {
+            gearView = GearShiftView(appContext, settings).apply {
                 tag = "gear_shift_overlay"
                 visibility = View.GONE
             }
