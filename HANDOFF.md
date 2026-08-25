@@ -1,26 +1,27 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-08-25T15:59:28+00:00 · Git HEAD: `74533ec`
+生成时间: 2026-08-25T16:36:27+00:00 · Git HEAD: `d85b9da`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: `main` @ `74533ec` (2026-08-25)
-- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `74533ec`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA
+- 锚点: `main` @ `d85b9da` (2026-08-25)
+- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `d85b9da`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA
 - 待重探的 [?]: 见下方标记
 - 先读: `HANDOFF.md` + `CLAUDE.md`
 
 ## 1. 当前目标
 
-**踏板方向反转升级**。已完成：`brakeInvert: Boolean` → `PedalInvert` 枚举（关闭/仅油门/仅刹车/全部），开关改下拉，新增油门踏板方向反转，旧 `brake_invert: true` 迁移到"仅刹车踏板"。真机验证全部通过。
+**踏板优先级升级**。已完成：双踏板模式的"刹车过渡点"滑块 → `PedalPriority` 枚举下拉（6 选项），新增油门过渡点滑块（条件显示），`arbitrateDual()` 扩展 4→6 种仲裁策略，旧版无 `pedal_priority` key 天然迁移到 `BRAKE_VALUE`。真机验证全部通过。
 
 ## 2. 已验证状态 — 工作实际停在哪
 
-- [V] **`PedalInvert` 枚举** — `ModConfig.kt`：4 值枚举 + `invertThrottle`/`invertBrake` 便利属性。`KEY_PEDAL_INVERT = "pedal_invert"`，旧 key 保留为 `KEY_LEGACY_BRAKE_INVERT = "brake_invert"`。`1c6c375` 已 push。
-- [V] **迁移函数 `migratePedalInvert`** — 先查新 key，找不到从旧 boolean 迁移（`true → BRAKE`，`false → OFF`）。`read()` 和 `fromJson()` 都调用。logcat 验证：`legacy brake_invert=true -> BRAKE`。
-- [V] **`ConfigViewModel` 字段升级** — `brakeInvert: Boolean` → `pedalInvert: PedalInvert`，`setBrakeInvert` → `setPedalInvert`。已 push。
-- [V] **UI: SwitchPreference → OverlayDropdownPreference** — `ConfigurePagerMiuix.kt`：标题"踏板方向反转"，描述"反转踏板的行程填充方向"，4 选项（关闭/仅油门/仅刹车/全部）。`invertName()` 辅助函数。已 push。
-- [V] **`PedalOverlayView` 油门反转** — `onDraw` THROTTLE + `updateDedicatedThrottle` 新增 `pedalInvert.invertThrottle` 分支，与刹车反转对称。BRAKE 分支从 `brakeInvert` 改为 `pedalInvert.invertBrake`。已 push。
-- [V] **README.md 同步** — 功能列表 + 配置表格更新。`74533ec` 已 push。
+- [V] **`PedalPriority` 枚举** — `ModConfig.kt`：6 值枚举 `FIRST_PRESSED / LAST_TOUCHED / ALWAYS_THROTTLE / ALWAYS_BRAKE / THROTTLE_VALUE / BRAKE_VALUE`。`from()` 默认返回 `BRAKE_VALUE`。`420a427` 已 push。
+- [V] **Settings 新增字段** — `pedalPriority: PedalPriority`、`throttleTransition: Float`（默认 0.2f）。`brakeTransition` 默认值 0.1→0.2。`read()/fromJson()/write()/defaultSettingsPublic()` 全覆盖。
+- [V] **ConfigViewModel 同步** — `ConfigUiState` + setter + `toSettings()` 新增两字段。
+- [V] **UI: 滑块→下拉 + 条件滑块** — `ConfigurePagerMiuix.kt`：`OverlayDropdownPreference` 6 选项，选 `THROTTLE_VALUE`→油门过渡点滑块（1-99%），选 `BRAKE_VALUE`→刹车过渡点滑块（1-99%）。Icon 用 `PriorityHigh`（与过渡点 `SwapVert` 区分）。
+- [V] **`PedalOverlayView` 仲裁扩展** — `arbitrateDual()` 6 策略；`FIRST_PRESSED`/`LAST_TOUCHED` 用 companion `sharedFirstPressed`/`sharedLastTouched` 时序状态；`ACTION_UP` 清理时序状态。
+- [V] **LAST_TOUCHED 修复** — 只在 raw 0→>0（按下瞬间）更新 `sharedLastTouched`，保存 `prevThrottle`/`prevBrake` 判定。MOVE 中不更新，防止先按的手指微动夺回优先。
+- [V] **README.md 同步** — 配置表格更新。`d85b9da` 已 push。
 - [V] **编译 + release 构建 + 真机验证** — 用户确认"全部测试通过"。
 - 工作区: 干净。
 
@@ -29,37 +30,39 @@
 ./gradlew :app:compileDebugKotlin → BUILD SUCCESSFUL
 ./gradlew :app:assembleRelease → BUILD SUCCESSFUL
 adb install -r app-release.apk → Success
-迁移验证: 旧版 brake_invert=true → 新版自动显示"仅刹车踏板"（logcat: migratePedalInvert: legacy brake_invert=true -> BRAKE）
 用户验证: 全部测试通过
 ```
 
 ## 3. 决策与理由
 
-- **`PedalInvert` 枚举而非两个 boolean** [V]——一个枚举表达 4 种组合（关闭/仅油门/仅刹车/全部），比 `throttleInvert + brakeInvert` 两个 boolean 更清晰，UI 下拉天然映射 `entries`。`invertThrottle`/`invertBrake` 便利属性封装 `== THROTTLE || == BOTH` 判断。
-- **迁移：旧 `brake_invert: true` → `PedalInvert.BRAKE`** [V]——用户要求"之前打开了刹车方向反转的用户升级上来保持在仅刹车踏板"。`migratePedalInvert` 先查新 key，找不到从旧 boolean 迁移，与项目已有 `migratePedalMode`/`PedalCurve.from` 模式一致。
-- **油门反转与刹车反转对称** [V]——`updateDedicatedThrottle` 的改动与 `updateDedicatedBrake` 完全对称：默认 `raw = 1f - t`（顶满），反转 `raw = t`（底满）。`onDraw` 绘制也对称。
-- **"全部"而非"油门和刹车踏板"** [V]——用户要求选项名简化。
+- **`PedalPriority` 枚举 6 值** [V]——一个枚举表达所有仲裁策略，UI 下拉天然映射 `entries`。`BRAKE_VALUE` 作为默认值保持旧行为（旧版无 key → `from("")` → `BRAKE_VALUE`）。
+- **`brake_transition` key 名不变，无需迁移函数** [V]——旧 key 保留，旧值保留，新增 `pedal_priority`/`throttle_transition` 用 `optString`/`optDouble` fallback 默认值。比 `PedalInvert` 的 `migratePedalInvert()` 简单。
+- **`ALWAYS_THROTTLE`/`ALWAYS_BRAKE` 只在有值时屏蔽** [V]——`if (sharedRawThrottle > 0f) arbitratedBrake = 0f`，不是无条件屏蔽。否则选了"始终油门优先"后刹车踏板完全失效。
+- **LAST_TOUCHED 只在按下瞬间更新** [V]——每次 MOVE 都更新会导致先按的手指微动夺回优先，与 FIRST_PRESSED 表现一致。修复：保存 `prevRaw`，只在 `raw > 0f && prevRaw <= 0f` 时更新 `sharedLastTouched`。
+- **油门过渡点在刹车过渡点前面（UI 顺序）** [V]——用户要求"油门放在刹车前面"。枚举顺序 `THROTTLE_VALUE` 在 `BRAKE_VALUE` 前面，UI 条件滑块顺序一致。
+- **Icon `PriorityHigh` 而非 `SwapVert`** [V]——过渡点滑块已用 `SwapVert`，踏板优先级用 `PriorityHigh`（感叹号）区分。
 
 ## 4. 失败的尝试 — 不要再试
 
-> 从旧 HANDOFF 前向搬运 + 本次新增，标 [V] 的已验证。完整历史见 `.handoffs/20260825155928-handoff.md`。
+> 从旧 HANDOFF 前向搬运 + 本次新增，标 [V] 的已验证。完整历史见 `.handoffs/20260825163626-handoff.md`。
 
 **本次新增：**
-- [V] **`adb install -r` 覆盖安装时旧版仍运行** → 旧版 ConfigActivity 在前台时安装新版，新版打开后配置可能不对（用户初次报告"显示关闭"）。正确测试流程：旧版开启刹车反转 → force-stop → 安装新版 → 打开。不是代码 bug，是测试方法问题。
+- [V] **LAST_TOUCHED 每次 MOVE 都更新 `sharedLastTouched`** → 先按的 view 手指微动产生 MOVE 事件夺回优先，与 FIRST_PRESSED 表现完全一致。改为只在 raw 0→>0（按下瞬间）更新，保存 `prevThrottle`/`prevBrake` 判定。不要再试。
 
-**从旧 HANDOFF 搬运（详见 `.handoffs/20260825155928-handoff.md`）：**
-- [V] `awaitLsposedSettled` 等 Connected(LSPosed) + 2s 确认窗口 → NPatch 用户等 2s 太慢。不要再试。
-- [V] 等"非 Connecting" + 删事件驱动 → App 1.5s 兜底置 Disconnected，service 晚于 1.5s 绑上时过早检测固定 INACTIVE。不要再试。
+**从旧 HANDOFF 搬运（详见 `.handoffs/20260825163626-handoff.md`）：**
+- [V] `adb install -r` 覆盖安装时旧版仍运行 → 配置可能不对。正确测试：force-stop 旧版 → 安装新版。不要再试。
+- [V] `awaitLsposedSettled` 等 Connected(LSPosed) + 2s → NPatch 用户等 2s 太慢。不要再试。
+- [V] 等"非 Connecting" + 删事件驱动 → App 1.5s 兜底置 Disconnected。不要再试。
 - [V] 等 Connected 5s 超时 → NPatch binder 先到 → INACTIVE 固定。不要再试。
-- [V] NONROOT 立即写缓存 → LSPosed 后到补不上，永远 NPatch。改为只有 LSPOSED 立即写。不要再试。
+- [V] NONROOT 立即写缓存 → LSPosed 后到补不上。只有 LSPOSED 立即写。不要再试。
 - [V] `clearAll` 调 `App.clearService()` → connectionState 变化触发弹窗。删掉。不要再试。
-- [V] 保留 onResume 重新检测 → 与"状态固定"矛盾。删除。不要再试。
+- [V] 保留 onResume 重新检测 → 与"状态固定"矛盾。不要再试。
 - [V] `onServiceDied` 不检查 service 身份 → NPatch binder 死亡误触。改为检查 `===`。
 - [V] 去掉 `evaluate()` service 检查 → onResume 恒 INACTIVE。恢复路径 2。
-- [V] `onServiceBind` 不区分框架 → LSPosed 开着但 NPatch 先到显示 NPatch。改为 LSPosed 优先。
+- [V] `onServiceBind` 不区分框架 → LSPosed 开着但 NPatch 先到。改为 LSPosed 优先。
 - [V] 弹窗并行 → npatchInstalled 竞态。恢复顺序执行。
 - [V] `hasShownDialog` 只弹一次 → 关 LSPosed 后再打开不弹窗。去掉。
-- [V] `kkgithub.com` 404 / `mirror.ghproxy.com` DNS 失败 / OkHttp 不走系统代理。改用 `gh-proxy.com`。
+- [V] `kkgithub.com` 404 / `mirror.ghproxy.com` DNS 失败。改用 `gh-proxy.com`。
 - [V] CHUNK_SIZE=256K → TransactionTooLargeException / Thread.sleep → ANR。
 - [V] 手动 `rememberNavigationEventDispatcherOwner` → 弹窗收不到返回键。
 - [V] LSPosed 下 ContentProvider IPC → Unknown authority / 定向广播 → 包不可见 / 非定向广播 → flyme IntentFirewall。
