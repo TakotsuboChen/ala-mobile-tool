@@ -1,69 +1,72 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-08-25T16:36:27+00:00 · Git HEAD: `d85b9da`
+生成时间: 2026-08-25T17:25:37+00:00 · Git HEAD: `afdc840`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: `main` @ `d85b9da` (2026-08-25)
-- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `d85b9da`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA
+- 锚点: `main` @ `afdc840` (2026-08-25)
+- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `afdc840`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA
 - 待重探的 [?]: 见下方标记
 - 先读: `HANDOFF.md` + `CLAUDE.md`
 
 ## 1. 当前目标
 
-**踏板优先级升级**。已完成：双踏板模式的"刹车过渡点"滑块 → `PedalPriority` 枚举下拉（6 选项），新增油门过渡点滑块（条件显示），`arbitrateDual()` 扩展 4→6 种仲裁策略，旧版无 `pedal_priority` key 天然迁移到 `BRAKE_VALUE`。真机验证全部通过。
+**Overlay 控件视觉属性**。已完成：新增三个可配置滑块——控件透明度（0-100%，默认 50%）、边框粗细（0-10dp，默认 5dp）、边框圆角（0-100%，默认 50%）。`clipPath` 圆角裁剪 + 边框内缩描边。真机验证全部通过。
 
 ## 2. 已验证状态 — 工作实际停在哪
 
-- [V] **`PedalPriority` 枚举** — `ModConfig.kt`：6 值枚举 `FIRST_PRESSED / LAST_TOUCHED / ALWAYS_THROTTLE / ALWAYS_BRAKE / THROTTLE_VALUE / BRAKE_VALUE`。`from()` 默认返回 `BRAKE_VALUE`。`420a427` 已 push。
-- [V] **Settings 新增字段** — `pedalPriority: PedalPriority`、`throttleTransition: Float`（默认 0.2f）。`brakeTransition` 默认值 0.1→0.2。`read()/fromJson()/write()/defaultSettingsPublic()` 全覆盖。
-- [V] **ConfigViewModel 同步** — `ConfigUiState` + setter + `toSettings()` 新增两字段。
-- [V] **UI: 滑块→下拉 + 条件滑块** — `ConfigurePagerMiuix.kt`：`OverlayDropdownPreference` 6 选项，选 `THROTTLE_VALUE`→油门过渡点滑块（1-99%），选 `BRAKE_VALUE`→刹车过渡点滑块（1-99%）。Icon 用 `PriorityHigh`（与过渡点 `SwapVert` 区分）。
-- [V] **`PedalOverlayView` 仲裁扩展** — `arbitrateDual()` 6 策略；`FIRST_PRESSED`/`LAST_TOUCHED` 用 companion `sharedFirstPressed`/`sharedLastTouched` 时序状态；`ACTION_UP` 清理时序状态。
-- [V] **LAST_TOUCHED 修复** — 只在 raw 0→>0（按下瞬间）更新 `sharedLastTouched`，保存 `prevThrottle`/`prevBrake` 判定。MOVE 中不更新，防止先按的手指微动夺回优先。
-- [V] **README.md 同步** — 配置表格更新。`d85b9da` 已 push。
+- [V] **ModConfig.kt 7 处同步** — `overlayAlpha`(0.5f)、`overlayBorderWidth`(5.0f)、`overlayCornerRadius`(0.5f)。JSON key: `overlay_alpha`/`overlay_border_width`/`overlay_corner_radius`。`f81336c` 已 push。
+- [V] **ConfigViewModel.kt 5 处同步** — ConfigUiState + init + defaultUiState + 3 setter + toSettings。
+- [V] **ConfigurePagerMiuix.kt UI** — 3 个 `SliderPreference`（DUAL 块后、Card 内），icon: `Opacity`/`BorderOuter`/`RoundedCorner`。
+- [V] **PedalOverlayView.kt 绘制改造** — Paint alpha 从 `settings.overlayAlpha` 读（`(1-transparency)*255`，反转语义）；`borderPaint` alpha 也从 settings 读；`clipPath` 裁剪填充到边框内边缘以内（`fillInset = strokeWidth`）；边框内缩 `strokeWidth/2` 画 `drawRoundRect`。
+- [V] **GearShiftView.kt 同步改造** — 构造函数加 `settings` 参数；Paint/clipPath/onDraw 同 PedalOverlayView。
+- [V] **OverlayManager.kt** — `GearShiftView(appContext, settings)` 传 settings。
+- [V] **README.md 同步** — 配置表格新增三行。`afdc840` 已 push。
 - [V] **编译 + release 构建 + 真机验证** — 用户确认"全部测试通过"。
 - 工作区: 干净。
 
 ### 测试/build 输出
 ```
-./gradlew :app:compileDebugKotlin → BUILD SUCCESSFUL
-./gradlew :app:assembleRelease → BUILD SUCCESSFUL
+./gradlew :app:assembleRelease → BUILD SUCCESSFUL (1m 31s)
 adb install -r app-release.apk → Success
 用户验证: 全部测试通过
 ```
 
 ## 3. 决策与理由
 
-- **`PedalPriority` 枚举 6 值** [V]——一个枚举表达所有仲裁策略，UI 下拉天然映射 `entries`。`BRAKE_VALUE` 作为默认值保持旧行为（旧版无 key → `from("")` → `BRAKE_VALUE`）。
-- **`brake_transition` key 名不变，无需迁移函数** [V]——旧 key 保留，旧值保留，新增 `pedal_priority`/`throttle_transition` 用 `optString`/`optDouble` fallback 默认值。比 `PedalInvert` 的 `migratePedalInvert()` 简单。
-- **`ALWAYS_THROTTLE`/`ALWAYS_BRAKE` 只在有值时屏蔽** [V]——`if (sharedRawThrottle > 0f) arbitratedBrake = 0f`，不是无条件屏蔽。否则选了"始终油门优先"后刹车踏板完全失效。
-- **LAST_TOUCHED 只在按下瞬间更新** [V]——每次 MOVE 都更新会导致先按的手指微动夺回优先，与 FIRST_PRESSED 表现一致。修复：保存 `prevRaw`，只在 `raw > 0f && prevRaw <= 0f` 时更新 `sharedLastTouched`。
-- **油门过渡点在刹车过渡点前面（UI 顺序）** [V]——用户要求"油门放在刹车前面"。枚举顺序 `THROTTLE_VALUE` 在 `BRAKE_VALUE` 前面，UI 条件滑块顺序一致。
-- **Icon `PriorityHigh` 而非 `SwapVert`** [V]——过渡点滑块已用 `SwapVert`，踏板优先级用 `PriorityHigh`（感叹号）区分。
+- **透明度语义反转** [V]——`alphaOf(transparency) = (1 - transparency) * 255`。100% = 完全透明，0% = 完全不透明。首次实现用了 `ratio * 255`（100% = 不透明），用户反馈"透明度反了"。
+- **边框内缩 strokeWidth/2 画** [V]——`drawRoundRect(inset, inset, w-inset, h-inset, ...)` 使 stroke 外边缘对齐控件边界。首次实现用 `(0,0,w,h)` 画，圆角处比直线处粗（外弧周长 > 内弧）。
+- **填充裁剪内缩 strokeWidth** [V]——`clipPath` 裁剪到 `(fillInset, ..., w-fillInset, ...)`，使填充边缘与边框内边缘重合。首次实现裁剪到 `(0,0,w,h)`，填充延伸到边框下面，半透明边框透出填充色。
+- **`borderPaint` alpha 从 settings 读** [V]——首次实现用 `Color.WHITE`（alpha=255 固定），边框不受透明度控制。改为 `Color.argb(alphaOf(...), 255, 255, 255)`。
+- **GearShiftView 构造函数加 settings** [V]——与 PedalOverlayView 对齐，配置变更靠销毁重建生效。
+- **默认值 50%/5dp/50%** [V]——用户指定。初始实现用 50%/2dp/25%，用户改为 50%/5dp/50%。
 
 ## 4. 失败的尝试 — 不要再试
 
-> 从旧 HANDOFF 前向搬运 + 本次新增，标 [V] 的已验证。完整历史见 `.handoffs/20260825163626-handoff.md`。
+> 从旧 HANDOFF 前向搬运 + 本次新增，标 [V] 的已验证。完整历史见 `.handoffs/20260825172537-handoff.md`。
 
 **本次新增：**
-- [V] **LAST_TOUCHED 每次 MOVE 都更新 `sharedLastTouched`** → 先按的 view 手指微动产生 MOVE 事件夺回优先，与 FIRST_PRESSED 表现完全一致。改为只在 raw 0→>0（按下瞬间）更新，保存 `prevThrottle`/`prevBrake` 判定。不要再试。
+- [V] **透明度 `alphaOf(ratio) = ratio * 255`** → 100% = 不透明，语义反了。改为 `(1-ratio) * 255`。不要再试。
+- [V] **`borderPaint` 用 `Color.WHITE` 不读 alpha** → 边框不受透明度控制。改为 `Color.argb(alphaOf(...), 255, 255, 255)`。不要再试。
+- [V] **`drawRoundRect(0,0,w,h,...)` 画边框不内缩** → 圆角处比直线处粗。改为内缩 `strokeWidth/2`。不要再试。
+- [V] **`clipPath` 裁剪到 `(0,0,w,h)`** → 填充延伸到边框下面，半透明边框透填充色。改为裁剪内缩 `strokeWidth`（`fillInset`）。不要再试。
 
-**从旧 HANDOFF 搬运（详见 `.handoffs/20260825163626-handoff.md`）：**
-- [V] `adb install -r` 覆盖安装时旧版仍运行 → 配置可能不对。正确测试：force-stop 旧版 → 安装新版。不要再试。
-- [V] `awaitLsposedSettled` 等 Connected(LSPosed) + 2s → NPatch 用户等 2s 太慢。不要再试。
-- [V] 等"非 Connecting" + 删事件驱动 → App 1.5s 兜底置 Disconnected。不要再试。
-- [V] 等 Connected 5s 超时 → NPatch binder 先到 → INACTIVE 固定。不要再试。
-- [V] NONROOT 立即写缓存 → LSPosed 后到补不上。只有 LSPOSED 立即写。不要再试。
-- [V] `clearAll` 调 `App.clearService()` → connectionState 变化触发弹窗。删掉。不要再试。
-- [V] 保留 onResume 重新检测 → 与"状态固定"矛盾。不要再试。
-- [V] `onServiceDied` 不检查 service 身份 → NPatch binder 死亡误触。改为检查 `===`。
+**从旧 HANDOFF 搬运（详见 `.handoffs/20260825172537-handoff.md`）：**
+- [V] `LAST_TOUCHED` 每次 MOVE 更新 → 先按的手指微动夺回优先。改为只在按下瞬间更新。
+- [V] `adb install -r` 覆盖安装时旧版运行 → 配置不对。force-stop 再安装。
+- [V] `awaitLsposedSettled` 等 Connected(LSPosed)+2s → NPatch 太慢。
+- [V] 等"非 Connecting"+删事件驱动 → App 1.5s 兜底 Disconnected。
+- [V] 等 Connected 5s 超时 → NPatch binder 先到 → INACTIVE 固定。
+- [V] NONROOT 立即写缓存 → LSPosed 后到补不上。只有 LSPOSED 立即写。
+- [V] `clearAll` 调 `App.clearService()` → connectionState 变化触发弹窗。删掉。
+- [V] 保留 onResume 重新检测 → 与"状态固定"矛盾。
+- [V] `onServiceDied` 不检查 service 身份 → NPatch binder 死亡误触。改为 `===`。
 - [V] 去掉 `evaluate()` service 检查 → onResume 恒 INACTIVE。恢复路径 2。
 - [V] `onServiceBind` 不区分框架 → LSPosed 开着但 NPatch 先到。改为 LSPosed 优先。
 - [V] 弹窗并行 → npatchInstalled 竞态。恢复顺序执行。
 - [V] `hasShownDialog` 只弹一次 → 关 LSPosed 后再打开不弹窗。去掉。
 - [V] `kkgithub.com` 404 / `mirror.ghproxy.com` DNS 失败。改用 `gh-proxy.com`。
-- [V] CHUNK_SIZE=256K → TransactionTooLargeException / Thread.sleep → ANR。
+- [V] `CHUNK_SIZE=256K` → TransactionTooLargeException / Thread.sleep → ANR。
 - [V] 手动 `rememberNavigationEventDispatcherOwner` → 弹窗收不到返回键。
 - [V] LSPosed 下 ContentProvider IPC → Unknown authority / 定向广播 → 包不可见 / 非定向广播 → flyme IntentFirewall。
 - [V] Remote Preferences `commit()` → UnsupportedOperationException / 广播传 300KB+ → Binder 溢出风险。
