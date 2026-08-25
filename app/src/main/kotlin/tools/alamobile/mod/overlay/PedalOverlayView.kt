@@ -42,7 +42,9 @@ class PedalOverlayView(
         enableUnlock = false,
         pedalDeadzone = 0.05f,
         pedalTransition = 0.5f,
-        brakeTransition = 0.1f,
+        brakeTransition = 0.2f,
+        throttleTransition = 0.2f,
+        pedalPriority = ModConfig.PedalPriority.BRAKE_VALUE,
         pedalInvert = ModConfig.PedalInvert.OFF,
         throttleCurve = ModConfig.PedalCurve.LINEAR,
         brakeCurve = ModConfig.PedalCurve.LINEAR,
@@ -62,13 +64,22 @@ class PedalOverlayView(
         // 独立调 NativeBridge.setThrottle/setBrake。两指同时按下时，native 层
         // throttle/brake 字段虽不互覆盖，但游戏逻辑不允许两者同时非零（否则
         // "只有先按着的生效"——油门和刹车互相抵消）。这里持共享 raw 值，每次
-        // 任意 view 更新都调 arbitrate() 按刹车过渡点规则仲裁：
-        //   brake ≥ brakeTransition → 刹车优先，屏蔽油门（mappedThrottle=0）
-        //   brake <  brakeTransition 且 throttle>0 → 油门优先，屏蔽刹车（mappedBrake=0）
+        // 任意 view 更新都调 arbitrate() 按 [PedalPriority] 策略仲裁：
+        //   FIRST_PRESSED：最早持续按住的踏板优先，抬起后另一踏板接管
+        //   LAST_TOUCHED：最新触摸的踏板优先
+        //   ALWAYS_THROTTLE：油门有值时始终屏蔽刹车
+        //   ALWAYS_BRAKE：刹车有值时始终屏蔽油门
+        //   THROTTLE_VALUE：throttle ≥ throttleTransition → 油门优先屏蔽刹车
+        //   BRAKE_VALUE：brake ≥ brakeTransition → 刹车优先屏蔽油门
         // 屏蔽只作用于 mapped/native；raw 仍跟手绘制（视觉反馈手指位移）。
         @Volatile private var sharedRawThrottle = 0f
         @Volatile private var sharedRawBrake = 0f
-        @Volatile private var sharedBrakeTransition = 0.1f
+        @Volatile private var sharedBrakeTransition = 0.2f
+        @Volatile private var sharedThrottleTransition = 0.2f
+        @Volatile private var sharedPedalPriority = ModConfig.PedalPriority.BRAKE_VALUE
+        // FIRST_PRESSED / LAST_TOUCHED 策略的时序状态（跨 view 共享）。
+        @Volatile private var sharedFirstPressed: PedalRole? = null
+        @Volatile private var sharedLastTouched: PedalRole? = null
         // 仲裁后的 mapped 值，双踏板两 view 共享——谁 update 谁送 native，
         // 但值由 arbitrate() 决定，避免"后按者覆盖"导致先按者失效。
         @Volatile private var arbitratedThrottle = 0f
@@ -168,9 +179,19 @@ class PedalOverlayView(
                 if (role == PedalRole.THROTTLE) {
                     sharedRawThrottle = 0f
                     arbitratedThrottle = 0f
+                    // FIRST_PRESSED：油门抬起时清记录，让刹车 view 下次 MOVE 接管。
+                    if (sharedFirstPressed == PedalRole.THROTTLE) sharedFirstPressed = null
+                    // LAST_TOUCHED：油门抬起时切到刹车（若仍按着），否则清空。
+                    if (sharedLastTouched == PedalRole.THROTTLE) {
+                        sharedLastTouched = if (sharedRawBrake > 0f) PedalRole.BRAKE else null
+                    }
                 } else if (role == PedalRole.BRAKE) {
                     sharedRawBrake = 0f
                     arbitratedBrake = 0f
+                    if (sharedFirstPressed == PedalRole.BRAKE) sharedFirstPressed = null
+                    if (sharedLastTouched == PedalRole.BRAKE) {
+                        sharedLastTouched = if (sharedRawThrottle > 0f) PedalRole.THROTTLE else null
+                    }
                 }
                 updateNativeValues()
                 invalidate()
@@ -249,8 +270,7 @@ class PedalOverlayView(
 
     /**
      * 双踏板跨 view 仲裁。两指同时按下时油门和刹车 view 各自独立更新，
-     * 这里用 companion 共享状态仲裁：brake ≥ brakeTransition → 刹车优先屏蔽
-     * 油门；brake < brakeTransition 且 throttle>0 → 油门优先屏蔽刹车。
+     * 这里用 companion 共享状态按 [ModConfig.PedalPriority] 策略仲裁。
      * 屏蔽只作用于 mapped/native，raw 仍跟手绘制（视觉反馈手指位移）。
      *
      * 调用方传本 view 曲线变换后的 mapped 值 [curveMapped]；方法内合并共享 raw
@@ -258,7 +278,15 @@ class PedalOverlayView(
      * 送 native。SINGLE 模式不走此路径（单 view 内 updateSingle 已自洽）。
      */
     private fun arbitrateDual(curveMapped: Float, isThrottleView: Boolean) {
+        val priority = settings.pedalPriority
         sharedBrakeTransition = settings.brakeTransition
+        sharedThrottleTransition = settings.throttleTransition
+        sharedPedalPriority = priority
+
+        // 保存旧 raw 值，供 LAST_TOUCHED 判断"按下瞬间"（0→>0）。
+        val prevThrottle = sharedRawThrottle
+        val prevBrake = sharedRawBrake
+
         if (isThrottleView) {
             sharedRawThrottle = rawThrottle
             arbitratedThrottle = curveMapped
@@ -266,17 +294,78 @@ class PedalOverlayView(
             sharedRawBrake = rawBrake
             arbitratedBrake = curveMapped
         }
-        // 仲裁规则：
-        //   刹车值（raw）≥ 过渡点 → 刹车优先，油门 mapped 置 0
-        //   刹车值 < 过渡点 且 油门 raw > 0 → 油门优先，刹车 mapped 置 0
-        // 注意用 raw 判定（跟手、即时），用 mapped 屏蔽（送 native）。
-        if (sharedRawBrake >= sharedBrakeTransition && sharedRawBrake > 0f) {
-            arbitratedThrottle = 0f
-            // mappedBrake 保留刹车 view 算出的值
-        } else if (sharedRawThrottle > 0f) {
-            arbitratedBrake = 0f
-            // mappedThrottle 保留油门 view 算出的值
+
+        val role = if (isThrottleView) PedalRole.THROTTLE else PedalRole.BRAKE
+        val raw = if (isThrottleView) sharedRawThrottle else sharedRawBrake
+
+        when (priority) {
+            ModConfig.PedalPriority.FIRST_PRESSED -> {
+                // 最早按住的踏板优先：raw > 0 且当前无记录 → 设为当前 view；
+                // raw 归零且记录是当前 view → 清除，让另一 view 下次 MOVE 接管。
+                if (raw > 0f && sharedFirstPressed == null) {
+                    sharedFirstPressed = role
+                } else if (raw <= 0f && sharedFirstPressed == role) {
+                    sharedFirstPressed = null
+                }
+                when (sharedFirstPressed) {
+                    PedalRole.THROTTLE -> arbitratedBrake = 0f
+                    PedalRole.BRAKE -> arbitratedThrottle = 0f
+                    else -> { /* SINGLE 不可能出现在双踏板仲裁；null = 都刚抬起，不屏蔽 */ }
+                }
+            }
+
+            ModConfig.PedalPriority.LAST_TOUCHED -> {
+                // 最新触摸的踏板优先：只在 raw 从 0→>0（按下瞬间）时更新，
+                // 不在已按住的 MOVE 中更新——否则先按的 view 手指微动会夺回优先。
+                val prevRaw = if (isThrottleView) prevThrottle else prevBrake
+                if (raw > 0f && prevRaw <= 0f) {
+                    sharedLastTouched = role
+                } else if (raw <= 0f && sharedLastTouched == role) {
+                    sharedLastTouched = if (isThrottleView) {
+                        if (sharedRawBrake > 0f) PedalRole.BRAKE else null
+                    } else {
+                        if (sharedRawThrottle > 0f) PedalRole.THROTTLE else null
+                    }
+                }
+                when (sharedLastTouched) {
+                    PedalRole.THROTTLE -> arbitratedBrake = 0f
+                    PedalRole.BRAKE -> arbitratedThrottle = 0f
+                    else -> { /* SINGLE 不可能出现在双踏板仲裁；null = 都没按，不屏蔽 */ }
+                }
+            }
+
+            ModConfig.PedalPriority.ALWAYS_THROTTLE -> {
+                // 始终油门优先：油门有值时屏蔽刹车，单独按刹车不受影响。
+                if (sharedRawThrottle > 0f) arbitratedBrake = 0f
+            }
+
+            ModConfig.PedalPriority.ALWAYS_BRAKE -> {
+                // 始终刹车优先：刹车有值时屏蔽油门，单独按油门不受影响。
+                if (sharedRawBrake > 0f) arbitratedThrottle = 0f
+            }
+
+            ModConfig.PedalPriority.THROTTLE_VALUE -> {
+                // 油门值（raw）≥ 过渡点 → 油门优先，刹车 mapped 置 0
+                // 油门值 < 过渡点 且 刹车 raw > 0 → 刹车优先，油门 mapped 置 0
+                if (sharedRawThrottle >= sharedThrottleTransition && sharedRawThrottle > 0f) {
+                    arbitratedBrake = 0f
+                } else if (sharedRawBrake > 0f) {
+                    arbitratedThrottle = 0f
+                }
+            }
+
+            ModConfig.PedalPriority.BRAKE_VALUE -> {
+                // 刹车值（raw）≥ 过渡点 → 刹车优先，油门 mapped 置 0
+                // 刹车值 < 过渡点 且 油门 raw > 0 → 油门优先，刹车 mapped 置 0
+                // 注意用 raw 判定（跟手、即时），用 mapped 屏蔽（送 native）。
+                if (sharedRawBrake >= sharedBrakeTransition && sharedRawBrake > 0f) {
+                    arbitratedThrottle = 0f
+                } else if (sharedRawThrottle > 0f) {
+                    arbitratedBrake = 0f
+                }
+            }
         }
+
         mappedThrottle = arbitratedThrottle
         mappedBrake = arbitratedBrake
     }

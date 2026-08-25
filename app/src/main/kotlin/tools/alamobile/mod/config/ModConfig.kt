@@ -67,6 +67,10 @@ object ModConfig {
     const val KEY_PEDAL_DEADZONE = "pedal_deadzone"
     const val KEY_PEDAL_TRANSITION = "pedal_transition"
     const val KEY_BRAKE_TRANSITION = "brake_transition"
+    // 油门过渡点：THROTTLE_VALUE 仲裁策略下，油门值 ≥ 此点 → 油门优先。
+    const val KEY_THROTTLE_TRANSITION = "throttle_transition"
+    // 双踏板仲裁策略：决定油门/刹车同时按下时谁优先。
+    const val KEY_PEDAL_PRIORITY = "pedal_priority"
     // 踏板方向反转：DUAL 模式下反转油门/刹车踏板的填充方向。
     // 关闭=默认方向（手指顶部满）；仅油门/仅刹车/油门和刹车分别控制各踏板。
     const val KEY_PEDAL_INVERT = "pedal_invert"
@@ -189,6 +193,38 @@ object ModConfig {
     }
 
     /**
+     * Dual-pedal arbitration strategy: decides which pedal wins when both
+     * are pressed simultaneously.
+     *
+     * - FIRST_PRESSED: the pedal that was pressed earliest and is still held
+     *   wins. When it is released, the other pedal takes over.
+     * - LAST_TOUCHED: the pedal that was most recently touched wins.
+     * - ALWAYS_THROTTLE: throttle always wins when both are pressed.
+     * - ALWAYS_BRAKE: brake always wins when both are pressed.
+     * - THROTTLE_VALUE: throttle raw value ≥ [Settings.throttleTransition] →
+     *   throttle wins, otherwise brake wins (if brake > 0).
+     * - BRAKE_VALUE: brake raw value ≥ [Settings.brakeTransition] → brake wins,
+     *   otherwise throttle wins (if throttle > 0). This is the legacy behavior.
+     *
+     * Migration: old configs without `pedal_priority` key default to
+     * [BRAKE_VALUE], preserving the legacy arbitration behavior.
+     */
+    enum class PedalPriority(val value: String) {
+        FIRST_PRESSED("first_pressed"),
+        LAST_TOUCHED("last_touched"),
+        ALWAYS_THROTTLE("always_throttle"),
+        ALWAYS_BRAKE("always_brake"),
+        THROTTLE_VALUE("throttle_value"),
+        BRAKE_VALUE("brake_value");
+
+        companion object {
+            fun from(value: String?): PedalPriority {
+                return entries.find { it.value == value } ?: BRAKE_VALUE
+            }
+        }
+    }
+
+    /**
      * Monotone cubic interpolation (Fritsch–Carlson) through the control
      * points plus the fixed endpoints (0,0) and (1,1).
      *
@@ -258,9 +294,14 @@ object ModConfig {
         val PEDAL_MODE = PedalMode.SINGLE
         const val PEDAL_DEADZONE = 0.05f
         const val PEDAL_TRANSITION = 0.5f
-        // 双踏板模式下油门/刹车仲裁的过渡点（用户配置 0..0.2）。
+        // 双踏板模式下刹车仲裁的过渡点（BRAKE_VALUE 策略，用户配置 0.01..0.99）。
         // 刹车值 ≥ 此点 → 刹车优先屏蔽油门；< 此点且油门>0 → 油门优先屏蔽刹车。
-        const val BRAKE_TRANSITION = 0.1f
+        const val BRAKE_TRANSITION = 0.2f
+        // 双踏板模式下油门仲裁的过渡点（THROTTLE_VALUE 策略，用户配置 0.01..0.99）。
+        // 油门值 ≥ 此点 → 油门优先屏蔽刹车；< 此点且刹车>0 → 刹车优先屏蔽油门。
+        const val THROTTLE_TRANSITION = 0.2f
+        // 双踏板仲裁策略：默认 BRAKE_VALUE（保持旧行为不变）。
+        val PEDAL_PRIORITY = PedalPriority.BRAKE_VALUE
         // 踏板方向反转：默认 OFF（手指顶部=满，填充从底往上）。
         val PEDAL_INVERT = PedalInvert.OFF
         val THROTTLE_CURVE = PedalCurve.LINEAR
@@ -369,6 +410,13 @@ object ModConfig {
                     KEY_BRAKE_TRANSITION,
                     Defaults.BRAKE_TRANSITION.toDouble()
                 ).toFloat(),
+                throttleTransition = json.optDouble(
+                    KEY_THROTTLE_TRANSITION,
+                    Defaults.THROTTLE_TRANSITION.toDouble()
+                ).toFloat(),
+                pedalPriority = PedalPriority.from(
+                    json.optString(KEY_PEDAL_PRIORITY, Defaults.PEDAL_PRIORITY.value)
+                ),
                 pedalInvert = migratePedalInvert(json),
                 throttleCurve = PedalCurve.from(
                     json.optString(KEY_THROTTLE_CURVE, json.optString(KEY_LEGACY_PEDAL_CURVE, Defaults.THROTTLE_CURVE.value))
@@ -419,6 +467,8 @@ object ModConfig {
             put(KEY_PEDAL_DEADZONE, settings.pedalDeadzone.toDouble())
             put(KEY_PEDAL_TRANSITION, settings.pedalTransition.toDouble())
             put(KEY_BRAKE_TRANSITION, settings.brakeTransition.toDouble())
+            put(KEY_THROTTLE_TRANSITION, settings.throttleTransition.toDouble())
+            put(KEY_PEDAL_PRIORITY, settings.pedalPriority.value)
             put(KEY_PEDAL_INVERT, settings.pedalInvert.value)
             put(KEY_THROTTLE_CURVE, settings.throttleCurve.value)
             put(KEY_BRAKE_CURVE, settings.brakeCurve.value)
@@ -684,6 +734,8 @@ object ModConfig {
                 pedalDeadzone = j.optDouble(KEY_PEDAL_DEADZONE, Defaults.PEDAL_DEADZONE.toDouble()).toFloat(),
                 pedalTransition = j.optDouble(KEY_PEDAL_TRANSITION, Defaults.PEDAL_TRANSITION.toDouble()).toFloat(),
                 brakeTransition = j.optDouble(KEY_BRAKE_TRANSITION, Defaults.BRAKE_TRANSITION.toDouble()).toFloat(),
+                throttleTransition = j.optDouble(KEY_THROTTLE_TRANSITION, Defaults.THROTTLE_TRANSITION.toDouble()).toFloat(),
+                pedalPriority = PedalPriority.from(j.optString(KEY_PEDAL_PRIORITY, Defaults.PEDAL_PRIORITY.value)),
                 pedalInvert = migratePedalInvert(j),
                 throttleCurve = PedalCurve.from(
                     j.optString(KEY_THROTTLE_CURVE, j.optString(KEY_LEGACY_PEDAL_CURVE, Defaults.THROTTLE_CURVE.value))
@@ -806,6 +858,8 @@ object ModConfig {
             pedalDeadzone = Defaults.PEDAL_DEADZONE,
             pedalTransition = Defaults.PEDAL_TRANSITION,
             brakeTransition = Defaults.BRAKE_TRANSITION,
+            throttleTransition = Defaults.THROTTLE_TRANSITION,
+            pedalPriority = Defaults.PEDAL_PRIORITY,
             pedalInvert = Defaults.PEDAL_INVERT,
             throttleCurve = Defaults.THROTTLE_CURVE,
             brakeCurve = Defaults.BRAKE_CURVE,
@@ -833,6 +887,8 @@ object ModConfig {
         val pedalDeadzone: Float,
         val pedalTransition: Float,
         val brakeTransition: Float,
+        val throttleTransition: Float = Defaults.THROTTLE_TRANSITION,
+        val pedalPriority: PedalPriority = Defaults.PEDAL_PRIORITY,
         val pedalInvert: PedalInvert = Defaults.PEDAL_INVERT,
         val throttleCurve: PedalCurve,
         val brakeCurve: PedalCurve,

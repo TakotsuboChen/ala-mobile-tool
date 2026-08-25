@@ -31,6 +31,7 @@ import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Flip
 import androidx.compose.material.icons.rounded.LockOpen
+import androidx.compose.material.icons.rounded.PriorityHigh
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Straighten
@@ -227,15 +228,55 @@ fun ConfigurePagerMiuix(
                                 exit = shrinkVertically() + fadeOut()
                             ) {
                                 Column {
-                                    SliderPreference(
-                                        title = "刹车过渡点",
-                                        summary = "刹车值超过此点则刹车优先，否则油门优先",
-                                        value = uiState.brakeTransition,
-                                        onValueChange = actions::setBrakeTransition,
-                                        valueRange = 0f..0.2f,
-                                        displayFormat = { String.format("%.0f%%", it * 100) },
-                                        icon = Icons.Rounded.SwapVert
+                                    OverlayDropdownPreference(
+                                        title = "踏板优先级",
+                                        summary = "双踏板同时按下时的优先策略",
+                                        items = ModConfig.PedalPriority.entries.map { priorityName(it) },
+                                        startAction = {
+                                            Icon(
+                                                Icons.Rounded.PriorityHigh,
+                                                modifier = Modifier.padding(end = 6.dp),
+                                                contentDescription = null,
+                                                tint = colorScheme.onBackground
+                                            )
+                                        },
+                                        selectedIndex = ModConfig.PedalPriority.entries.indexOf(uiState.pedalPriority),
+                                        onSelectedIndexChange = { index ->
+                                            actions.setPedalPriority(ModConfig.PedalPriority.entries[index])
+                                        },
                                     )
+                                    // 根据油门数值判断 → 显示油门过渡点滑块
+                                    AnimatedVisibility(
+                                        visible = uiState.pedalPriority == ModConfig.PedalPriority.THROTTLE_VALUE,
+                                        enter = expandVertically() + fadeIn(),
+                                        exit = shrinkVertically() + fadeOut()
+                                    ) {
+                                        SliderPreference(
+                                            title = "油门过渡点",
+                                            summary = "油门值超过此点则油门优先，否则刹车优先",
+                                            value = uiState.throttleTransition,
+                                            onValueChange = actions::setThrottleTransition,
+                                            valueRange = 0.01f..0.99f,
+                                            displayFormat = { String.format("%.0f%%", it * 100) },
+                                            icon = Icons.Rounded.SwapVert
+                                        )
+                                    }
+                                    // 根据刹车数值判断 → 显示刹车过渡点滑块
+                                    AnimatedVisibility(
+                                        visible = uiState.pedalPriority == ModConfig.PedalPriority.BRAKE_VALUE,
+                                        enter = expandVertically() + fadeIn(),
+                                        exit = shrinkVertically() + fadeOut()
+                                    ) {
+                                        SliderPreference(
+                                            title = "刹车过渡点",
+                                            summary = "刹车值超过此点则刹车优先，否则油门优先",
+                                            value = uiState.brakeTransition,
+                                            onValueChange = actions::setBrakeTransition,
+                                            valueRange = 0.01f..0.99f,
+                                            displayFormat = { String.format("%.0f%%", it * 100) },
+                                            icon = Icons.Rounded.SwapVert
+                                        )
+                                    }
                                     OverlayDropdownPreference(
                                         title = "踏板方向反转",
                                         summary = "反转踏板的行程填充方向",
@@ -801,4 +842,13 @@ private fun invertName(invert: ModConfig.PedalInvert): String = when (invert) {
     ModConfig.PedalInvert.THROTTLE -> "仅油门踏板"
     ModConfig.PedalInvert.BRAKE -> "仅刹车踏板"
     ModConfig.PedalInvert.BOTH -> "全部"
+}
+
+private fun priorityName(priority: ModConfig.PedalPriority): String = when (priority) {
+    ModConfig.PedalPriority.FIRST_PRESSED -> "最早按住的踏板优先"
+    ModConfig.PedalPriority.LAST_TOUCHED -> "最新触摸的踏板优先"
+    ModConfig.PedalPriority.ALWAYS_THROTTLE -> "始终油门优先"
+    ModConfig.PedalPriority.ALWAYS_BRAKE -> "始终刹车优先"
+    ModConfig.PedalPriority.THROTTLE_VALUE -> "根据油门数值判断"
+    ModConfig.PedalPriority.BRAKE_VALUE -> "根据刹车数值判断"
 }
