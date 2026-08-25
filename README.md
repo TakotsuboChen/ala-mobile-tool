@@ -3,7 +3,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/LSPosed%20API-102-green" alt="LSPosed API">
-  <img src="https://img.shields.io/badge/version-1.0.0-green" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.1-green" alt="Version">
   <img src="https://img.shields.io/badge/target-Ala%20Mobile-red" alt="Target">
 </p>
 
@@ -58,7 +58,7 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 - **三种拓扑**：关闭、单踏板（上半油门/下半刹车）、双踏板（独立油门/刹车控件）
 - **响应曲线**：线性 / 自定义（多点控制点 + 保单调三次样条），油门和刹车可分别设置
 - **死区与过渡点**：单踏板模式下可调油门/刹车交界处的无效范围（0-20%）和分界线位置（20-80%）
-- **刹车优先仲裁**：双踏板模式下两指同时按下时，刹车值超过过渡点（默认 10%）则刹车优先屏蔽油门
+- **踏板优先级仲裁**：双踏板模式下两指同时按下时的冲突仲裁策略，可选最早按住 / 最新触摸 / 始终油门 / 始终刹车 / 根据油门数值 / 根据刹车数值（默认），后两者配合可调过渡点（1-99%，默认 20%）
 - **踏板方向反转**：双踏板模式下反转油门/刹车踏板的填充方向（关闭 / 仅油门 / 仅刹车 / 全部）
 
 #### 主菜单音乐替换
@@ -76,6 +76,10 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 - 拖拽移动 + 四角缩放各 Overlay 位置
 - 长按编辑层重置到出厂默认位置
 - 单踏板 / 双踏板模式的位置分别持久化，互不干扰
+
+#### Overlay 视觉属性
+- **可定制外观**：控件透明度（0-100%，默认 50%）、边框粗细（0-10dp，0 表示无边框，默认 5dp）、边框圆角（0-100%，圆角半径 = 比例 × 短边/2，0% 为直角，默认 50%）
+- 同时作用于踏板控件与换挡按钮，配置变更后重建生效
 
 #### 内购解锁（Unlock / IAP Bypass）
 - 双重锁定路径：**Native inline Hook**（主路径）+ **Java 层 Xposed Hook**（辅助路径）
@@ -111,8 +115,9 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 - LSPosed 共存版：`System.setProperty` 进程级标记避免双 ClassLoader 重复注入
 
 #### LSPosed 激活检测
-- 概览页实时显示激活状态（已激活 / 未激活）
-- 判定依据 `service.frameworkName == "LSPosed"`：LSPosed daemon 只在模块启用时推 binder，绑定即激活（参照 AdClose `onServiceBind` 思路）
+- 概览页显示激活状态（已激活 / 未激活），冷启动检测一次后会话级固定，下次冷启动重新检测
+- 事件驱动判定（去轮询）：ConnectionState 三态等待 + onServiceDied service 身份检查，避免超时误弹免 Root 弹窗
+- 判定优先级：游戏进程 `onModuleLoaded` 标记 > `frameworkName == "LSPosed"` > Non-root 确认标记 > 未激活
 - NPatch 等非 Root 框架（`frameworkName == "NPatch"`，API 101）不算 LSPOSED；检测到 NPatch 已安装才弹"作用域确认"弹窗，未安装时点击激活卡片 Toast 提示
 
 #### 游戏版本检测
@@ -227,7 +232,7 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 | 模块更新通道 | 稳定版（仅正式 Release）或预览版（含 Pre-release） |
 | 启用日志 | 开关日志记录（logEnabled 统一门控 Java/native 文件输出，默认关闭） |
 | 导出并分享日志 | 合并模块与游戏进程日志，经 FileProvider 分享 |
-| 清除激活标记 | 删除 Non-root 确认标记与旧版激活残留（filesDir，pm clear 可清）；不碰 EULA 同意状态 |
+| 清除激活标记 | 删除 Non-root 确认标记与旧版激活残留（filesDir，pm clear 可清）；不碰 EULA 同意状态；清除后本次会话状态不变，下次冷启动重新检测 |
 | 清除跳过更新标记 | 恢复被跳过版本的自动弹窗提示 |
 | 用户协议 | 重新查看并确认用户协议 |
 
@@ -339,6 +344,9 @@ tools/run-il2cpp-dumper.sh
 
 <details>
 <summary>展开查看</summary>
+
+**v1.0.1**（2026-08-26，正式版，versionCode 101300）
+> 踏板操控与激活检测增强。新增踏板优先级枚举（6 策略仲裁 + 油门过渡点，替代旧单一刹车优先）、踏板方向反转枚举（油门/刹车可独立反转）、Overlay 视觉属性（透明度/边框粗细/边框圆角三个可配置滑块，作用于踏板与换挡控件）；LSPosed 激活检测稳定性大修（去轮询改事件驱动 + ConnectionState 三态 + service 身份检查，根治超时误弹免 Root 弹窗）；激活状态会话级持久化（冷启动检测一次固定到下次冷启动，清除标记下次冷启动重新检测）。
 
 **v1.0.0**（2026-08-19，正式版，versionCode 100300）
 > 首个正式版本。新增完整日志系统（logEnabled 开关统一门控 Java/native 文件输出 + 一键导出分享）；NPatch 激活确认流程收窄（激活弹窗收敛为「NPatch 作用域确认」，仅检测到 NPatch 已安装才弹出，未安装点击激活卡片 Toast 提示）；解锁持久化加固（走 `SetUnlocked(true)` 完整路径写 PlayerPrefs，修复标记文件残留导致车库车锁着的问题）。修复响应曲线图表在平板/横屏下高度溢出撑爆卡片、LSPosed 激活检测轮询超时误弹免 Root 弹窗。
