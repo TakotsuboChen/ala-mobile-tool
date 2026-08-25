@@ -67,9 +67,9 @@ object ModConfig {
     const val KEY_PEDAL_DEADZONE = "pedal_deadzone"
     const val KEY_PEDAL_TRANSITION = "pedal_transition"
     const val KEY_BRAKE_TRANSITION = "brake_transition"
-    // 刹车踏板方向反转：DUAL 模式下红色填充从默认的"手指顶部满、往下退"
-    // 改成"手指底部满、往上涨"，对应用户从下往上拉的触感偏好。
-    const val KEY_BRAKE_INVERT = "brake_invert"
+    // 踏板方向反转：DUAL 模式下反转油门/刹车踏板的填充方向。
+    // 关闭=默认方向（手指顶部满）；仅油门/仅刹车/油门和刹车分别控制各踏板。
+    const val KEY_PEDAL_INVERT = "pedal_invert"
     const val KEY_THROTTLE_CURVE = "throttle_curve"
     const val KEY_BRAKE_CURVE = "brake_curve"
     // 自定义曲线控制点列表 (x,y) ∈ [0,1]²。曲线是过 (0,0)、各控制点、(1,1) 的
@@ -80,6 +80,9 @@ object ModConfig {
     // Legacy keys (kept only for one-way migration on read)
     const val KEY_LEGACY_ENABLE_CONTROL_REPLACEMENT = "enable_control_replacement"
     const val KEY_LEGACY_PEDAL_CURVE = "pedal_curve"
+    // Legacy: 刹车踏板方向反转（boolean），迁移到 pedal_invert 枚举。
+    // true → PedalInvert.BRAKE（仅刹车踏板），false → PedalInvert.OFF（关闭）。
+    const val KEY_LEGACY_BRAKE_INVERT = "brake_invert"
 
     // Overlay positions
     const val KEY_PEDAL_POSITION = "pedal_position"
@@ -160,6 +163,32 @@ object ModConfig {
     data class CurvePoint(val x: Float, val y: Float)
 
     /**
+     * Pedal direction reverse mode for DUAL pedal mode.
+     *
+     * - OFF: neither pedal inverted (default — finger top = full).
+     * - THROTTLE: only the throttle pedal fills top-down (finger bottom = full).
+     * - BRAKE: only the brake pedal fills top-down (finger bottom = full).
+     * - BOTH: both pedals inverted.
+     *
+     * Migration: the legacy `brake_invert` boolean (true) maps to [BRAKE].
+     */
+    enum class PedalInvert(val value: String) {
+        OFF("off"),
+        THROTTLE("throttle"),
+        BRAKE("brake"),
+        BOTH("both");
+
+        val invertThrottle: Boolean get() = this == THROTTLE || this == BOTH
+        val invertBrake: Boolean get() = this == BRAKE || this == BOTH
+
+        companion object {
+            fun from(value: String?): PedalInvert {
+                return entries.find { it.value == value } ?: OFF
+            }
+        }
+    }
+
+    /**
      * Monotone cubic interpolation (Fritsch–Carlson) through the control
      * points plus the fixed endpoints (0,0) and (1,1).
      *
@@ -232,10 +261,8 @@ object ModConfig {
         // 双踏板模式下油门/刹车仲裁的过渡点（用户配置 0..0.2）。
         // 刹车值 ≥ 此点 → 刹车优先屏蔽油门；< 此点且油门>0 → 油门优先屏蔽刹车。
         const val BRAKE_TRANSITION = 0.1f
-        // 刹车踏板方向反转：默认 false（红色从手指位置往下填到底部，
-        // 手指顶部=满刹车）。true 时改成从手指位置往上填到顶部，
-        // 手指底部=满刹车（对应用户"从下往上拉"的触感偏好）。
-        const val BRAKE_INVERT = false
+        // 踏板方向反转：默认 OFF（手指顶部=满，填充从底往上）。
+        val PEDAL_INVERT = PedalInvert.OFF
         val THROTTLE_CURVE = PedalCurve.LINEAR
         val BRAKE_CURVE = PedalCurve.LINEAR
         // 自定义曲线控制点列表默认空 = 线性（只有两端点）。
@@ -342,7 +369,7 @@ object ModConfig {
                     KEY_BRAKE_TRANSITION,
                     Defaults.BRAKE_TRANSITION.toDouble()
                 ).toFloat(),
-                brakeInvert = json.optBoolean(KEY_BRAKE_INVERT, Defaults.BRAKE_INVERT),
+                pedalInvert = migratePedalInvert(json),
                 throttleCurve = PedalCurve.from(
                     json.optString(KEY_THROTTLE_CURVE, json.optString(KEY_LEGACY_PEDAL_CURVE, Defaults.THROTTLE_CURVE.value))
                 ),
@@ -392,7 +419,7 @@ object ModConfig {
             put(KEY_PEDAL_DEADZONE, settings.pedalDeadzone.toDouble())
             put(KEY_PEDAL_TRANSITION, settings.pedalTransition.toDouble())
             put(KEY_BRAKE_TRANSITION, settings.brakeTransition.toDouble())
-            put(KEY_BRAKE_INVERT, settings.brakeInvert)
+            put(KEY_PEDAL_INVERT, settings.pedalInvert.value)
             put(KEY_THROTTLE_CURVE, settings.throttleCurve.value)
             put(KEY_BRAKE_CURVE, settings.brakeCurve.value)
             put(KEY_THROTTLE_CURVE_POINTS, writeCurvePoints(settings.throttleCurvePoints))
@@ -657,7 +684,7 @@ object ModConfig {
                 pedalDeadzone = j.optDouble(KEY_PEDAL_DEADZONE, Defaults.PEDAL_DEADZONE.toDouble()).toFloat(),
                 pedalTransition = j.optDouble(KEY_PEDAL_TRANSITION, Defaults.PEDAL_TRANSITION.toDouble()).toFloat(),
                 brakeTransition = j.optDouble(KEY_BRAKE_TRANSITION, Defaults.BRAKE_TRANSITION.toDouble()).toFloat(),
-                brakeInvert = j.optBoolean(KEY_BRAKE_INVERT, Defaults.BRAKE_INVERT),
+                pedalInvert = migratePedalInvert(j),
                 throttleCurve = PedalCurve.from(
                     j.optString(KEY_THROTTLE_CURVE, j.optString(KEY_LEGACY_PEDAL_CURVE, Defaults.THROTTLE_CURVE.value))
                 ),
@@ -689,6 +716,18 @@ object ModConfig {
         if (explicit.isNotEmpty()) return PedalMode.from(explicit)
         return if (json.optBoolean(KEY_LEGACY_ENABLE_CONTROL_REPLACEMENT, true)) PedalMode.SINGLE
         else PedalMode.OFF
+    }
+
+    /**
+     * One-way migration: if the new `pedal_invert` key is present, use it.
+     * Otherwise derive from the legacy `brake_invert` boolean:
+     *   true  -> BRAKE (仅刹车踏板)
+     *   false -> OFF (关闭)
+     */
+    private fun migratePedalInvert(json: JSONObject): PedalInvert {
+        val explicit = json.optString(KEY_PEDAL_INVERT, "")
+        if (explicit.isNotEmpty()) return PedalInvert.from(explicit)
+        return if (json.optBoolean(KEY_LEGACY_BRAKE_INVERT, false)) PedalInvert.BRAKE else PedalInvert.OFF
     }
 
     private fun readOverlayPosition(
@@ -767,7 +806,7 @@ object ModConfig {
             pedalDeadzone = Defaults.PEDAL_DEADZONE,
             pedalTransition = Defaults.PEDAL_TRANSITION,
             brakeTransition = Defaults.BRAKE_TRANSITION,
-            brakeInvert = Defaults.BRAKE_INVERT,
+            pedalInvert = Defaults.PEDAL_INVERT,
             throttleCurve = Defaults.THROTTLE_CURVE,
             brakeCurve = Defaults.BRAKE_CURVE,
             throttleCurvePoints = Defaults.THROTTLE_CURVE_POINTS,
@@ -794,7 +833,7 @@ object ModConfig {
         val pedalDeadzone: Float,
         val pedalTransition: Float,
         val brakeTransition: Float,
-        val brakeInvert: Boolean = Defaults.BRAKE_INVERT,
+        val pedalInvert: PedalInvert = Defaults.PEDAL_INVERT,
         val throttleCurve: PedalCurve,
         val brakeCurve: PedalCurve,
         val throttleCurvePoints: List<CurvePoint> = Defaults.THROTTLE_CURVE_POINTS,

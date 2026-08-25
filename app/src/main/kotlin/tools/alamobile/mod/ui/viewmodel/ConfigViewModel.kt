@@ -55,7 +55,7 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
                 pedalDeadzone = s.pedalDeadzone,
                 pedalTransition = s.pedalTransition,
                 brakeTransition = s.brakeTransition,
-                brakeInvert = s.brakeInvert,
+                pedalInvert = s.pedalInvert,
                 throttleCurve = s.throttleCurve,
                 brakeCurve = s.brakeCurve,
                 throttleCurvePoints = s.throttleCurvePoints,
@@ -80,7 +80,7 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
             pedalDeadzone = s.pedalDeadzone,
             pedalTransition = s.pedalTransition,
             brakeTransition = s.brakeTransition,
-            brakeInvert = s.brakeInvert,
+            pedalInvert = s.pedalInvert,
             throttleCurve = s.throttleCurve,
             brakeCurve = s.brakeCurve,
             throttleCurvePoints = s.throttleCurvePoints,
@@ -115,7 +115,7 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
     fun setPedalDeadzone(v: Float) { _uiState.value = _uiState.value.copy(pedalDeadzone = v); scheduleSave() }
     fun setPedalTransition(v: Float) { _uiState.value = _uiState.value.copy(pedalTransition = v); scheduleSave() }
     fun setBrakeTransition(v: Float) { _uiState.value = _uiState.value.copy(brakeTransition = v); scheduleSave() }
-    fun setBrakeInvert(v: Boolean) { _uiState.value = _uiState.value.copy(brakeInvert = v); scheduleSave() }
+    fun setPedalInvert(v: ModConfig.PedalInvert) { _uiState.value = _uiState.value.copy(pedalInvert = v); scheduleSave() }
     fun setThrottleCurve(v: ModConfig.PedalCurve) { _uiState.value = _uiState.value.copy(throttleCurve = v); scheduleSave() }
     fun setBrakeCurve(v: ModConfig.PedalCurve) { _uiState.value = _uiState.value.copy(brakeCurve = v); scheduleSave() }
     fun setThrottleCurvePoints(v: List<ModConfig.CurvePoint>) { _uiState.value = _uiState.value.copy(throttleCurvePoints = v); scheduleSave() }
@@ -154,7 +154,7 @@ data class ConfigUiState(
     val pedalDeadzone: Float,
     val pedalTransition: Float,
     val brakeTransition: Float,
-    val brakeInvert: Boolean,
+    val pedalInvert: ModConfig.PedalInvert,
     val throttleCurve: ModConfig.PedalCurve,
     val brakeCurve: ModConfig.PedalCurve,
     val throttleCurvePoints: List<ModConfig.CurvePoint>,
@@ -174,7 +174,7 @@ data class ConfigUiState(
         pedalDeadzone = pedalDeadzone,
         pedalTransition = pedalTransition,
         brakeTransition = brakeTransition,
-        brakeInvert = brakeInvert,
+        pedalInvert = pedalInvert,
         throttleCurve = throttleCurve,
         brakeCurve = brakeCurve,
         throttleCurvePoints = throttleCurvePoints,

@@ -236,9 +236,10 @@ fun ConfigurePagerMiuix(
                                         displayFormat = { String.format("%.0f%%", it * 100) },
                                         icon = Icons.Rounded.SwapVert
                                     )
-                                    SwitchPreference(
-                                        title = "刹车踏板方向反转",
-                                        summary = "开启后刹车行程变为由上往下",
+                                    OverlayDropdownPreference(
+                                        title = "踏板方向反转",
+                                        summary = "反转踏板的行程填充方向",
+                                        items = ModConfig.PedalInvert.entries.map { invertName(it) },
                                         startAction = {
                                             Icon(
                                                 Icons.Rounded.Flip,
@@ -247,8 +248,10 @@ fun ConfigurePagerMiuix(
                                                 tint = colorScheme.onBackground
                                             )
                                         },
-                                        checked = uiState.brakeInvert,
-                                        onCheckedChange = actions::setBrakeInvert
+                                        selectedIndex = ModConfig.PedalInvert.entries.indexOf(uiState.pedalInvert),
+                                        onSelectedIndexChange = { index ->
+                                            actions.setPedalInvert(ModConfig.PedalInvert.entries[index])
+                                        },
                                     )
                                 }
                             }
@@ -791,4 +794,11 @@ private fun modeName(mode: ModConfig.PedalMode): String = when (mode) {
     ModConfig.PedalMode.OFF -> "关闭"
     ModConfig.PedalMode.SINGLE -> "单踏板模式"
     ModConfig.PedalMode.DUAL -> "双踏板模式"
+}
+
+private fun invertName(invert: ModConfig.PedalInvert): String = when (invert) {
+    ModConfig.PedalInvert.OFF -> "关闭"
+    ModConfig.PedalInvert.THROTTLE -> "仅油门踏板"
+    ModConfig.PedalInvert.BRAKE -> "仅刹车踏板"
+    ModConfig.PedalInvert.BOTH -> "全部"
 }
