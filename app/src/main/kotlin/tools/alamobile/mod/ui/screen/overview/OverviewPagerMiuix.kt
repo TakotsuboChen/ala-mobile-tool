@@ -35,7 +35,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,13 +61,11 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.VolunteerActivism
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import tools.alamobile.mod.BuildConfig
 import tools.alamobile.mod.EulaManager
 import tools.alamobile.mod.App
@@ -384,14 +381,15 @@ private fun ActivationCard(eulaAccepted: Boolean) {
     var dialogVisible by remember { mutableStateOf(false) }
     // 区分关闭原因，onDismissFinished 里据此执行不同副作用。
     var pendingAction by remember { mutableStateOf<() -> Unit>({ }) }
-    // 首次检测完成标记：LaunchedEffect(Unit) 顺序执行首次检测后置 true，
-    // LaunchedEffect(connectionState) 据此跳过首次（避免重复弹窗）。
-    var firstCheckDone by remember { mutableStateOf(false) }
     val isDark = isSystemInDarkTheme()
 
-    // 首次检测 + 弹窗：顺序执行（恢复原来的弹窗逻辑），用 connectionState
-    // 等待 service 稳定，替代原来的 evaluate(awaitService=true) 3s 轮询。
-    // npatchInstalled 在弹窗前已设置，无竞态。
+    // 首次检测 + 弹窗：顺序执行，用 connectionState 等待 service 稳定（2s），
+    // 替代原来的 evaluate(awaitService=true) 3s 轮询。npatchInstalled 在弹窗前已设置，无竞态。
+    //
+    // **运行时单次持久化**：detectOnce 非 INACTIVE（LSPOSED/NONROOT）立即写缓存固定；
+    // INACTIVE 不写缓存，留给下面 LaunchedEffect(connectionState) 事件驱动补刷新
+    //（service 可能晚到，补上 LSPOSED 后写缓存固定）。5s 超时 forceSettle 兜底。
+    // 缓存写入后（isDetectionDone=true）本次会话状态完全固定，直到下次冷启动。
     LaunchedEffect(Unit) {
         // NPatch 管理器安装检测（IO 线程，PackageManager 查询）。
         npatchInstalled = withContext(Dispatchers.IO) {
@@ -399,79 +397,54 @@ private fun ActivationCard(eulaAccepted: Boolean) {
         }
         // 等 connectionState 稳定（Connecting → Connected/Disconnected），最多 2s。
         // 参照 AdClose AppRepository: withTimeoutOrNull { connectionState.first { !is Connecting } }。
-        // 协程挂起不阻塞线程，service 在 2s 内绑上则返回 Connected，超时则 null。
-        // 等 connectionState 稳定（service 绑上或 2s 超时），然后 evaluate 检查 App.xposedService。
-        // evaluate 内部判断 frameworkName=="LSPosed" → LSPOSED，NPatch → 走手动确认路径。
         withTimeoutOrNull(2000L) {
             App.connectionState.first { it !is ConnectionState.Connecting }
         }
-        val evaluated = withContext(Dispatchers.IO) { LsposedStatus.evaluate(context) }
+        // detectOnce：非 INACTIVE 立即写缓存固定；INACTIVE 不写，等事件驱动补刷新。
+        val evaluated = withContext(Dispatchers.IO) { LsposedStatus.detectOnce(context) }
         status = evaluated
-        firstCheckDone = true
         // 弹窗条件与原逻辑一致：INACTIVE + EULA 已同意 + NPatch 已安装。
         if (evaluated == LsposedStatus.Status.INACTIVE && eulaAccepted && npatchInstalled) {
             showNonRootDialog = true
             dialogVisible = true
         }
+        // 超时兜底：2s 等待 + 3s = 5s 总窗口后，如果还没写缓存（INACTIVE 等事件驱动
+        // 但 service 一直没绑上），强制固定为 INACTIVE，避免状态一直不固定。
+        delay(3000)
+        if (!LsposedStatus.isDetectionDone()) {
+            LsposedStatus.forceSettle(context)
+        }
     }
 
-    // 事件驱动：service 后续变化时刷新 status + 弹窗。
-    // firstCheckDone 守护：首次检测由 LaunchedEffect(Unit) 负责，这里跳过首次。
+    // 事件驱动：service 后到时补刷新 status + 弹窗。
+    // isDetectionDone 守护：缓存已写入（LSPOSED/NONROOT/超时 INACTIVE）后跳过，
+    // 状态固定不再变——这是"运行时单次持久化"的核心。
+    // 缓存未写入时（首次检测 INACTIVE，service 可能晚到），事件驱动补刷新：
+    // service 绑上 → detectOnce → LSPOSED → 写缓存固定 + 关弹窗。
     val connectionState by App.connectionState.collectAsState()
     LaunchedEffect(connectionState) {
-        if (!firstCheckDone) return@LaunchedEffect
+        if (LsposedStatus.isDetectionDone()) return@LaunchedEffect
         when (val state = connectionState) {
             is ConnectionState.Connected -> {
-                // service 绑上/升级 → 重新 evaluate（检查 App.xposedService）
-                val evaluated = withContext(Dispatchers.IO) { LsposedStatus.evaluate(context) }
+                val evaluated = withContext(Dispatchers.IO) { LsposedStatus.detectOnce(context) }
                 status = evaluated
                 if (evaluated == LsposedStatus.Status.LSPOSED) {
                     showNonRootDialog = false
                     dialogVisible = false
-                } else if (evaluated == LsposedStatus.Status.INACTIVE && eulaAccepted && npatchInstalled) {
-                    showNonRootDialog = true
-                    dialogVisible = true
                 }
             }
-            is ConnectionState.Disconnected -> {
-                val evaluated = withContext(Dispatchers.IO) { LsposedStatus.evaluate(context) }
-                status = evaluated
-                if (evaluated == LsposedStatus.Status.INACTIVE && eulaAccepted && npatchInstalled) {
-                    showNonRootDialog = true
-                    dialogVisible = true
-                }
-            }
+            is ConnectionState.Disconnected -> { }
             is ConnectionState.Connecting -> { }
         }
     }
 
     // EULA 同意后补弹：eulaAccepted 从 false→true 时若仍 INACTIVE，触发弹窗。
+    // 用会话缓存的 status 判断（冷启动检测结果，本次会话固定）。
     LaunchedEffect(eulaAccepted) {
         if (eulaAccepted && status == LsposedStatus.Status.INACTIVE && npatchInstalled) {
             showNonRootDialog = true
             dialogVisible = true
         }
-    }
-
-    // onResume 重新检测：后台缓存恢复时 service 状态可能已变。
-    // 只刷新 status，不触发弹窗（弹窗由 ConnectionState 事件驱动）。
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val scope = rememberCoroutineScope()
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                scope.launch {
-                    val evaluated = withContext(Dispatchers.IO) {
-                        LsposedStatus.evaluate(context)
-                    }
-                    if (evaluated != status) {
-                        status = evaluated
-                    }
-                }
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // status 为 null 时显示加载态，避免 null 检查导致的颜色闪烁。
@@ -556,9 +529,8 @@ private fun ActivationCard(eulaAccepted: Boolean) {
                 // 先把 visible 翻 false 触发退出动画，动画结束后 onDismissFinished 执行真正逻辑
                 pendingAction = {
                     LsposedStatus.confirmNonRoot(context)
-                    // 重新检测：若 LSPosed service 已绑上（ConnectionState.Connected），
-                    // LaunchedEffect(connectionState) 会优先刷新到 LSPOSED 并清掉刚写的
-                    // nonroot flag——这正是"LSPosed 状态高于一切"的语义。
+                    // confirmNonRoot 已写会话缓存 NONROOT，evaluate 读缓存立即生效。
+                    // 本次会话状态固定为 NONROOT，下次冷启动检测到 LSPosed 再覆盖。
                     status = LsposedStatus.evaluate(context)
                 }
                 dialogVisible = false

@@ -63,7 +63,7 @@ import tools.alamobile.mod.config.ModConfig
  * 激活检测的核心状态——UI 订阅 [App.connectionState] 事件驱动刷新：
  * - [Connecting]：已注册 listener，等待 daemon 推 binder
  * - [Connected]：onServiceBind 回调，frameworkName 区分 LSPosed / NPatch
- * - [Disconnected]：onServiceDied / 超时 / clearService
+ * - [Disconnected]：onServiceDied / 超时
  */
 sealed interface ConnectionState {
     data object Connecting : ConnectionState
@@ -113,30 +113,12 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
          *
          * - [ConnectionState.Connecting]：已注册 listener，等待 daemon 推 binder
          * - [ConnectionState.Connected]：onServiceBind 回调，存 service 实例
-         * - [ConnectionState.Disconnected]：onServiceDied（仅当前 service 死）/ 1.5s 超时 / clearService
+         * - [ConnectionState.Disconnected]：onServiceDied（仅当前 service 死）/ 1.5s 超时
          *
          * UI 订阅此 Flow 事件驱动刷新激活状态，不再轮询 [xposedService]。
          */
         private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Connecting)
         val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
-
-        /**
-         * 清掉内存中的 [xposedService] 引用（不调 onServiceDied，不通知框架）。
-         *
-         * 供 [LsposedStatus.clearAll] 用：用户在设置页点"清除激活标记"时，
-         * 仅清持久标记（nonroot flag / property / remote key）不够——进程不
-         * 重启时 [xposedService] 仍在内存，下次 [LsposedStatus.evaluate] 立即
-         * 命中路径 2 返回 LSPOSED，"清除"形同虚设。清掉它后 evaluate 才会真正
-         * 走完整检测流程（下次 service 异步重新绑上时自然恢复 LSPOSED）。
-         *
-         * **不调 [onServiceDied]**：那会向框架注销死亡回调，副作用超出"清激活
-         * 标记"的语义。这里只是置 null，让 [evaluate] 不再看到旧引用。
-         */
-        fun clearService() {
-            xposedService = null
-            _connectionState.value = ConnectionState.Disconnected
-            Log.i(TAG, "App: xposedService cleared by LsposedStatus.clearAll")
-        }
 
         /**
          * 主动从 NPatch 管理器的 RemoteApiProvider 拿可写 IXposedService binder。

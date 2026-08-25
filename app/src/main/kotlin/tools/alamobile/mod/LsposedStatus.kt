@@ -33,8 +33,10 @@ import android.util.Log
  * 之后 LSPosed 关了 → 不保留 Non-root 已激活状态，必须重新点选。
  *
  * 异步时序：[App.xposedService] 在 ConfigActivity.onCreate 时可能仍为 null
- * （XposedServiceHelper 异步绑定）。service 绑定状态由 [App.connectionState]
- * StateFlow 事件驱动，UI 订阅后在 Connected 时刷新为已激活。
+ * （XposedServiceHelper 异步绑定）。UI 首次组合时等 [App.connectionState] 稳定
+ * （最多 2s）后调 [detectOnce] 做一次完整检测并缓存——**本次会话内状态固定**，
+ * 之后 [evaluate] 只读缓存，不再实时检测（用户中途开关框架 / 清除激活标记
+ * 都不影响，下次冷启动重新检测才生效）。
  */
 object LsposedStatus {
 
@@ -42,6 +44,26 @@ object LsposedStatus {
 
     /** NPatch 管理器包名。Android 11+ 包可见性已在 AndroidManifest <queries> 声明。 */
     const val NPATCH_PKG = "top.nkbe.npatch"
+
+    /**
+     * 会话级激活状态缓存（进程级）。
+     *
+     * 冷启动（进程启动）时 [detectOnce] 执行一次完整检测并写入；之后本次会话内
+     * [evaluate] 一律返回缓存值，**不再实时检测**——激活状态从这次冷启动到下次
+     * 冷启动完全固定。用户中途开关 LSPosed 管理器 / 清除激活标记都不影响本次
+     * 会话状态，下次冷启动重新检测时才会反映变化。
+     */
+    @Volatile
+    private var cachedStatus: Status? = null
+
+    /**
+     * 首次检测是否已完成（进程级）。
+     *
+     * 供 UI 判断"是否真正首次检测"：Activity 重建（进程存活）时 [detectOnce]
+     * 直接返回缓存，弹窗逻辑据此跳过，不重复弹窗。
+     */
+    @Volatile
+    private var detectionDone = false
 
     /** 激活状态。UI 据此渲染卡片标题、描述、颜色与点击行为。 */
     enum class Status {
@@ -54,7 +76,61 @@ object LsposedStatus {
     }
 
     /**
-     * 判定当前激活状态（纯同步快速检测，无轮询）。
+     * 冷启动完整检测。
+     *
+     * **只有 LSPOSED 立即写缓存**——LSPosed 是最高优先级，确定后不会降级，
+     * 可以安全固定。NONROOT / INACTIVE 不写缓存：LSPosed 可能晚到覆盖
+     * （NPatch binder 同步先到 → detectOnce 返回 NONROOT，但 LSPosed daemon
+     * 可能 2s 后才推 binder），留给 [OverviewPagerMiuix] 的
+     * `LaunchedEffect(connectionState)` 事件驱动补刷新——补上 LSPOSED 后
+     * 写缓存固定。
+     *
+     * NONROOT / INACTIVE 不写缓存但 [detectOnce] 仍返回结果给 UI 显示，
+     * 所以 NPatch 用户 2s 内就能看到 NONROOT（和上次会话一样快）。5s 超时
+     * 调 [forceSettle] 兜底写缓存（调 [evaluateInternal] 获取当前状态，
+     * NPatch 用户写 NONROOT，无框架写 INACTIVE），用户无感知。
+     */
+    @Synchronized
+    fun detectOnce(context: Context): Status {
+        cachedStatus?.let { return it }
+        val s = evaluateInternal(context)
+        if (s == Status.LSPOSED) {
+            cachedStatus = s
+            detectionDone = true
+        }
+        return s
+    }
+
+    /**
+     * 读取本次会话的固定激活状态。
+     *
+     * **不再实时检测**——只返回 [detectOnce] 写入的缓存；尚未检测时返回
+     * [Status.INACTIVE]。语义：这次冷启动到下次冷启动之间，激活状态完全固定。
+     */
+    fun evaluate(context: Context): Status = cachedStatus ?: Status.INACTIVE
+
+    /** 首次检测是否已完成（缓存已写入，状态固定）。 */
+    fun isDetectionDone(): Boolean = detectionDone
+
+    /**
+     * 超时兜底：强制写缓存固定。
+     *
+     * 供 UI 侧 [OverviewPagerMiuix] 的 `LaunchedEffect(Unit)` 在 5s 后调用：
+     * 如果此时 [detectOnce] 还没写缓存（NONROOT/INACTIVE 等事件驱动但
+     * LSPosed 一直没绑上），调 [evaluateInternal] 获取当前状态并写缓存固定
+     *（NPatch 用户 → NONROOT，无框架 → INACTIVE），避免状态一直不固定。
+     */
+    @Synchronized
+    fun forceSettle(context: Context) {
+        if (cachedStatus == null) {
+            cachedStatus = evaluateInternal(context)
+            detectionDone = true
+            Log.i(TAG, "forceSettle: settled to $cachedStatus after timeout")
+        }
+    }
+
+    /**
+     * 判定当前激活状态（纯同步快速检测，无轮询）。仅由 [detectOnce] 调用。
      *
      * **判定优先级**：
      * 1. `hasModuleLoadedFlag()` —— 目标进程（游戏进程）路径：`onModuleLoaded`
@@ -64,18 +140,15 @@ object LsposedStatus {
      *    NPatch service（`frameworkName == "NPatch"`）不算激活，走路径 3。
      * 3. `readNonRootConfirmed()` —— 用户在弹窗里确认了 Non-root 框架。
      * 4. 默认 `INACTIVE`。
-     *
-     * service 异步绑定由 [App.connectionState] StateFlow 事件驱动补充：
-     * service 绑上时 UI 重新调本方法，路径 2 命中 → LSPOSED。
      */
-    fun evaluate(context: Context): Status {
+    private fun evaluateInternal(context: Context): Status {
         // 1) 目标进程路径：onModuleLoaded 执行过（游戏进程被真正注入）。
         if (hasModuleLoadedFlag()) {
-            Log.i(TAG, "evaluate: hasModuleLoadedFlag=true → LSPOSED")
+            Log.i(TAG, "detectOnce: hasModuleLoadedFlag=true → LSPOSED")
             clearNonRootConfirmed(context)
             return Status.LSPOSED
         }
-        Log.i(TAG, "evaluate: hasModuleLoadedFlag=false, continue")
+        Log.i(TAG, "detectOnce: hasModuleLoadedFlag=false, continue")
 
         // 2) ConfigActivity 进程路径：LSPosed daemon 已绑定。
         //    App.xposedService 由 App.onServiceBind 赋值。只认 frameworkName=="LSPosed"，
@@ -83,20 +156,20 @@ object LsposedStatus {
         val service = App.xposedService
         if (service != null) {
             if (isLsposedService(service)) {
-                Log.i(TAG, "evaluate: frameworkName=LSPosed → LSPOSED")
+                Log.i(TAG, "detectOnce: frameworkName=LSPosed → LSPOSED")
                 clearNonRootConfirmed(context)
                 return Status.LSPOSED
             }
-            Log.i(TAG, "evaluate: service is not LSPosed framework → fall through")
+            Log.i(TAG, "detectOnce: service is not LSPosed framework → fall through")
         }
 
         // 3) Non-root 用户确认标记 —— 用户在弹窗里选了"是"。
         if (readNonRootConfirmed(context)) {
-            Log.i(TAG, "evaluate: nonroot_confirmed=true → NONROOT")
+            Log.i(TAG, "detectOnce: nonroot_confirmed=true → NONROOT")
             return Status.NONROOT
         }
 
-        Log.i(TAG, "evaluate: no path matched → INACTIVE")
+        Log.i(TAG, "detectOnce: no path matched → INACTIVE")
         return Status.INACTIVE
     }
 
@@ -148,7 +221,7 @@ object LsposedStatus {
     }
 
     /**
-     * 用户在弹窗里选"是"（用了 Non-root 框架）→ 写持久标记。
+     * 用户在弹窗里选"是"（用了 Non-root 框架）→ 写持久标记 + 会话缓存。
      *
      * **只写模块进程 filesDir，不写 remote prefs** —— 原因：
      * - `nonroot_confirmed` 是"每个安装会话"的本地状态，只在 ConfigActivity 进程
@@ -157,6 +230,9 @@ object LsposedStatus {
      *   卸载重装**清不掉**该标记（它不在模块进程数据目录）→ 导致"清数据后仍显示
      *   Non-root 已激活、不弹窗询问"（用户实测 bug）。
      * - 只存 filesDir，`pm clear`/卸载重装自然清掉，语义正确。
+     *
+     * 同时写会话缓存 [cachedStatus] = [Status.NONROOT]：用户主动确认是本次会话
+     * 内唯一允许立即改变激活状态的操作（不等下次冷启动）。
      */
     fun confirmNonRoot(context: Context) {
         try {
@@ -166,6 +242,7 @@ object LsposedStatus {
         } catch (e: Throwable) {
             Log.w(TAG, "confirmNonRoot: local flag write failed", e)
         }
+        cachedStatus = Status.NONROOT
     }
 
     /** 用户在弹窗里选"否" → 清掉 Non-root 标记，保持未激活。 */
@@ -176,7 +253,12 @@ object LsposedStatus {
     }
 
     /**
-     * "设置 → 清除激活标记"用：彻底清掉所有激活痕迹。
+     * "设置 → 清除激活标记"用：清掉所有**持久**激活痕迹。
+     *
+     * **本次会话激活状态不变**——只清持久标记（nonroot flag / remote key /
+     * property），不动 [cachedStatus] 会话缓存，也不改 [App.connectionState]
+     * （置 Disconnected 会触发 UI 事件驱动刷新当场弹窗）。
+     * 清除结果在**下次冷启动**（进程重启）重新检测时才生效。
      *
      * **只清激活状态**，不碰 EULA 同意标记——两者语义独立，设置页有单独的
      * "用户协议"入口负责重置协议同意状态。早期版本曾在此调用 [EulaManager.clear]，
@@ -184,12 +266,9 @@ object LsposedStatus {
      */
     fun clearAll(context: Context) {
         clearNonRootConfirmed(context)
-        // 清内存中的 xposedService 引用——进程不重启时 service 仍在内存，
-        // 下次 evaluate 立即命中 LSPOSED，"清除"形同虚设。清掉后 evaluate
-        // 才会真正走完整检测流程（下次 service 重新绑上时自然恢复）。
-        App.clearService()
         // 旧版本（property/daemon module_loaded 路径）残留清理，向后兼容。
         // 新方案下这两个标记已不再写，但用户可能从旧版升级，清掉避免迷惑。
+        // 只读 service 引用（配置写入通道），不改 connectionState。
         val service = App.xposedService
         if (service != null) {
             try {
