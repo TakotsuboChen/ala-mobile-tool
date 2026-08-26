@@ -124,9 +124,11 @@ class PedalOverlayView(
         val h = height.toFloat()
         val corner = cornerRadiusPx()
         val hasBorder = settings.overlayBorderWidth > 0f
-        // 填充内缩量 = 边框宽度，使填充边缘与边框内边缘重合，
-        // 避免半透明边框透出填充色。
-        val fillInset = if (hasBorder) borderPaint.strokeWidth else 0f
+        val sw = if (hasBorder) borderPaint.strokeWidth else 0f
+        // 填充内缩量 = 边框宽度 - 1.5px 抗锯齿溢出。填充比边框内边缘多溢出
+        // 1.5px 到边框下面，覆盖 clipPath 硬裁剪与 drawRoundRect STROKE 在圆角
+        // 处的抗锯齿过渡差异——消除"不均匀缝隙"。1.5px 在视觉上不可见。
+        val fillInset = (sw - 1.5f).coerceAtLeast(0f)
 
         // 裁剪：有圆角或有边框时都需要裁剪填充区域。
         val needClip = corner > 0f || hasBorder
@@ -189,6 +191,8 @@ class PedalOverlayView(
         // 外半圈会被裁掉，边框看起来只有一半粗细。
         if (needClip) canvas.restore()
 
+        // drawRoundRect 系统原生渲染弧线（不经过 Path.op flatten），
+        // 圆角与直线连接处天然平滑。
         if (hasBorder) {
             val inset = borderPaint.strokeWidth / 2f
             if (corner > 0f) {

@@ -59,7 +59,9 @@ class GearShiftView(
         val h = height.toFloat()
         val corner = cornerRadiusPx()
         val hasBorder = settings.overlayBorderWidth > 0f
-        val fillInset = if (hasBorder) borderPaint.strokeWidth else 0f
+        val sw = if (hasBorder) borderPaint.strokeWidth else 0f
+        // 填充内缩量 = 边框宽度 - 1.5px 抗锯齿溢出（同 PedalOverlayView）。
+        val fillInset = (sw - 1.5f).coerceAtLeast(0f)
 
         val needClip = corner > 0f || hasBorder
         if (needClip) {
@@ -83,6 +85,8 @@ class GearShiftView(
 
         if (needClip) canvas.restore()
 
+        // drawRoundRect 系统原生渲染弧线（不经过 Path.op flatten），
+        // 圆角与直线连接处天然平滑。
         if (hasBorder) {
             val inset = borderPaint.strokeWidth / 2f
             if (corner > 0f) {
