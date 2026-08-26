@@ -46,6 +46,7 @@ static void *g_drivetrain_do_gear_shifting_stub = NULL;
 static void *g_player_controls_update_stub = NULL;
 static void *g_traction_filter_stub = NULL;
 static void *g_handle_abs_stub = NULL;
+static void *g_car_controller_stub = NULL;
 
 static void *g_throttle_orig = NULL;
 static void *g_brake_orig = NULL;
@@ -57,6 +58,7 @@ static void *g_drivetrain_do_gear_shifting_orig = NULL;
 static void *g_player_controls_update_orig = NULL;
 static void *g_traction_filter_orig = NULL;
 static void *g_handle_abs_orig = NULL;
+static void *g_car_controller_orig = NULL;
 
 static volatile int g_hooks_installed = 0;
 
@@ -281,6 +283,20 @@ static void proxy_fixed_update(void *this) {
         // 内联的 ABS 检查就会跳过。比 hook 内联代码可靠得多。
         if (!g_config.enable_abs) {
             write_bool_field(this, 0xC4, false);
+
+            // per-wheel: 写 usesABS=false (0x3CE)，直接禁用每个轮子的 ABS。
+            // absEnable=false 不足以阻止内联的 ABS 逻辑——内联代码同时检查
+            // 车辆级 absEnable 和轮子级 usesABS 做双重门控。
+            // wheels 数组在偏移 0x28 (IRDSWheel[])，IL2CPP 数组数据从 0x20 开始。
+            void *wheels_arr = *(void **)((uintptr_t)this + 0x28);
+            if (wheels_arr != NULL) {
+                for (int i = 0; i < 4; i++) {
+                    void *wheel = *(void **)((uintptr_t)wheels_arr + 0x20 + i * 8);
+                    if (wheel != NULL) {
+                        write_bool_field(wheel, 0x3CE, false);
+                    }
+                }
+            }
         }
 
         // 隐藏游戏原生油门/刹车按钮——FixedUpdate 每物理步（50fps）调用，
@@ -414,6 +430,38 @@ static void proxy_handle_abs(void *this) {
     typedef void (*orig_t)(void *);
     if (g_handle_abs_orig != NULL) {
         ((orig_t) g_handle_abs_orig)(this);
+    }
+}
+
+// IRDSCarControllInput::carController() — 车辆控制器主方法。
+// HandleABS 被编译器内联到这里，所以 ABS 的实际门控检查在 carController 内部。
+// proxy_fixed_update 在 orig 前写 absEnable=false，但 orig（FixedUpdate）内部
+// 可能在调用 carController 前恢复了 absEnable=true，覆盖我们的 false。
+// hook carController 入口：在 carController 执行前再写一次 absEnable=false，
+// 确保内联的 ABS 逻辑读到 false 就跳过。
+//
+// carController RVA = FixedUpdate RVA + 0xA8（同类内方法统一偏移，
+// 8.0.0 和 8.0.4 中差值一致）。
+static void proxy_car_controller(void *this) {
+    if (!g_config.enable_abs && this != NULL && is_player_controller(this)) {
+        write_bool_field(this, 0xC4, false);
+
+        // per-wheel: 写 usesABS=false (0x3CE)，直接禁用每个轮子的 ABS。
+        // absEnable=false 不足以阻止内联的 ABS 逻辑，需要在轮子级也禁用。
+        // wheels 数组在偏移 0x28 (IRDSWheel[])，IL2CPP 数组数据从 0x20 开始。
+        void *wheels_arr = *(void **)((uintptr_t)this + 0x28);
+        if (wheels_arr != NULL) {
+            for (int i = 0; i < 4; i++) {
+                void *wheel = *(void **)((uintptr_t)wheels_arr + 0x20 + i * 8);
+                if (wheel != NULL) {
+                    write_bool_field(wheel, 0x3CE, false);
+                }
+            }
+        }
+    }
+    typedef void (*orig_t)(void *);
+    if (g_car_controller_orig != NULL) {
+        ((orig_t) g_car_controller_orig)(this);
     }
 }
 
@@ -598,6 +646,26 @@ bool pedal_install_hooks(const pedal_hook_config_t *config) {
         }
     }
 
+    // carController = FixedUpdate + 0xA8（同类内方法统一偏移）。
+    // HandleABS 被内联到 carController，proxy_fixed_update 在 orig 前写
+    // absEnable=false 会被 FixedUpdate 内部恢复，所以必须在 carController
+    // 入口再写一次 absEnable=false。
+    if (g_config.fixed_update_offset != 0) {
+        uintptr_t car_controller_offset = g_config.fixed_update_offset + 0xA8;
+        uintptr_t target = base + car_controller_offset;
+        g_car_controller_stub = shadowhook_hook_sym_addr(
+                (void *) target,
+                (void *) proxy_car_controller,
+                (void **) &g_car_controller_orig);
+        if (g_car_controller_stub == NULL) {
+            int err = shadowhook_get_errno();
+            LOGE("shadowhook_hook_sym_addr(carController) failed: %d (%s)",
+                 err, shadowhook_to_errmsg(err));
+        } else {
+            LOGI("Hooked carController at 0x%" PRIxPTR, target);
+        }
+    }
+
     if (g_config.player_controls_update_offset != 0) {
         uintptr_t target = base + g_config.player_controls_update_offset;
         g_player_controls_update_stub = shadowhook_hook_sym_addr(
@@ -669,6 +737,11 @@ void pedal_uninstall_hooks(void) {
         shadowhook_unhook(g_handle_abs_stub);
         g_handle_abs_stub = NULL;
         g_handle_abs_orig = NULL;
+    }
+    if (g_car_controller_stub != NULL) {
+        shadowhook_unhook(g_car_controller_stub);
+        g_car_controller_stub = NULL;
+        g_car_controller_orig = NULL;
     }
     if (g_player_controls_update_stub != NULL) {
         shadowhook_unhook(g_player_controls_update_stub);

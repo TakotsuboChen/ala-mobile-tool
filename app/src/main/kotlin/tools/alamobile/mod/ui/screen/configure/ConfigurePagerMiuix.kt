@@ -187,6 +187,20 @@ fun ConfigurePagerMiuix(
                                 checked = uiState.enableTc,
                                 onCheckedChange = actions::setEnableTc
                             )
+                            SwitchPreference(
+                                title = "防抱死制动系统",
+                                summary = "启用游戏原生 ABS",
+                                startAction = {
+                                    Icon(
+                                        tools.alamobile.mod.ui.AbsIcon,
+                                        modifier = Modifier.padding(end = 6.dp),
+                                        contentDescription = null,
+                                        tint = colorScheme.onBackground
+                                    )
+                                },
+                                checked = uiState.enableAbs,
+                                onCheckedChange = actions::setEnableAbs
+                            )
                         }
 
                         // ── Section 2: Overlay 控件 ──
