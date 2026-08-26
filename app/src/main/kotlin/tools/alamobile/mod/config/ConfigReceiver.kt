@@ -121,6 +121,14 @@ class ConfigReceiver : BroadcastReceiver() {
             tools.alamobile.mod.IntroSoundPlayer.setEnabled(enableV10Sound)
             Log.i(TAG, "ConfigReceiver: IntroSoundPlayer.setEnabled=$enableV10Sound")
 
+            // 实时同步"隐藏游戏原生油门/刹车按钮"开关——
+            // native 层 hide_pedals_tick 据此启停查找 + SetActive（全在 Unity 脚本线程）。
+            val hideGamePedals = incoming.optBoolean("hide_game_pedals", false)
+            if (tools.alamobile.mod.NativeBridge.isAvailable) {
+                tools.alamobile.mod.NativeBridge.setHidePedalsEnabled(hideGamePedals)
+                Log.i(TAG, "ConfigReceiver: setHidePedalsEnabled=$hideGamePedals")
+            }
+
             // 实时同步日志开关——logEnabled 控制文件写入，logcat 始终输出。
             val logEnabled = incoming.optBoolean("log_enabled", false)
             tools.alamobile.mod.util.Logger.setEnabled(logEnabled)

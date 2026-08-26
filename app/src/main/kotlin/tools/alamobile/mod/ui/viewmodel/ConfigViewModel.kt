@@ -52,6 +52,7 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
                 enableAbs = s.enableAbs,
                 enableMusicReplace = s.enableMusicReplace,
                 enableV10Sound = s.enableV10Sound,
+                hideGamePedals = s.hideGamePedals,
                 pedalDeadzone = s.pedalDeadzone,
                 pedalTransition = s.pedalTransition,
                 brakeTransition = s.brakeTransition,
@@ -82,6 +83,7 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
             enableAbs = s.enableAbs,
             enableMusicReplace = s.enableMusicReplace,
             enableV10Sound = s.enableV10Sound,
+            hideGamePedals = s.hideGamePedals,
             pedalDeadzone = s.pedalDeadzone,
             pedalTransition = s.pedalTransition,
             brakeTransition = s.brakeTransition,
@@ -122,6 +124,7 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
     fun setEnableAbs(v: Boolean) { _uiState.value = _uiState.value.copy(enableAbs = v); scheduleSave() }
     fun setEnableMusicReplace(v: Boolean) { _uiState.value = _uiState.value.copy(enableMusicReplace = v); scheduleSave() }
     fun setEnableV10Sound(v: Boolean) { _uiState.value = _uiState.value.copy(enableV10Sound = v); scheduleSave() }
+    fun setHideGamePedals(v: Boolean) { _uiState.value = _uiState.value.copy(hideGamePedals = v); scheduleSave() }
     fun setPedalDeadzone(v: Float) { _uiState.value = _uiState.value.copy(pedalDeadzone = v); scheduleSave() }
     fun setPedalTransition(v: Float) { _uiState.value = _uiState.value.copy(pedalTransition = v); scheduleSave() }
     fun setBrakeTransition(v: Float) { _uiState.value = _uiState.value.copy(brakeTransition = v); scheduleSave() }
@@ -166,6 +169,7 @@ data class ConfigUiState(
     val enableAbs: Boolean,
     val enableMusicReplace: Boolean,
     val enableV10Sound: Boolean,
+    val hideGamePedals: Boolean,
     val pedalDeadzone: Float,
     val pedalTransition: Float,
     val brakeTransition: Float,
@@ -191,6 +195,7 @@ data class ConfigUiState(
         enableAbs = enableAbs,
         enableMusicReplace = enableMusicReplace,
         enableV10Sound = enableV10Sound,
+        hideGamePedals = hideGamePedals,
         pedalDeadzone = pedalDeadzone,
         pedalTransition = pedalTransition,
         brakeTransition = brakeTransition,

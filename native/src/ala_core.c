@@ -8,6 +8,7 @@
 #include "unlock_hook.h"
 #include "music_hook.h"
 #include "intro_hook.h"
+#include "hide_pedals_hook.h"
 
 #define LOG_TAG "AlaMobileTool"
 #define LOGI(...) NLOGI(__VA_ARGS__)
@@ -335,4 +336,20 @@ Java_tools_alamobile_mod_NativeBridge_setLogEnabled(JNIEnv *env, jclass clazz, j
     (void) clazz;
     native_log_set_enabled(enabled ? 1 : 0);
     NLOGI("native log enabled=%d", enabled ? 1 : 0);
+}
+
+// 初始化"隐藏游戏原生油门/刹车按钮"功能——启动 native 后台轮询线程。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_initHidePedals(JNIEnv *env, jclass clazz, jboolean enabled) {
+    (void) env;
+    (void) clazz;
+    hide_pedals_init((bool) enabled);
+}
+
+// 实时切换"隐藏游戏原生油门/刹车按钮"开关（配置广播到达后调用）。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_setHidePedalsEnabled(JNIEnv *env, jclass clazz, jboolean enabled) {
+    (void) env;
+    (void) clazz;
+    hide_pedals_set_enabled((bool) enabled);
 }

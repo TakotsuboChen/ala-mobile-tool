@@ -1,4 +1,5 @@
 #include "pedal_hook.h"
+#include "hide_pedals_hook.h"
 #include "native_log.h"
 #include <dlfcn.h>
 #include <inttypes.h>
@@ -282,6 +283,12 @@ static void proxy_fixed_update(void *this) {
             write_bool_field(this, 0xC4, false);
         }
 
+        // 隐藏游戏原生油门/刹车按钮——FixedUpdate 每物理步（50fps）调用，
+        // 比 proxy_player_controls_update（Update）更稳定，计时赛加载期间
+        // Update 可能每 2 秒才调用一次，但 FixedUpdate 始终 50fps。
+        // 原子锁防止与 proxy_player_controls_update 中的 tick 竞态。
+        hide_pedals_tick();
+
         // 注意：不再在此处调 apply_inputs_to_controller。
         // 确保模块输入由 writer 线程（~500Hz）写入——它只写 g_player_controller
         //（由只挂在玩家车上的 IRDSPlayerControls.Update 设置），不受 AI 车误判影响。
@@ -372,6 +379,10 @@ static void proxy_player_controls_update(void *this) {
     if (g_player_controls_update_orig != NULL) {
         ((orig_t) g_player_controls_update_orig)(this);
     }
+
+    // 隐藏游戏原生油门/刹车按钮——在 Unity 主线程中调用（线程安全）。
+    // hide_pedals_tick 内部用帧计数器降频，约每 2 秒执行一次。
+    hide_pedals_tick();
 }
 
 // IRDSCarControllInput::TractionFilter(float accel) — TC 入口。

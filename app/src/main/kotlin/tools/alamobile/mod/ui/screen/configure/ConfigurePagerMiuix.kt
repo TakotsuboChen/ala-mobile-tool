@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.Opacity
 import androidx.compose.material.icons.rounded.BorderOuter
 import androidx.compose.material.icons.rounded.RoundedCorner
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -157,6 +158,20 @@ fun ConfigurePagerMiuix(
                                 },
                                 checked = uiState.enableUnlock,
                                 onCheckedChange = actions::setEnableUnlock
+                            )
+                            SwitchPreference(
+                                title = "隐藏油门和刹车按钮",
+                                summary = "隐藏游戏原生油门/刹车踏板，保留离合",
+                                startAction = {
+                                    Icon(
+                                        Icons.Rounded.VisibilityOff,
+                                        modifier = Modifier.padding(end = 6.dp),
+                                        contentDescription = null,
+                                        tint = colorScheme.onBackground
+                                    )
+                                },
+                                checked = uiState.hideGamePedals,
+                                onCheckedChange = actions::setHideGamePedals
                             )
                             SwitchPreference(
                                 title = "牵引力控制",

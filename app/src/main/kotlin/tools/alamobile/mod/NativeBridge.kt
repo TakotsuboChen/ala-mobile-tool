@@ -322,6 +322,30 @@ object NativeBridge {
     @JvmStatic
     external fun forceUnlockNow(): Boolean
 
+    /**
+     * 初始化"隐藏游戏原生油门/刹车按钮"功能。
+     * 启动 native 后台轮询线程，每 2 秒遍历 IRDSUIMobileControls 布局 GameObject
+     * 子物体，按名字匹配 "Throttle"/"Brake" 并 SetActive(false)，跳过 "Clutch"。
+     * enabled=false 时启动线程但不执行隐藏。
+     */
+    @JvmStatic
+    external fun initHidePedals(enabled: Boolean)
+
+    /**
+     * 实时切换"隐藏游戏原生油门/刹车按钮"开关。
+     * 配置广播到达游戏进程后由 ConfigReceiver 调用，无需重启游戏。
+     */
+    @JvmStatic
+    external fun setHidePedalsEnabled(enabled: Boolean)
+
+    /**
+     * 从 Android 主线程（Java Handler.postDelayed）调用。
+     * 补充 hide_pedals_tick——计时赛加载期间 proxy_player_controls_update
+     * 调用频率极低，Java Handler 每 100ms 调用确保按钮及时隐藏。
+     */
+    @JvmStatic
+    external fun hidePedalsApply()
+
     @JvmStatic
     fun setThrottleSafe(value: Float) {
         if (!isAvailable) return

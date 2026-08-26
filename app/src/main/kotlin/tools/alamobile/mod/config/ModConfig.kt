@@ -62,6 +62,11 @@ object ModConfig {
     // V10 引擎声浪开关：替换开场动画的引擎声为 V10 声浪
     const val KEY_ENABLE_V10_SOUND = "enable_v10_sound"
 
+    // 隐藏游戏原生油门和刹车按钮（不隐藏离合）。
+    // native 层通过 IRDSUIMobileControls 单例遍历布局 GameObject 子物体，
+    // 按名字匹配 "Throttle"/"Brake" 并 SetActive(false)。
+    const val KEY_HIDE_GAME_PEDALS = "hide_game_pedals"
+
     // Pedal mapping
     const val KEY_PEDAL_MODE = "pedal_mode"
     const val KEY_PEDAL_DEADZONE = "pedal_deadzone"
@@ -295,6 +300,8 @@ object ModConfig {
         const val ENABLE_MUSIC_REPLACE = true
         // V10 引擎声浪默认关闭
         const val ENABLE_V10_SOUND = false
+        // 隐藏游戏原生油门和刹车按钮默认关闭
+        const val HIDE_GAME_PEDALS = false
         val PEDAL_MODE = PedalMode.SINGLE
         const val PEDAL_DEADZONE = 0.05f
         const val PEDAL_TRANSITION = 0.5f
@@ -406,6 +413,10 @@ object ModConfig {
                     KEY_ENABLE_V10_SOUND,
                     Defaults.ENABLE_V10_SOUND
                 ),
+                hideGamePedals = json.optBoolean(
+                    KEY_HIDE_GAME_PEDALS,
+                    Defaults.HIDE_GAME_PEDALS
+                ),
                 pedalDeadzone = json.optDouble(
                     KEY_PEDAL_DEADZONE,
                     Defaults.PEDAL_DEADZONE.toDouble()
@@ -475,6 +486,7 @@ object ModConfig {
             put(KEY_ENABLE_ABS, settings.enableAbs)
             put(KEY_ENABLE_MUSIC_REPLACE, settings.enableMusicReplace)
             put(KEY_ENABLE_V10_SOUND, settings.enableV10Sound)
+            put(KEY_HIDE_GAME_PEDALS, settings.hideGamePedals)
             put(KEY_PEDAL_DEADZONE, settings.pedalDeadzone.toDouble())
             put(KEY_PEDAL_TRANSITION, settings.pedalTransition.toDouble())
             put(KEY_BRAKE_TRANSITION, settings.brakeTransition.toDouble())
@@ -745,6 +757,7 @@ object ModConfig {
                 enableAbs = j.optBoolean(KEY_ENABLE_ABS, Defaults.ENABLE_ABS),
                 enableMusicReplace = j.optBoolean(KEY_ENABLE_MUSIC_REPLACE, Defaults.ENABLE_MUSIC_REPLACE),
                 enableV10Sound = j.optBoolean(KEY_ENABLE_V10_SOUND, Defaults.ENABLE_V10_SOUND),
+                hideGamePedals = j.optBoolean(KEY_HIDE_GAME_PEDALS, Defaults.HIDE_GAME_PEDALS),
                 pedalDeadzone = j.optDouble(KEY_PEDAL_DEADZONE, Defaults.PEDAL_DEADZONE.toDouble()).toFloat(),
                 pedalTransition = j.optDouble(KEY_PEDAL_TRANSITION, Defaults.PEDAL_TRANSITION.toDouble()).toFloat(),
                 brakeTransition = j.optDouble(KEY_BRAKE_TRANSITION, Defaults.BRAKE_TRANSITION.toDouble()).toFloat(),
@@ -872,6 +885,7 @@ object ModConfig {
             enableAbs = Defaults.ENABLE_ABS,
             enableMusicReplace = Defaults.ENABLE_MUSIC_REPLACE,
             enableV10Sound = Defaults.ENABLE_V10_SOUND,
+            hideGamePedals = Defaults.HIDE_GAME_PEDALS,
             pedalDeadzone = Defaults.PEDAL_DEADZONE,
             pedalTransition = Defaults.PEDAL_TRANSITION,
             brakeTransition = Defaults.BRAKE_TRANSITION,
@@ -904,6 +918,7 @@ object ModConfig {
         val enableAbs: Boolean = Defaults.ENABLE_ABS,
         val enableMusicReplace: Boolean = Defaults.ENABLE_MUSIC_REPLACE,
         val enableV10Sound: Boolean = Defaults.ENABLE_V10_SOUND,
+        val hideGamePedals: Boolean = Defaults.HIDE_GAME_PEDALS,
         val pedalDeadzone: Float,
         val pedalTransition: Float,
         val brakeTransition: Float,

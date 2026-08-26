@@ -300,6 +300,8 @@ class AlaMobileModule : XposedModule() {
         val enableMusicReplace = settings?.enableMusicReplace ?: false
         // V10 引擎声浪开关，默认 false
         val enableV10Sound = settings?.enableV10Sound ?: false
+        // 隐藏游戏原生油门/刹车按钮开关，默认 false
+        val hideGamePedals = settings?.hideGamePedals ?: false
 
         // forceLoad + initUnlock（deferred 后同步执行，ShadowHook 已 init）
         logX(Log.INFO, TAG, "NPatch early unlock path: forceLoad + initUnlock (deferred)")
@@ -443,6 +445,15 @@ class AlaMobileModule : XposedModule() {
                         logX(Log.INFO, TAG, "15s delay: forceUnlockNow returned $unlocked")
                     } else {
                         logX(Log.INFO, TAG, "15s delay: enableUnlock=false, skipping forceUnlockNow")
+                    }
+                    // 隐藏游戏原生油门/刹车按钮——启动 native 后台轮询线程。
+                    // 线程每 2 秒遍历 IRDSUIMobileControls 布局子物体，
+                    // 按 GameObject 名匹配 "Throttle"/"Brake" 并 SetActive(false)。
+                    try {
+                        NativeBridge.initHidePedals(hideGamePedals)
+                        logX(Log.INFO, TAG, "hideGamePedals initialized, enabled=$hideGamePedals")
+                    } catch (e: Throwable) {
+                        logX(Log.ERROR, TAG, "initHidePedals failed: ${e.message}")
                     }
                 } else {
                     logX(Log.WARN, TAG, "NativeBridge not available, skipping 15s init and unlock")
