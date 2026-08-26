@@ -711,15 +711,20 @@ private fun ChartCanvas(
         drawText("行程", Offset(plotRight + 4.dp.toPx(), plotBottom + 8.dp.toPx()), textColor, 11.dp.toPx())
 
         // 曲线：保单调三次样条（Fritsch–Carlson），过 (0,0)、各控制点、(1,1)。
+        // 均匀采样 + 控制点 x 位置，确保曲线精确经过每个控制点圆心
+        // （极端曲线下均匀网格采样点可能跳过控制点 x，导致附近线段偏离圆心）。
         val points = localPoints.sortedBy { it.x }
+        val sampleXs = ((0..128).map { it / 128f } + points.map { it.x }).sorted()
         val curvePath = Path().apply {
-            val steps = 64
-            for (i in 0..steps) {
-                val x = i / steps.toFloat()
+            var prevX = -1f
+            var first = true
+            for (x in sampleXs) {
+                if (x - prevX < 0.0001f) continue // 去重，避免零长度线段
+                prevX = x
                 val y = ModConfig.monotoneCubic(points, x)
                 val pxv = px(x)
                 val pyv = py(y)
-                if (i == 0) moveTo(pxv, pyv) else lineTo(pxv, pyv)
+                if (first) { moveTo(pxv, pyv); first = false } else lineTo(pxv, pyv)
             }
         }
         drawPath(curvePath, curveColor, style = Stroke(width = 2.dp.toPx()))
@@ -827,7 +832,11 @@ private fun removePoint(points: List<ModConfig.CurvePoint>, index: Int): List<Mo
     return points.filterIndexed { i, _ -> i != index }
 }
 
-/** 把 index 处的控制点移动到 [pos]。 */
+/**
+ * 把 index 处的控制点移动到 [pos]。
+ * x 被约束在相邻控制点之间：向左不能 ≤ 左边相邻点，向右不能 ≥ 右边相邻点。
+ * epsilon 保证严格不等，防止两点 x 完全相同导致 sortedBy 交换顺序（瞬移重合）。
+ */
 private fun movePoint(
     points: List<ModConfig.CurvePoint>,
     index: Int,
@@ -838,8 +847,14 @@ private fun movePoint(
     if (index < 0 || index >= points.size) return points
     val w = size.width
     val h = size.height
-    val x = ((pos.x - padPx) / (w - 2 * padPx)).coerceIn(0f, 1f)
+    val rawX = ((pos.x - padPx) / (w - 2 * padPx)).coerceIn(0f, 1f)
     val y = (1f - (pos.y - padPx) / (h - 2 * padPx)).coerceIn(0f, 1f)
+    // 约束 x 不超过相邻控制点：向左不能 ≤ 左边相邻点，向右不能 ≥ 右边相邻点。
+    val epsilon = 0.001f
+    val minX = if (index > 0) points[index - 1].x + epsilon else 0f
+    val maxX = if (index < points.size - 1) points[index + 1].x - epsilon else 1f
+    if (minX > maxX) return points // 相邻点间距过小，不移动
+    val x = rawX.coerceIn(minX, maxX)
     return points.mapIndexed { i, p -> if (i == index) ModConfig.CurvePoint(x, y) else p }
         .sortedBy { it.x }
 }
