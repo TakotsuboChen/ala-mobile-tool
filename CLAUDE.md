@@ -147,7 +147,7 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - `app/src/main/kotlin/tools/alamobile/mod/overlay/PedalOverlayView.kt` — dual-zone pedal.
 - `app/src/main/kotlin/tools/alamobile/mod/util/VersionGate.kt` — version gating.
 - `native/src/ala_core.c` — native entry points and ShadowHook init.
-- `native/src/pedal_hook.c` — throttle/brake/gear hook logic + input writer thread.
+- `native/src/pedal_hook.c` — throttle/brake/gear hook logic + input writer thread + ABS/TC control (carController hook + per-wheel usesABS).
 - `native/src/drs_hook.c` — auto DRS / active aero hook logic.
 - `native/src/unlock_hook.c` — billing/unlock IL2CPP hook logic.
 - `native/src/music_hook.c` — main menu music mute + heartbeat signal.
@@ -161,6 +161,7 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - `app/src/main/kotlin/tools/alamobile/mod/IntroSoundPlayer.kt` — V10 engine sound player.
 - `app/src/main/resources/META-INF/xposed/module.prop` — libxposed module metadata.
 - `app/src/main/resources/META-INF/xposed/scope.list` — target package list.
+- `TECHNICAL_ANALYSIS.md` — Ala Mobile engine reverse-engineering analysis (ABS, TC, ESC, Pacejka tire model).
 
 ## TODO(human) Integration Points
 

@@ -158,6 +158,10 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 - 支持「跳过该版本」（仅影响自动弹窗，手动检查不受限）和「清除跳过更新标记」
 - 同版本已下载的 APK 不重复下载，直接调起安装器；启动时自动清理旧版本残留 APK
 
+#### 原生 TC/ABS 控制
+- 牵引力控制（TC）开关：hook `TractionFilter` 入口，关闭时直接返回原始 accel
+- 防抱死制动系统（ABS）开关：carController hook + per-wheel `usesABS=false` 双重门控，关闭时重刹轮子直接锁死
+
 #### 支持开发
 - 概览页「支持开发」卡片，展示收款码，可保存到相册
 
@@ -165,7 +169,6 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 
 - **自动 DRS**：已完成 `drsToggle()` 拦截，telemetry 赛道数据解析待实现
 - **手动换挡**：`DoGearShifting` Hook 导致起步失败，需重新实现
-- **原生 ABS 控制**：`HandleABS` 被编译器内联到 carController，Hook 不触发。当前通过写 `absEnable` 字段（偏移 0xC4）实现，待找到未被内联的正确入口点后再做开关
 
 ---
 
@@ -252,7 +255,7 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 
 - 自动 DRS 仅完成 `drsToggle()` 拦截，赛道数据自动判断尚未实现
 - 手动换挡因 `DoGearShifting` Hook 导致起步失败，**已暂时禁用**，待重新实现
-- ABS 原生 Hook（`HandleABS`）被编译器内联，当前通过写字段（偏移 0xC4）替代，开关尚未实现
+- ~~ABS 原生 Hook（`HandleABS`）被编译器内联~~ → 已解决：carController hook + per-wheel `usesABS=false` 双重门控
 - **弯道「顿挫」通常来自游戏内置的刹车辅助**，与模块无关，请在游戏设置中关闭辅助功能
 - 共存版（重打包改包名）需配合双 ClassLoader 守卫，当前版本已修复
 
@@ -318,7 +321,7 @@ tools/run-il2cpp-dumper.sh
 
 - [ ] 自动 DRS：赛道 telemetry 解析 + 自动开关
 - [ ] 手动换挡：重新实现 `DoGearShifting` Hook
-- [ ] 原生 ABS 开关：找到未被内联的正确入口点后接入
+- [x] 原生 ABS 开关：carController hook + per-wheel usesABS=false 双重门控
 - [ ] 工具按钮位置持久化开关
 - [ ] 多语言支持
 
