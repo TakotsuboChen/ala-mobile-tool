@@ -50,7 +50,7 @@ The module has three runtime contexts:
 
 ## Common Commands
 
-> Note: the Gradle project builds successfully with `./gradlew :app:assembleDebug`. Build environment: AGP 8.9.1, Kotlin 2.4.0, compileSdk 37, NDK 26.1.10909125. Maven mirrors (Aliyun) are configured in `settings.gradle.kts` to bypass Clash TUN TLS failures on `dl.google.com`.
+> Note: the Gradle project builds successfully with `./gradlew :app:assembleDebug`. Build environment: AGP 9.3.1, Kotlin 2.4.10, compileSdk 37, NDK 26.1.10909125. Maven mirrors (Aliyun) are configured in `settings.gradle.kts` to bypass Clash TUN TLS failures on `dl.google.com`.
 
 Build the module APK:
 ```bash
@@ -110,7 +110,7 @@ The project uses a 6-digit `versionCode` encoding the semantic version, release 
 
 - **Stable releases** publish as GitHub **Release** (`prerelease=false`).
 - **Alpha/Beta releases** publish as GitHub **Pre-release** (`prerelease=true`).
-- The CI workflow's `Upload to Release` step currently hardcodes `prerelease: true` — correct for Alpha/Beta, but must be flipped to `false` (or auto-derived from `versionName`) when publishing a Stable release.
+- The CI workflow auto-derives `prerelease` from `versionName`: if it contains "Beta"/"Alpha"/"Pre" → `prerelease=true`, otherwise `prerelease=false`. No manual flip needed.
 
 ## IL2CPP Reverse Engineering
 
@@ -118,15 +118,15 @@ Reverse-engineering artifacts are generated from the local APK and should not be
 
 Run Il2CppDumper (requires a local `Il2CppDumper` binary):
 ```bash
-mkdir -p il2cpp-dumps/v8.0.0
+mkdir -p il2cpp-dumps/v8.0.4
 Il2CppDumper /tmp/ala-mobile-research/native/lib/arm64-v8a/libil2cpp.so \
              /tmp/ala-mobile-research/il2cpp/assets/bin/Data/Managed/Metadata/global-metadata.dat \
-             il2cpp-dumps/v8.0.0/
+             il2cpp-dumps/v8.0.4/
 ```
 
 Important output files:
-- `il2cpp-dumps/v8.0.0/dump.cs` — human-readable class/method/field dump.
-- `il2cpp-dumps/v8.0.0/offsets_sheet.csv` — curated table of target methods and fields used by the module.
+- `il2cpp-dumps/v8.0.4/dump.cs` — human-readable class/method/field dump.
+- `il2cpp-dumps/v8.0.4/offsets_sheet.csv` — curated table of target methods and fields used by the module.
 
 Update `OffsetTable.kt` after every IL2CPP dump.
 
@@ -135,7 +135,7 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - Package root: `tools.alamobile.mod`
 - `AlaMobileModule` is the single `XposedModule` subclass and entry point. Register it in `src/main/resources/META-INF/xposed/java_init.list`.
 - Keep the native bridge surface small. Java passes only resolved offsets and feature toggles to `libala-core.so`.
-- All native IL2CPP hooks are gated by `VersionGate`: refuse to install if the game version is not exactly `8.0.0 (200142)`.
+- All native IL2CPP hooks are gated by `VersionGate`: refuse to install if the game version is not exactly `8.0.4 (200146)`.
 - Overlay Views use raw Android Canvas (not Compose) because Compose cannot overlay reliably on a Unity SurfaceView.
 - A JSON file in external storage is used for configuration. The ConfigActivity writes; `AlaMobileModule` reads.
 
