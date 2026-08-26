@@ -118,6 +118,10 @@ class PedalOverlayView(
     private var mappedThrottle = 0f
     private var mappedBrake = 0f
 
+    // Active pointer 跟踪：记录当前控制踏板的手指 pointerId，
+    // 防止其他手指的触摸事件干扰踏板值。详见 onTouchEvent。
+    private var activePointerId = MotionEvent.INVALID_POINTER_ID
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val w = width.toFloat()
@@ -206,51 +210,88 @@ class PedalOverlayView(
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
-                // 用 rawY - 配置的 view top 重建相对坐标。
-                // 不能用 event.getY()（相对 view 左上角）：共存版被 pairip
-                // 壳反复 relayout，view 实际位置漂移，相对坐标跟着跳，归一化后
-                // throttle/brake 值抖动。rawY 是屏幕绝对坐标，不受 view 位置影响；
-                // 配置值 (topPx/heightPx) 是用户配置的、不依赖运行时 layout，也稳定。
-                // 原版上 view 布局稳定，配置值 == 实际值，行为不变；
-                // 共存版上用配置值绕开漂移，行为与原版一致。
-                val screenHeight = resources.displayMetrics.heightPixels
-                val viewTop = position.topPx(screenHeight)
-                val viewHeight = position.heightPx(context, screenHeight).toFloat()
-                val relativeY = event.rawY - viewTop
-                updateValues(relativeY, viewHeight)
+            MotionEvent.ACTION_DOWN -> {
+                activePointerId = event.getPointerId(0)
+                updateValuesFromPointer(event)
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                updateValuesFromPointer(event)
+                return true
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                // 新手指按下，不改变 active pointer——踏板始终由第一指控制。
+                // 消费事件避免落入 super（返回 false 可能导致系统误判）。
+                return true
+            }
+            MotionEvent.ACTION_POINTER_UP -> {
+                // 如果抬起的是 active pointer（控制踏板的手指）→ 重置踏板；
+                // 非 active pointer 抬起 → 忽略，不影响踏板值。
+                val pointerId = event.getPointerId(event.actionIndex)
+                if (pointerId == activePointerId) {
+                    resetPedalState()
+                    activePointerId = MotionEvent.INVALID_POINTER_ID
+                }
                 return true
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                rawThrottle = 0f
-                rawBrake = 0f
-                mappedThrottle = 0f
-                mappedBrake = 0f
-                // 双踏板：本 view 抬起要同步清共享 raw，否则另一指还在屏上时
-                // 仲裁仍用旧 raw 误判。mapped 由另一 view 下次 MOVE 重新仲裁。
-                if (role == PedalRole.THROTTLE) {
-                    sharedRawThrottle = 0f
-                    arbitratedThrottle = 0f
-                    // FIRST_PRESSED：油门抬起时清记录，让刹车 view 下次 MOVE 接管。
-                    if (sharedFirstPressed == PedalRole.THROTTLE) sharedFirstPressed = null
-                    // LAST_TOUCHED：油门抬起时切到刹车（若仍按着），否则清空。
-                    if (sharedLastTouched == PedalRole.THROTTLE) {
-                        sharedLastTouched = if (sharedRawBrake > 0f) PedalRole.BRAKE else null
-                    }
-                } else if (role == PedalRole.BRAKE) {
-                    sharedRawBrake = 0f
-                    arbitratedBrake = 0f
-                    if (sharedFirstPressed == PedalRole.BRAKE) sharedFirstPressed = null
-                    if (sharedLastTouched == PedalRole.BRAKE) {
-                        sharedLastTouched = if (sharedRawThrottle > 0f) PedalRole.THROTTLE else null
-                    }
-                }
-                updateNativeValues()
-                invalidate()
+                resetPedalState()
+                activePointerId = MotionEvent.INVALID_POINTER_ID
                 return true
             }
         }
         return super.onTouchEvent(event)
+    }
+
+    // 用 active pointer 的屏幕绝对坐标重建相对坐标。
+    // 不能用 event.getY()（相对 view 左上角）：共存版被 pairip
+    // 壳反复 relayout，view 实际位置漂移，相对坐标跟着跳，归一化后
+    // throttle/brake 值抖动。rawY 是屏幕绝对坐标，不受 view 位置影响；
+    // 配置值 (topPx/heightPx) 是用户配置的、不依赖运行时 layout，也稳定。
+    // 原版上 view 布局稳定，配置值 == 实际值，行为不变；
+    // 共存版上用配置值绕开漂移，行为与原版一致。
+    //
+    // 用 findPointerIndex(activePointerId) 而非 getRawY(0)：多指按下/抬起时
+    // pointer index 会重新排列，index 0 可能不是控制踏板的手指，导致踏板值
+    // 跳到其他手指的位置（如另一指点空白处时踏板飘到 100% 油门）。
+    private fun updateValuesFromPointer(event: MotionEvent) {
+        if (activePointerId == MotionEvent.INVALID_POINTER_ID) return
+        val pointerIndex = event.findPointerIndex(activePointerId)
+        if (pointerIndex == -1) return
+        val screenHeight = resources.displayMetrics.heightPixels
+        val viewTop = position.topPx(screenHeight)
+        val viewHeight = position.heightPx(context, screenHeight).toFloat()
+        val relativeY = event.getRawY(pointerIndex) - viewTop
+        updateValues(relativeY, viewHeight)
+    }
+
+    // 重置踏板值到零，并同步清理双踏板共享状态。
+    private fun resetPedalState() {
+        rawThrottle = 0f
+        rawBrake = 0f
+        mappedThrottle = 0f
+        mappedBrake = 0f
+        // 双踏板：本 view 抬起要同步清共享 raw，否则另一指还在屏上时
+        // 仲裁仍用旧 raw 误判。mapped 由另一 view 下次 MOVE 重新仲裁。
+        if (role == PedalRole.THROTTLE) {
+            sharedRawThrottle = 0f
+            arbitratedThrottle = 0f
+            // FIRST_PRESSED：油门抬起时清记录，让刹车 view 下次 MOVE 接管。
+            if (sharedFirstPressed == PedalRole.THROTTLE) sharedFirstPressed = null
+            // LAST_TOUCHED：油门抬起时切到刹车（若仍按着），否则清空。
+            if (sharedLastTouched == PedalRole.THROTTLE) {
+                sharedLastTouched = if (sharedRawBrake > 0f) PedalRole.BRAKE else null
+            }
+        } else if (role == PedalRole.BRAKE) {
+            sharedRawBrake = 0f
+            arbitratedBrake = 0f
+            if (sharedFirstPressed == PedalRole.BRAKE) sharedFirstPressed = null
+            if (sharedLastTouched == PedalRole.BRAKE) {
+                sharedLastTouched = if (sharedRawThrottle > 0f) PedalRole.THROTTLE else null
+            }
+        }
+        updateNativeValues()
+        invalidate()
     }
 
     private fun updateValues(y: Float, viewHeight: Float) {
