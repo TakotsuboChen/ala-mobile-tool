@@ -98,4 +98,55 @@ $NDK_OBJDUMP -d --start-address=0x1A7B35C --stop-address=0x1A7BE44 lib/arm64-v8a
 - 偏移访问扫描：须同时覆盖 `(w & 0x3B800000) == 0x38000000`（含 ldrb/strb/SIMD）
   与 `add imm`（`(w & 0x7F800000) ∈ {0x11000000, 0x91000000}`）——
   初版扫描曾因掩码遗漏 `ldrb` 编码组（0x39xxxxxx）而系统性漏报；
+- **地址域陷阱**（TC 分析时新发现）：全文件调用图扫描的目标必须换算到
+  与指令同一地址域。该 so 代码段 `文件偏移 = VA − 0x4000`，`.rodata` 段
+  `VA = 文件偏移`；直接拿 dump.cs 的 RVA 匹配"文件偏移 + imm×4"会系统性零命中
+  （旧版 `find_bl.py` 即有此 bug，ABS 的死方法结论靠 proxy hook 无日志交叉验证才未翻车）；
+- **浮点 ldr/str 的 imm12 缩放**：实际偏移 = imm12 << 2（float scale=4）。
+  把 imm12 直接当偏移会大量误报（如 imm12=0x34 实为偏移 0xD0）；
+  `ldrb`/`strb` 的 scale 为 1 不受影响；
+- 双字访问漏报：相邻 float 字段可能被 `ldr d0`/`stur d0`（0xFD40xxxx/0xFC03xxxx）
+  一次拷贝 8 字节（如 `SetPlayerSettings` 写 `TCLSlip`+`TCLminSPD`），
+  单 float 偏移扫描看不见，须补 `0xFC`/`0xFD` 开头的 load/store 指令组；
 - 命中点归属用 `script.json` 的方法地址表二分定位。
+
+---
+
+## 5. TC（牵引力控制）工程笔记
+
+> 详细控制律与证据见 `TECHNICAL_ANALYSIS.md` §3。TC 与 ABS 相反：车辆级实现
+> 是活代码（`TractionFilter` @ 0x1A64CE4，每物理帧经 `carController`+0xBC 调用）。
+
+### 5.1 模块潜在的 TC 功能路径
+
+| 目标 | 路径 | 要点 |
+|---|---|---|
+| TC 介入灯可视化 | 读 `tclTriggered` (0xCA) | **活跃字段**（每帧先复位后由削减动作置位），与 `absTriggered` 死字段不同 |
+| TC 强度调节 | 写 `TCLSlip` (0x34) / `TCLminSPD` (0x38) | 被活跃读取；但会被 `SetPlayerSettings` 在设置变更时覆盖（双字写） |
+| 阈值微调（等效） | 无需 hook——游戏设置 `tcl`/`tclMinSpd` 链有效 | 模块只需调游戏设置即可，增益有限 |
+| TC 状态灯扩展 | 读 `escTriggered` (0xC9) | ESC 介入标志，同样活跃 |
+
+### 5.2 关 TC 的陷阱（若未来做此功能）
+
+**直接写 `tclEnable` (0xC6) = false 无效**。玩家车的该字段被
+`carModifier.Update` → `TractionControlDynamicAssist`（0x176935C，仅玩家车调用）
+每帧重算：先无条件写 true，再按条件写 false（高速 > 22 m/s、不在维修区时关闭）。
+写 false 后下一物理帧即被覆盖。
+
+可行路径（均未实测）：
+1. **hook `TractionControlDynamicAssist` 直接 return**——代价是跳过其中的
+   圈速无效化逻辑（`PlayerGotOutOfTrack` → `InvalidateLap`），有副作用；
+2. **hook `TractionFilter`（0x1A64CE4）入口**：在 `tclEnable` 读取（入口 +0x28）
+   之前把实例字段临时置 false，返回前恢复——比 1 精确但需要处理重入；
+3. 接受游戏内行为：TC 本身在 > 79 km/h 自动关闭（`TractionControlDynamicAssist`
+   条件 B），低速段的 TC 干预是否值得关闭取决于实测手感。
+
+### 5.3 TC 行为速查（实测对照用）
+
+- 生效车速区间：约 3.6–79 km/h（`TCLminSPD` = 1.0 m/s 下限；> 22 m/s 被管理器关闭）；
+- 一挡（gear == 1）完全不干预——起步不受 TC 影响；
+- 满削减保留 15% 油门（`c_T` = −0.85，`.rodata` @ 0x929E7C，只读不建议改）；
+- 判据是**综合滑移指标** W = max(|slipRatio/maxSlip|, |slipAngle/maxAngle|)，
+  纵向滑移与横向侧偏都会触发，不限于驱动轮空转；
+- 移动端松油门回落斜率在 `drivetrain.slipRatio`（0xCC，驱动轮聚合）≥ 0.2 时
+  切换为更快的 `throttleReleaseTimeTraction`——手感上"TC 激活时松油门更灵"。

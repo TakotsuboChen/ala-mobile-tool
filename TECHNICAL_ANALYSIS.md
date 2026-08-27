@@ -7,9 +7,9 @@
 > 以及 **`libil2cpp.so` 的 ARM64 指令级反汇编**与模块原生钩子的运行时交叉验证。
 >
 > **文档范围**：本文按子系统分篇，随逆向进度陆续补充。
-> 篇章编号按成篇追加顺序分配（详见总目录），当前已完成 ABS 篇；
-> 空气动力学与 DRS、车辆动力学（TC/ESC/转向辅助）、传动与多线程轮子物理等
-> 为规划中的占位篇目（见各篇导语）。
+> 篇章编号按成篇追加顺序分配（详见总目录），当前已完成 ABS 篇与
+> 车辆动力学（TC / ESC / 转向辅助）篇；
+> 空气动力学与 DRS、传动与多线程轮子物理等为规划中的占位篇目（见各篇导语）。
 >
 > **版本适用性**：本文全部 RVA / 字段偏移 / 常数地址均为 8.0.4 (200146) 专属；
 > 升级目标版本时须按各篇验证清单重新验证。
@@ -24,11 +24,11 @@
 - **共享方法篇**：[1　研究方法与证据体系](#1研究方法与证据体系)
 - **已完成**：
   - [2　ABS 防抱死制动系统](#2abs-防抱死制动系统)
+  - [3　车辆动力学：TC / ESC / 转向辅助](#3车辆动力学tc--esc--转向辅助)
 - **规划中**（顺序与编号待成篇时确定）：
   - 空气动力学与 DRS
-  - 车辆动力学：TC / ESC / 转向辅助
   - 传动与多线程轮子物理
-- **附录**：[A　ABS 篇证据置信度矩阵](#附录-aabs-篇证据置信度矩阵) · [B　ABS 篇关键常数与地址表](#附录-babs-篇关键常数与地址表)
+- **附录**：[A　ABS 篇证据置信度矩阵](#附录-aabs-篇证据置信度矩阵) · [B　ABS 篇关键常数与地址表](#附录-babs-篇关键常数与地址表) · [C　TC/ESC 篇证据置信度矩阵](#附录-ctcesc-篇证据置信度矩阵) · [D　TC/ESC 篇关键常数与地址表](#附录-dtcesc-篇关键常数与地址表)
 
 ---
 
@@ -40,7 +40,8 @@
 
 1. 从游戏 APK 提取 `libil2cpp.so`（arm64-v8a）；
 2. 以 Il2CppDumper 输出（`dump.cs`、`script.json`）获取类型布局与方法地址表
-   （该 so 中 RVA = VA = 文件偏移）；
+   （该 so 中 RVA = VA；代码段文件偏移 = VA − 0x4000，`.rodata` 段 VA = 文件偏移，
+   两者不可混用——全文件调用图扫描必须统一到同一地址域，否则系统性零命中）；
 3. 使用 `llvm-objdump`（NDK 26.1.10909125）按地址区间反汇编目标方法；
 4. 解析 ELF program header 将 VA 映射到文件偏移，读取 `.rodata` 浮点常数池。
 
@@ -576,14 +577,386 @@ $`T`$ 即被重算为 $`F_{\mathrm{base}}\Omega \le T_b`$——与轮胎是否�
 > - `IRDSCarControllInput.drsToggle()`（0x1A64CC8）与 DRS 区间判定
 > - 模块已实现的 auto DRS hook（`native/src/drs_hook.c`）所对应的游戏侧逻辑
 
-# 车辆动力学：TC / ESC / 转向辅助（待补充）
+# 3　车辆动力学：TC / ESC / 转向辅助
 
-> **占位篇目**——本篇将覆盖牵引力控制、电子稳定程序与转向辅助的运行时验证。
-> 已知入口：`TractionFilter(accel)` @ 0x1A64CE4（TC，未被内联、hook 有效 [V]）、
-> `escFilter()` @ 0x1A65090（ESC）、`SteerHelp(steer)` @ 0x1A64E28、
-> `LockSteerAtVelocity` / `LockSteerAtSlipAngle`。
-> **未验证**：其车辆级开关（`tclEnable`/`escEnable`/`steerHelpEnable`）是否与 ABS 一样
-> 存在设置链断裂——`ABS` 篇的断裂结论不能未经反汇编地外推 [?]。
+> 本篇回答四个问题：牵引力控制（TC）的执行体、感知来源与完整控制律；
+> TC 的玩家设置链是否像 ABS 一样断裂（§2.7）；以及共享同一条电控管线的
+> 电子稳定程序（ESC）与转向辅助（SteerHelp）的实际机制。
+> 结论先行：**车辆级 TC / ESC / SteerHelp 全部是活代码**，与 ABS 的"死车辆级层"形成对照；
+> TC 的削减上限为 85%，且在约 79 km/h 以上被每帧重算的管理器强制关闭，
+> ESC 以单侧后轮制动纠正横摆。ESC/SteerHelp 的玩家设置链完整有效，
+> TC 的参数链有效但其开关位被每帧重算（§3.7、§3.10）。
+
+## 3.1 符号约定
+
+| 符号 | 字段（偏移） | 含义 |
+|---|---|---|
+| $`\tau`$ | `_inputTorque` (0x174) | 过滤前的油门扭矩输入，$`\in[0,1]`$ |
+| $`\tau'`$ | `actualInputTorque` (0x16C) | TC 合成后的实际驱动扭矩输入 |
+| $`\sigma`$ | `IRDSWheel.slipRatio` (0x104) | 驱动轮滑移率（由 `RoadForce` 计算） |
+| $`\bar\sigma`$ | `IRDSDrivetrain.slipRatio` (0xCC) | 驱动轮滑移率的传动系加权聚合 |
+| $`\alpha`$ | `slipAngle` (0x170) | 轮胎侧偏角 |
+| $`s_{\max}`$ | `maxSlip` (0x1A8) | 每轮峰值滑移归一化上限 |
+| $`\alpha_{\max}`$ | `maxAngle` (0x1AC) | 每轮峰值侧偏角上限 |
+| $`W`$ | — | 综合滑移指标 $`= \max\bigl(\lvert\sigma/s_{\max}\rvert,\ \lvert\alpha/\alpha_{\max}\rvert\bigr)`$ |
+| $`\varepsilon`$ | `TCLSlip` (0x34) | TC 阈值参数（默认 0.45） |
+| $`v_0`$ | `TCLminSPD` (0x38) | TC 最低工作车速（默认 1.0 m/s） |
+| $`g`$ | `drivetrain.gear` (0xC0) | 当前挡位（0 = 空挡） |
+| $`t`$ | `tclEnable` (0xC6) | TCL 门控开关 |
+| $`c_T`$ | `.rodata` 0x929E7C | TC 补偿系数 $`= -0.85`$ |
+| $`\beta`$ | `driftAngle` (0x70) | 车体侧偏角（度） |
+| $`f_E`$ | `escFactor` (0x3C) | ESC 制动强度（默认 1.0） |
+| $`k_S`$ | `steerHelp` (0x40) | 转向辅助强度（默认 0.01） |
+| $`\Delta t`$ | — | 物理帧时长 $`= 1/50\,\mathrm{s}`$ |
+| $`\rho`$ | `brakeFrictionTorque` (0x88) | 制动摩擦扭矩上限 |
+
+## 3.2 电控管线架构
+
+与 ABS 的"车辆级死代码、轮级活代码"格局相反，TC / ESC / SteerHelp 的车辆级实现
+**正是活跃执行层**。`carController()`（玩家物理主入口）以固定顺序串联三个过滤
+阶段，全部位于 `IRDSCarControllInput` 内 [V]：
+
+| 阶段 | 方法 | 地址 | 调用点（carController 内偏移） |
+|---|---|---|---|
+| 入口 | `FixedUpdate` → 尾跳 `carController` | 0x1A64524 / 0x1A645CC | `b 0x1A645C4` |
+| TC | `TractionFilter(accel)` | 0x1A64CE4 | +0xBC |
+| SteerHelp | `SteerHelp(steer)` | 0x1A64E28 | +0x470 |
+| ESC | `escFilter()` | 0x1A65090 | +0x5BC |
+
+```mermaid
+flowchart LR
+    subgraph SENSE["感知层（每物理帧，IRDSWheel）"]
+        RF["RoadForce 0x1A7B35C"] -->|"调用于 +0x71C"| SR["SlipRatio 0x1A7B244"]
+        SR -->|"写入"| SIG["wheel.slipRatio 0x104<br/>wheel.slipAngle 0x170"]
+    end
+    subgraph DECIDE["决策与执行层（每物理帧，carController 0x1A645CC）"]
+        TF["TractionFilter +0xBC<br/>滑移超限则削油门"] --> SH["SteerHelp +0x470<br/>转向辅助"]
+        SH --> EF["escFilter +0x5BC<br/>侧偏超限则单轮制动"]
+    end
+    subgraph DRIVE["传动层（IRDSDrivetrain）"]
+        DT["FixedUpdate<br/>聚合驱动轮 slipRatio"]
+    end
+    SIG -->|"poweredIRDSWheels"| TF
+    DT -->|"slipRatio 0xCC"| IN2["移动端油门释放斜率"]
+    TF --> TAU["actualInputTorque 0x16C<br/>→ drivetrain.throttle"]
+```
+
+三个过滤器**共享同一组感知字段**：TractionFilter 读取每轮的 $`\sigma`$ 与 $`\alpha`$，
+SteerHelp 读取每轮的归一化量 `unitSlip`/`unitAngle`（0x3F8/0x3FC），
+escFilter 读取车体速度合成的侧偏角 $`\beta`$。三者的门控位与触发位在
+`IRDSCarControllInput` 中连续排布（0xC4–0xC7 与 0xC8–0xCB 各四字节）[V]。
+
+## 3.3 滑移感知层：`IRDSWheel.SlipRatio`
+
+TC 的感知输入由 `RoadForce` 在计算路面力时顺带产出：`RoadForce` 于自身偏移
++0x71C 处调用 `SlipRatio`，返回值经 $`[-1, \sigma_{\mathrm{clamp}}]`$ 钳制后写入
+`wheel.slipRatio`（0x104）[V]（$`\sigma_{\mathrm{clamp}}`$ = `slipRatioClamp`，0x35C）。
+
+`SlipRatio`（0x1A7B244，33 条指令）的反汇编直读如下 [V]。参数中的 `radius`
+**未被使用**（加载后立即被覆盖），实际只依赖角速度与车轮局部速度：
+
+```math
+\mathrm{SlipRatio} \;=\;
+\frac{-v_{z}^{\,\mathrm{local}}}{\max\bigl(|\omega_{\mathrm{mag}}|,\ 1\bigr)}
+\;\cdot\;
+\mathrm{clamp}_{01}\!\left(
+\frac{|v_{z}^{\,\mathrm{vel}}|}{8\,\Delta t / K}
+\right)
+```
+
+其中 $`v_z^{\mathrm{vel}}`$ = `velLocal.z`（0x268，车轮局部纵向速度）、
+$`v_z^{\mathrm{L}}`$ = `LVelocity.z`（0x254）、$`\omega_{\mathrm{mag}}`$ 为传入的
+角速度量值，归一化常数 $`K = 0.02`$（`.rodata` @ 0x929B70，与 $`\Delta t`$ 同量纲）[V]。
+在默认物理帧率（$`\Delta t = 0.02\,\mathrm{s}`$）下分母退化为常数 8 m/s——
+即滑移率随纵向速度在 0–8 m/s 区间线性开启，之后恒饱和。分母按 $`\Delta t`$
+缩放意味着**该感知量随物理帧率变化**：帧率越低（$`\Delta t`$ 越大），饱和越慢 [V]。
+
+传动系侧的聚合量 $`\bar\sigma`$（0xCC）由 `IRDSDrivetrain.FixedUpdate`
+对全部驱动轮的 $`\sigma`$ 加权求和得出 [V]，仅用于移动端输入层（§3.6）。
+
+## 3.4 TC 决策层：`TractionFilter` 控制律
+
+`TractionFilter(accel)`（0x1A64CE4，约 90 条指令）是 TC 的完整决策体 [V]。
+它每物理帧接收过滤前的油门输入 $`\tau`$，先无条件复位触发标记
+`tclTriggered`（0xCA），再依次通过四道门控：
+
+```mermaid
+flowchart TD
+    A["入口 tau"] --> R0["tclTriggered = false"]
+    R0 --> G1{"carSpeed >= v0 ?"}
+    G1 -->|"否"| PASS["直通返回 tau"]
+    G1 -->|"是"| G2{"TCLSlip 不为 0 ?"}
+    G2 -->|"否"| PASS
+    G2 -->|"是"| G3{"tclEnable ?"}
+    G3 -->|"否"| PASS
+    G3 -->|"是"| G4{"gear 不为 1 ?"}
+    G4 -->|"否"| PASS
+    G4 -->|"是"| LOOP["遍历驱动轮<br/>W = 取每组比值中的较大者"]
+    LOOP --> X["x = clamp01 以 1 减 TCLSlip 加权 W 再减 1"]
+    X -->|"x = 0（轻度）"| CLAMP["返回 min 的截断值"]
+    X -->|"x > 0（超限）"| CUT["tau 乘以削减因子<br/>tclTriggered = true"]
+    CUT --> CLAMP
+    CLAMP --> OUT["返回"]
+```
+
+令 $`W`$ 为全部驱动轮上的最大综合滑移指标（纵向与横向取大）：
+
+```math
+W \;=\; \max_{\mathrm{driven}}\;
+\max\!\left( \left|\frac{\sigma}{s_{\max}}\right|,\;
+\left|\frac{\alpha}{\alpha_{\max}}\right| \right)
+```
+
+四道门控的语义 [V]：
+
+1. **低速豁免**：$`v_{\mathrm{car}} < v_0`$（默认 1.0 m/s）不干预——起步阶段完全放开；
+2. **阈值零值禁用**：$`\varepsilon = 0`$ 时直通（`TCLSlip` 提供了运行时开关语义）；
+3. **开关门控**：`tclEnable` 为假不干预（由设置链写入，§3.7）；
+4. **一挡豁免**：$`g = 1`$ 时强制直通——起步加速不削油门。
+
+门控全部通过后计算削减因子。以 `s(x)` 记三次 smoothstep（反汇编内联展开，
+无子程序调用）[V]：
+
+```math
+\mathrm{smoothstep}(x) = 3x^2 - 2x^3, \qquad
+x = \mathrm{clamp}_{01}\!\bigl((1-\varepsilon)\,W - 1\bigr)
+```
+
+被滤后的油门为：
+
+```math
+\mathrm{filtered}(\tau) \;=\;
+\min\bigl(\tau\cdot\bigl(1-\mathrm{smoothstep}(x)\bigr),\ 1\bigr),
+\qquad \tau < 0 \Rightarrow 0
+```
+
+同时 `tclTriggered = true`。注意 $`x > 0`$ 才置位——**触发标记是削减动作的
+副产物，而非独立判断** [V]。
+
+## 3.5 执行层：补偿合成与 85% 上限
+
+`carController` 在调用点 +0xBC 处并不直接采用 `TractionFilter` 的返回值，
+而是将**被削减量按系数 $`c_T = -0.85`$（`.rodata` @ 0x929E7C）部分回补**后
+写入 `actualInputTorque`（0x16C）[V]：
+
+```math
+\tau' \;=\; \mathrm{clamp}_{01}\Bigl(\tau + \bigl(\tau - \mathrm{filtered}\bigr)\cdot c_T\Bigr)
+\;=\; \tau\cdot\Bigl(1 - 0.85\cdot\mathrm{smoothstep}(x)\Bigr)
+```
+
+（推导：$`\mathrm{filtered} \le \tau`$ 恒成立，削减量 $`\Delta = \tau\cdot\mathrm{smoothstep}(x)`$，代入即得。）合成路径中的空挡分支
+（$`g = 0`$ 且自动挡时 `actualBrake`/`actualInputTorque` 互换）为挡位细节，
+不影响控制律 [V]。
+
+综合决策层与执行层，TC 对油门的**总削减率**（百分比，默认参数 $`\varepsilon = 0.45`$）为：
+
+```math
+R(W) \;=\; 85\cdot\mathrm{smoothstep}\bigl(\mathrm{clamp}_{01}(0.55\,W - 1)\bigr)\ \%
+```
+
+削减窗口与上限（默认序列化值下）[V]：
+
+```mermaid
+---
+config:
+  xyChart:
+    plotColorPalette: "#2563eb"
+---
+xychart-beta
+    title "TC 削减率随综合滑移指标 W 的变化（默认参数）"
+    x-axis "综合滑移指标 W（无量纲）" 0 --> 4
+    y-axis "削减率（百分比）" 0 --> 90
+    line [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 2.4, 5.5, 9.7, 14.7, 20.5, 26.9, 33.6, 40.6, 47.6, 54.5, 61.1, 67.2, 72.7, 77.3, 81.1, 83.6, 84.9, 85.0, 85.0, 85.0, 85.0]
+```
+
+三个结构特征 [V]：
+
+1. **无干预平台**：$`W \le 1/(1-\varepsilon) \approx 1.82`$ 时 TC 完全不介入——
+   阈值不是"开始滑移"而是"滑移显著超过归一化峰值"；
+2. **85% 上限**：即使轮子完全失控（$`W \to \infty`$），仍保留 15% 油门——
+   TC 是**限幅器而非开关**，永远不会把油门清零；
+3. **零时间常数**：从感知到执行全程瞬时，无斜坡、无迟滞、无积分器，
+   `tclTriggered` 每帧无条件复位后由当帧削减动作重新置位。
+
+## 3.6 输入层：移动端油门斜率调制
+
+TC 在**输入层**还有第二条作用路径（`IRDSPlayerControls.CarControllerMobile`，
+移动端专用输入循环）[V]。油门输入状态量以固定斜率积分：
+
+- 上升沿：$`\dot\tau = \Delta t / \mathrm{throttleTime}`$（0x28）；
+- 释放沿：以 $`\bar\sigma \ge 0.2`$（`.rodata` @ 0x929D84）为条件切换斜率 [V]：
+
+```math
+\dot\tau_{\mathrm{release}} \;=\;
+\begin{cases}
+1 / \mathrm{throttleReleaseTimeTraction} & \bar\sigma \ge 0.2 \\
+1 / \mathrm{throttleReleaseTime} & \bar\sigma < 0.2
+\end{cases}
+```
+
+即驱动轮平均滑移率超过 0.2 时，松油门的**回落速率切换到专用时间常数**
+（0x34）——滑移越严重油门收得越快。这是与 §3.5 的瞬时比例削减互补的
+**慢速斜率通道**。`throttleTimeTraction`（0x2C）字段在全 so 范围内无读者，
+上升沿斜率不受 TC 影响（§3.11）[V]。
+
+## 3.7 玩家设置链：TC 与 ESC 有效，ABS 断裂的对照
+
+`IRDSPlayerSettings` 的电控字段经 `SetPlayerSettings`（0x1A63788）写入
+`IRDSCarControllInput`，映射关系全部经反汇编确认 [V]：
+
+| `IRDSPlayerSettings` 字段（偏移） | 写入目标（偏移） | 默认值（ctor 0x199DD78） | 运行时读者 |
+|---|---|---|---|
+| `enableABS` (0x50) | `absEnable` (0xC4) | true | **无（死字段）** |
+| `abs` (0x54) | `ABSSlip` (0x30) | 0.4 | **无（死字段）** |
+| `enableTCL` (0x45) | `tclEnable` (0xC6) | true | `TractionFilter` [V] |
+| `tcl` (0x48) | `TCLSlip` (0x34) | 0.45 | `TractionFilter` [V] |
+| `tclMinSpd` (0x4C) | `TCLminSPD` (0x38) | 1.0 m/s | `TractionFilter` [V] |
+| `enableESC` (0x58) | `escEnable` (0xC5) | true | `escFilter` [V] |
+| `esc` (0x5C) | `escFactor` (0x3C) | 1.0 | `escFilter` [V] |
+| `enableSteerHelp` (0x60) | `steerHelpEnable` (0xC7) | true | `SteerHelp` [V] |
+| `steerHelp` (0x64) | `steerHelp` (0x40) | 0.01 | `SteerHelp` [V] |
+
+值得注意的是 `tcl` 与 `tclMinSpd` 的传值方式：`SetPlayerSettings` 以
+**一条 8 字节双字装载指令同时写入两个相邻 float**（`ldr d0` / `stur d0`），
+单一 float 偏移扫描会漏报这一传值路径 [V]。
+
+由此得到与 §2.7 相反的结论：ESC 与 SteerHelp 的玩家设置链**完整有效**——
+`escEnable` 的全文件写入者仅 `SetPlayerSettings` 一处，`steerHelpEnable`
+的写入者均为设置应用路径，链终点读者皆为每物理帧活跃的方法 [V]。
+ABS 的断裂不是因为这条链不存在，而是因为链的终点（`absEnable`/`ABSSlip`）
+的读者 `HandleABS` 本身是死方法。
+
+**TC 的开关位是唯一例外**：`tclEnable` 除 `SetPlayerSettings` 外还有
+`TractionControlDynamicAssist` 的三处每帧覆写（§3.10）——玩家设置写入的
+值在下一次 Update 中被重算（高速段强制关闭、特定条件下强制开启）。
+因此 TC 的参数（$`\varepsilon`$、$`v_0`$）经设置链传递且被 `TractionFilter`
+真实读取 [V]，但 `enableTCL` 开关位的最终效果取决于管理器的重算结果，
+游戏内设置项能否真正关掉 TC 需实测确认 [?]。
+
+## 3.8 ESC 控制律
+
+`escFilter`（0x1A65090，约 90 条指令）以**车体侧偏角**为判据执行单侧后轮
+制动 [V]：
+
+```math
+\beta \;=\; 57.29578 \cdot \arctan2\bigl(v_{\mathrm{body},x},\ v_{\mathrm{body},z}\bigr)
+\quad [\mathrm{deg}]
+```
+
+（换算常数即弧度→角度制；$`v_{\mathrm{body}}`$ = `bodyVelocity`，0x120 [V]。）
+触发条件与干预量：
+
+| 条件 | 判据 [V] |
+|---|---|
+| 使能 | `escEnable` 为真且 $`f_E \ne 0`$ |
+| 车速 | $`v_{\mathrm{car}} > 8`$ m/s（低速豁免） |
+| 触发 | $`\beta > +3^\circ`$ 或 $`\beta < -3^\circ`$ |
+| 干预 | $`\mathrm{brake} = \min\bigl(f_E,\ 2000/\rho\bigr)`$ 写入单侧后轮 0xF0 |
+| 方向 | $`\beta > 0`$ → 右后轮（`wheelRR`，0xB4）；$`\beta < 0`$ → 左后轮（`wheelRL`，0xB0） |
+| 标记 | `escTriggered`（0xC9）置位 |
+
+即：侧偏角超过 3° 时对**同侧后轮**施加制动，制动量由玩家设置强度 $`f_E`$
+决定、以 $`2000/\rho`$ 为上限（$`2000`$ 为 `.rodata` 立即数 0x44FA0000）[V]。
+单侧后轮制动产生反向横摆力矩，是道路车辆 ESC 的经典执行方式。
+
+## 3.9 转向辅助
+
+`SteerHelp(steer)`（0x1A64E28，约 160 条指令）是三者中最复杂的过滤器，
+在转向输入上叠加两级修正 [V]：
+
+1. **速度钳制**（`steerHelp = 0` 时仍生效的基础路径）：以
+   $`\mathrm{clamp}_{01}(v_{\mathrm{car}}\cdot 3.6 / 700)`$（km/h 归一化）
+   计算速度相关转向钳制系数并写入 `clampFactor`（0xCC）；
+2. **侧偏反馈**（`steerHelp > 0` 且玩家车且 $`g \ne 0`$）：以全部轮子的
+   `unitSlip`/`unitAngle`（0x3F8/0x3FC）均值为基底，当
+   $`|\beta| > 1^\circ`$、横向速度为正且 $`v_{\mathrm{car}} > 3`$ m/s 时，
+   按 $`\beta / (2\,\delta_{\max})`$（$`\delta_{\max}`$ = `maxSteerLock`，0xA0）
+   反打方向，经 `.rodata` 步长常数（±0.01 / ±0.1）限幅 [V]。
+
+输出写入 `clampFactor`（0xCC）并**回写共享字段 `driftAngle`（0x70）**——
+与 `escFilter` 的读取形成管线内前后依赖：SteerHelp 先算 $`\beta`$，
+escFilter 后用它做触发判据 [V]。
+
+## 3.10 玩家车的 TCL 每帧重算器
+
+`carModifier.TractionControlDynamicAssist`（0x176935C）的调用点位于
+`carModifier.Update`（+0xAC）内 `playercar`（0x9C）门控之后——**仅对玩家车
+每帧执行，AI 车辆不经过此函数** [V]。它对玩家车的 `tclEnable` 做三步重算 [V]：
+
+1. **无条件先开**：每帧写入 `tclEnable = true`；
+2. **条件关闭 A**：当（全局设置单例开关为真、其子对象整型字段 = 1、
+   且玩家不在维修区 `intw._onPits` (0x21) = false）时写 false——
+   单例谓词语义未解 [?]；
+3. **条件关闭 B（高速禁用）**：玩家在赛道上（`PlayerGotOutOfTrack` 为假）且
+   刚体速度模长 > 22 m/s（约 79 km/h，`.rodata` 立即数）且不在维修区时写 false。
+
+即 TC 的实际生效区间被管理器限制为**低速段**：车速超过约 79 km/h 后即使
+门控位活跃，`tclEnable` 也被每帧拉低，`TractionFilter` 的所有逻辑不再执行 [V]。
+
+该函数后半段混入与 TC 无关的**赛道状态逻辑**
+（`PlayerGotOutOfTrack` → `odometerHandler.InvalidateLap` 圈速无效化 →
+`IRDSCarControllerAI.OnPlayerRejoinTrack`），方法名与实际职责不对应，
+属引擎的历史演化痕迹 [V]。
+
+## 3.11 僵尸代码与死字段
+
+与 ABS 篇的判定方法一致（全文件调用图重建 + 字段访问扫描）[V]：
+
+| 死项 | 证据 |
+|---|---|
+| `IRDSPlayerControls.tractionControl`（0x38，bool） | 类内全方法零读者 |
+| `IRDSPlayerControls.throttleTimeTraction`（0x2C） | 全文件零读者（仅访问器） |
+| `GetTCLSlip`/`SetTCLSlip`（0x1A62BCC/0x1A62BD4） | 全文件零调用者 |
+| `GetTCLMinSPD`/`SetTCLMinSPD`（0x1A62BEC/0x1A62BF4） | 全文件零调用者 |
+| `GetThrottleTimeTraction` 等访问器 | 仅被序列化/外部工具链路径引用，物理不经过 |
+
+注意与 ABS 篇的层级对照：**车辆级**（`IRDSCarControllInput`）TC 是活的；
+死掉的是**输入层** `IRDSPlayerControls` 中的一组 TC 字段——移动端真正的
+释放斜率开关直接比较 $`\bar\sigma \ge 0.2`$（§3.6），绕过了这组字段 [V]。
+
+## 3.12 特性总结：驱动侧与制动侧电控的对称性
+
+TC（驱动侧）与 ABS（制动侧）在架构上互为镜像，但成熟度相反 [V]：
+
+| 维度 | ABS（§2） | TC（§3） |
+|---|---|---|
+| 车辆级执行层 | 死代码（`HandleABS` 无调用者） | 活代码（每物理帧执行） |
+| 真实执行体 | 轮级 `RoadForce` 方波脉冲 | 车辆级 `TractionFilter` 比例削减 |
+| 削减形态 | 25 Hz 两态方波（间歇泄压） | 连续 smoothstep（3 次多项式） |
+| 削减上限 | 制动压力可降至 0 | 油门残量恒 15% |
+| 阈值语义 | 硬编码 0.15，与轮胎模型解耦 | 参数化 $`\varepsilon`$（默认 0.45），经归一化窗口 |
+| 玩家设置链 | 断裂（终点死字段） | 参数传递有效；开关位被每帧重算（§3.10） |
+| 低速行为 | 与打滑无关的强限压（辅助过度主力） | 1 m/s 以下与一挡完全豁免；79 km/h 以上强制关闭 |
+| 时间特性 | 每帧翻转、无状态 | 零时间常数、瞬时比例 |
+
+TC 的设计质量显著高于 ABS：参数化阈值、单调平滑削减、有界干预量、
+瞬时无迟滞，且低速/起步策略合理。两者共用同一感知层（$`\sigma`$ 均出自
+`RoadForce`），差异源于执行层级的历史保留状态——ABS 的车辆级路径
+被轮级实现取代后沦为死代码，TC 的车辆级路径则被保留并接入了玩家设置链 [V]。
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    state "TC 未干预" as IDLE
+    state "TC 削减中" as CUT
+    IDLE --> CUT : W 越过 1.82（默认参数）<br/>且过四道门控
+    CUT --> CUT : W 在 1.82 至 3.64 之间<br/>削减率随 W 连续爬升
+    CUT --> IDLE : W 回落到阈值以下<br/>或车速低于 v0 或切回一挡
+    note right of CUT
+        每物理帧重新评估
+        tclTriggered 先复位后置位
+        满削减时油门残量 15%
+    end note
+```
+
+> **本篇结论**：Ala Mobile 的 TC 是一个**阈值触发的瞬时比例控制器**——
+> 以驱动轮滑移率/侧偏角的归一化最大值为判据，经 smoothstep 插值削减油门，
+> 上限 85%、无时间常数、一挡与低速豁免，且在约 79 km/h 以上被管理器
+> 每帧强制关闭（实际生效区间约 3.6–79 km/h）。其参数链传递有效，
+> 但开关位被每帧重算，游戏内设置能否关掉 TC 需实测。ESC 以 3° 侧偏角为
+> 判据做单侧后轮制动，转向辅助在转向通道上叠加速度钳制与侧偏反馈。
+> ESC/SteerHelp 的玩家设置链完整有效，与 ABS 的断裂形成对照。三者共享
+> `carController` 管线与轮级感知字段，构成该游戏驾驶辅助的电控中枢。
 
 # 传动与多线程轮子物理（待补充）
 
@@ -639,3 +1012,64 @@ $`T`$ 即被重算为 $`F_{\mathrm{base}}\Omega \le T_b`$——与轮胎是否�
 | `IRDSPlayerSettings.abs` 默认值 | 0.4（ctor @ 0x199DD78） | [V] |
 | 压力平滑常数 | 0.15（`.rodata` @ 0x9297B4） | [V] |
 | 角度→弧度 | $`\pi/180`$（`.rodata` @ 0x929A14） | [V] |
+
+## 附录 C：TC/ESC 篇证据置信度矩阵
+
+| 发现 | 置信度 | 证据来源 |
+|---|---|---|
+| `carController` 串联 `TractionFilter`/`SteerHelp`/`escFilter` | [V] | 调用点偏移 +0xBC/+0x470/+0x5BC，全文件 bl 解码 |
+| `TractionFilter` 四道门控（$`v_0`$/$`\varepsilon`$/$`t`$/一挡） | [V] | 反汇编分支链 0x1A64CE4 起 |
+| 综合滑移指标 $`W = \max(\|\sigma/s_{\max}\|, \|\alpha/\alpha_{\max}\|)`$ | [V] | 驱动轮循环 `fdiv`/`fabs`/`fcsel gt` 序列 |
+| 削减因子 `smoothstep`（3x²−2x³ 内联展开） | [V] | `fmov #3`/`fadd`/`fmul` 立即数序列 |
+| 补偿系数 $`c_T = -0.85`$ | [V] | `.rodata` @ 0x929E7C（0xBF59999A） |
+| 满削减残量 15% | [V] | 由 $`c_T`$ 代数导出 + 反汇编无其他路径 |
+| `tclTriggered` 为削减副产物（先复位后置位） | [V] | `strb wzr` @ +0x14 与 `strb #1` @ +0x120 |
+| `SlipRatio` 公式与 $`K = 0.02`$ | [V] | 反汇编 + `.rodata` @ 0x929B70 |
+| `SlipRatio` 的 `radius` 参数未使用 | [V] | 加载后立即被覆盖 |
+| 分母随 $`\Delta t`$ 缩放（`Time.fixedDeltaTime` 调用） | [V] | script.json 桩解析 0x32A5D34 |
+| $`\bar\sigma`$ 为驱动轮加权聚合 | [V] | `IRDSDrivetrain.FixedUpdate` 循环累加 |
+| 移动端释放斜率阈值 $`\bar\sigma \ge 0.2`$ | [V] | `.rodata` @ 0x929D84 + `CarControllerMobile` 分支 |
+| TC/ESC/SteerHelp 设置链完整有效 | 修正 | ESC/SteerHelp：唯一写入者 `SetPlayerSettings`，读者活跃 [V]；`tclEnable` 另有 3 处每帧覆写（§3.10），`enableTCL` 开关最终效果 [?] |
+| `TractionControlDynamicAssist` 仅玩家车执行 | [V] | 调用点前 `playercar` (0x9C) 门控，AI 车跳过 |
+| $`tcl`$/$`tclMinSpd`$ 双字传递（单 float 扫描漏报） | [V] | `ldr d0`/`stur d0` @ 0x1A637B0 |
+| `tcl`/`tclMinSpd`/`esc`/`steerHelp` 默认值 0.45/1.0/1.0/0.01 | [V] | ctor @ 0x199DD78 + `.rodata` @ 0x92A778 |
+| ESC 单侧后轮制动（$`\beta > 3^\circ`$，$`v > 8`$ m/s） | [V] | `escFilter` 反汇编全文 |
+| $`\beta`$ 为角度制（57.29578 换算） | [V] | `.rodata` @ 0x929EB0 |
+| ESC 制动量 $`\min(f_E, 2000/\rho)`$ | [V] | `.rodata` 立即数 0x44FA0000 = 2000 |
+| SteerHelp 速度钳制 + 侧偏反馈两级结构 | [V] | 反汇编主路径 |
+| SteerHelp 与 escFilter 共享 `driftAngle` 写/读 | [V] | 同偏移 0x70 的 str/ldr 顺序 |
+| AI 车 TCL 条件剥夺 + 圈速逻辑混入 | [V] | `TractionControlDynamicAssist` 反汇编全文 |
+| `tractionControl`/`throttleTimeTraction`/TC 访问器为死代码 | [V] | 全文件调用图 + 字段访问扫描 |
+| $`\sigma`$、$`\alpha`$、`unitSlip`/`unitAngle` 的序列化实际值 | [?] | Unity 资产，静态不可得 |
+| $`W`$ 阈值 1.82 / 3.64 的物理单位（滑移比 or 绝对滑移率） | [?] | 取决于 $`s_{\max}`$ 运行时值（序列化） |
+| 非移动端（手柄/键盘）路径是否同样调释放斜率切换 | [?] | 仅确认 `CarControllerMobile`（移动端），桌面路径未逐指令验证 |
+| ~~TC 车辆级层与 ABS 一样存在设置链断裂~~ | [X] | 读者 `TractionFilter` 为活方法，占位篇导语之疑已证伪 |
+| ~~`TractionControlDynamicAssist` 是 TC 的强度调节器~~ | [X] | 实际为 AI 车开关管理 + 圈速无效化混合体 |
+| ~~`escFilter` 制动量与侧偏角成正比~~ | [X] | 制动量 = `min(escFactor, 2000/ρ)`，与 $`\beta`$ 无关（$`\beta`$ 仅触发） |
+
+## 附录 D：TC/ESC 篇关键常数与地址表
+
+| 名称 | 值 / 地址 | 出处 |
+|---|---|---|
+| TC 补偿系数 $`c_T`$ | −0.85（`.rodata` @ 0x929E7C） | [V] |
+| TC 阈值参数 $`\varepsilon`$（`tcl`） | 0.45（ctor @ 0x199DD78，`.rodata` @ 0x92A778 双字低半） | [V] |
+| TC 最低车速 $`v_0`$（`tclMinSpd`） | 1.0 m/s（ctor，`.rodata` @ 0x92A780 双字高半） | [V] |
+| `SlipRatio` 归一化常数 $`K`$ | 0.02（`.rodata` @ 0x929B70） | [V] |
+| `SlipRatio` 饱和速度（默认帧率） | 8 m/s（`8·\Delta t/K`，$`\Delta t`$ = 0.02） | [V] |
+| 移动端释放斜率切换阈值 | 0.2（`.rodata` @ 0x929D84，$`\bar\sigma`$） | [V] |
+| ESC 侧偏角触发阈 | ±3°（`fmov #3.0` 立即数） | [V] |
+| ESC 侧偏角换算 | 57.29578（`.rodata` @ 0x929EB0，弧度→度） | [V] |
+| ESC 车速下限 | 8 m/s（`fmov #8.0` 立即数） | [V] |
+| ESC 制动上限分子 | 2000.0（立即数 0x44FA0000） | [V] |
+| SteerHelp 强度默认值 | 0.01（ctor，0x3C23D70A） | [V] |
+| SteerHelp 速度归一化 | 3.6 / 700（`.rodata` @ 0x929E8C / 立即数 0x442F0000） | [V] |
+| SteerHelp 步长常数 | ±0.01 / ±0.1（`.rodata` @ 0x929A64/0x929D40/0x9299C4/0x929D90） | [V] |
+| `IRDSPlayerSettings` ctor | 0x199DD78 | [V] |
+| `SetPlayerSettings` | 0x1A63788 | [V] |
+| `TractionFilter` | 0x1A64CE4 | [V] |
+| `escFilter` | 0x1A65090 | [V] |
+| `SteerHelp` | 0x1A64E28 | [V] |
+| `TractionControlDynamicAssist` | 0x176935C（调用者 `carModifier.Update`+0xAC） | [V] |
+| `IRDSWheel.SlipRatio` | 0x1A7B244（调用者 `RoadForce`+0x71C） | [V] |
+| `carController` 内 TC 调用点 | +0xBC（0x1A64688） | [V] |
+| `IRDSDrivetrain.FixedUpdate` 聚合写入点 | +0x548 / +0x638（0xCC） | [V] |
