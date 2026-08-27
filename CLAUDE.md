@@ -137,6 +137,7 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - Keep the native bridge surface small. Java passes only resolved offsets and feature toggles to `libala-core.so`.
 - All native IL2CPP hooks are gated by `VersionGate`: refuse to install if the game version is not exactly `8.0.4 (200146)`.
 - Native hooks that intercept or override gameplay behavior (TC/ABS disable, future ESC tuning) must gate on the whitelist comparison `is_target_player_car` (`this == g_player_controller`), never on the `is_player_controller` field probe — the `playerControls` field (0x108) can be non-null on AI cars, and intercepting them breaks all AI drivers (verified: disabling TC once crippled the whole AI field).
+- Passthrough hooks (installed on methods shared by all cars/instances, e.g. proxy_shift_up/down) must stay log-free — any unconditional LOGI there floods the log (measured: 18810 lines in 21 min, fires even when the feature is off) and drowns diagnostic logs. Log only at install time or inside player-gated paths.
 - Overlay Views use raw Android Canvas (not Compose) because Compose cannot overlay reliably on a Unity SurfaceView.
 - A JSON file in external storage is used for configuration. The ConfigActivity writes; `AlaMobileModule` reads.
 
