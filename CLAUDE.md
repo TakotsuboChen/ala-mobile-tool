@@ -118,11 +118,18 @@ The project uses a 6-digit `versionCode` encoding the semantic version, release 
 
 Reverse-engineering artifacts are generated from the local APK and should not be committed to GitHub.
 
-Run Il2CppDumper (requires a local `Il2CppDumper` binary):
+**游戏 APK 本地副本在项目内，不要去 /tmp 找临时解包目录（WSL 重启即丢），也不要 adb pull：**
+
+- `安装包/` — 各版本成品安装包（如 `Ala Mobile 8.0.4 Takotsubo 共存版.apk`）
+- `build/v<版本>-official/base.apk` + `build/v<版本>-official-native/split_config.arm64_v8a.apk` — 官方版分包，解 `lib/arm64-v8a/libil2cpp.so` 用后者
+- `build/` 下还有各历史版本的 base.apk / split_config.arm64_v8a.apk
+- global-metadata.dat 在 base.apk 的 `assets/bin/Data/Managed/Metadata/` 内
+
+Run Il2CppDumper (requires a local `Il2CppDumper` binary)——先从上面的项目内 APK 解出两个输入文件：
 ```bash
 mkdir -p il2cpp-dumps/v8.0.4
-Il2CppDumper /tmp/ala-mobile-research/native/lib/arm64-v8a/libil2cpp.so \
-             /tmp/ala-mobile-research/il2cpp/assets/bin/Data/Managed/Metadata/global-metadata.dat \
+Il2CppDumper <解出的 libil2cpp.so> \
+             <解出的 global-metadata.dat> \
              il2cpp-dumps/v8.0.4/
 ```
 
