@@ -161,8 +161,8 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - `app/src/main/kotlin/tools/alamobile/mod/IntroSoundPlayer.kt` — V10 engine sound player.
 - `app/src/main/resources/META-INF/xposed/module.prop` — libxposed module metadata.
 - `app/src/main/resources/META-INF/xposed/scope.list` — target package list.
-- `TECHNICAL_ANALYSIS.md` — Ala Mobile game-engine reverse-engineering analysis, organized by subsystem (paper-style, LaTeX + Mermaid). Completed: ABS. Planned: aero/DRS, vehicle dynamics (TC/ESC/steer assist), drivetrain.
-- `MODULE_ABS_NOTES.md` — engineering notes for the ABS subsystem: module hook layers, tunable field paths, upgrade verification checklist.
+- `TECHNICAL_ANALYSIS.md` — Ala Mobile game-engine reverse-engineering analysis, organized by subsystem (paper-style, LaTeX + Mermaid). Completed: ABS, vehicle dynamics (TC/ESC/steer assist). Planned: aero/DRS, drivetrain.
+- `MODULE_ABS_NOTES.md` — engineering notes for the ABS and TC subsystems: module hook layers, tunable field paths, native-scan toolchain pitfalls, upgrade verification checklist.
 
 ## TODO(human) Integration Points
 
