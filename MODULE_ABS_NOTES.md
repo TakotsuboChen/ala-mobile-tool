@@ -126,20 +126,23 @@ $NDK_OBJDUMP -d --start-address=0x1A7B35C --stop-address=0x1A7BE44 lib/arm64-v8a
 | 阈值微调（等效） | 无需 hook——游戏设置 `tcl`/`tclMinSpd` 链有效 | 模块只需调游戏设置即可，增益有限 |
 | TC 状态灯扩展 | 读 `escTriggered` (0xC9) | ESC 介入标志，同样活跃 |
 
-### 5.2 关 TC 的陷阱（若未来做此功能）
+### 5.2 关 TC 的陷阱（模块已有实现，此处是原理注解）
 
 **直接写 `tclEnable` (0xC6) = false 无效**。玩家车的该字段被
 `carModifier.Update` → `TractionControlDynamicAssist`（0x176935C，仅玩家车调用）
 每帧重算：先无条件写 true，再按条件写 false（高速 > 22 m/s、不在维修区时关闭）。
 写 false 后下一物理帧即被覆盖。
 
-可行路径（均未实测）：
-1. **hook `TractionControlDynamicAssist` 直接 return**——代价是跳过其中的
-   圈速无效化逻辑（`PlayerGotOutOfTrack` → `InvalidateLap`），有副作用；
-2. **hook `TractionFilter`（0x1A64CE4）入口**：在 `tclEnable` 读取（入口 +0x28）
-   之前把实例字段临时置 false，返回前恢复——比 1 精确但需要处理重入；
-3. 接受游戏内行为：TC 本身在 > 79 km/h 自动关闭（`TractionControlDynamicAssist`
-   条件 B），低速段的 TC 干预是否值得关闭取决于实测手感。
+**模块现行实现**（`pedal_hook.c` 的 `proxy_traction_filter`，已实测生效）：
+hook `TractionFilter` 入口，TC 关闭时直接 `return accel` 不调 orig——
+完全绕过游戏削减逻辑，不依赖任何字段状态。与 `carController` 的补偿合成
+数学兼容：返回原值 → 削减量 Δ = 0 → `actualInputTorque = τ`（无副作用）。
+AI 车经 `is_player_controller` 过滤天然豁免。
+
+其他理论路径（均未采用）：
+1. hook `TractionControlDynamicAssist` 直接 return——会跳过其中的圈速无效化
+   逻辑（`PlayerGotOutOfTrack` → `InvalidateLap`），有副作用；
+2. 临时改写实例 `tclEnable` 再恢复——比现行方案复杂且需处理重入，无收益。
 
 ### 5.3 TC 行为速查（实测对照用）
 
