@@ -98,6 +98,22 @@ static inline int is_player_controller(void *instance) {
     return player_controls != NULL ? 1 : 0;
 }
 
+// 严格玩家车判定（白名单实例比对）：instance 必须就是 g_player_controller——
+// 由 proxy_player_controls_update 设置（IRDSPlayerControls 组件只挂玩家车
+// GameObject，实机验证过的单一可靠来源）。
+//
+// ⚠️ 拦截类 hook（关 TC/关 ABS 的入口直接返回）必须用本函数，不能用
+// is_player_controller 做拦截判定：AI 车的 playerControls (0x108) 可能非空
+// （实机实证：关 TC 时 19 辆 AI 车的 TractionFilter 一并被跳过，AI 全体
+// 失去 TC 保护 → 打滑失控 → 失误率暴增）。TractionFilter 是每辆车每物理帧
+// 的必经路径，误判必现；setter 路径 AI 未必经过，所以当年油门修复后此缺陷
+// 一直潜伏到 TC hook 上线才暴露。
+// is_player_controller 仅保留两类用途：setter 透传的宽松过滤、
+// 白名单实例的野指针二次校验。
+static inline int is_target_player_car(void *instance) {
+    return instance != NULL && instance == (void *) g_player_controller;
+}
+
 // 把当前模块 desired 输入值写到 controller 实例字段。
 // 只在对应 active 时写字段——不踩时绝不写，避免覆盖游戏自带输入
 // （方向键 ButtonsSteering 模式的转向辅助依赖油门/刹车值）。
@@ -281,7 +297,9 @@ static void proxy_fixed_update(void *this) {
         // 所以 hook HandleABS 入口没用。但内联的 ABS 逻辑读 absEnable(0xC4)
         // 门控——在这里（FixedUpdate 入口，carController 之前）设 absEnable=0，
         // 内联的 ABS 检查就会跳过。比 hook 内联代码可靠得多。
-        if (!g_config.enable_abs) {
+        // ⚠️ 在宽松 is_player 之上再叠白名单：is_player_controller 对 AI 车
+        // 可能误判（见 is_target_player_car 注释），不加白名单会误关 AI 车 ABS。
+        if (!g_config.enable_abs && is_target_player_car(this)) {
             write_bool_field(this, 0xC4, false);
 
             // per-wheel: 写 usesABS=false (0x3CE)，直接禁用每个轮子的 ABS。
@@ -405,9 +423,10 @@ static void proxy_player_controls_update(void *this) {
 // 签名: float TractionFilter(void *this, float accel)
 // 返回削减后的 accel。当模块 TC 开关关闭时，直接返回原始 accel（不削减），
 // 绕过游戏自带 TC。比写字段更可靠——不依赖 tclEnable 是否被游戏覆盖。
-// 只作用玩家车（is_player_controller 过滤）。
+// 只作用玩家车（白名单比对，见 is_target_player_car 注释——本 hook 会被
+// 所有车每物理帧调用，用 is_player_controller 会误拦 AI 车的 TC）。
 static float proxy_traction_filter(void *this, float accel) {
-    if (!g_config.enable_tc && this != NULL && is_player_controller(this)) {
+    if (!g_config.enable_tc && is_target_player_car(this)) {
         // TC 关闭：直接返回原始 accel，不调 orig（跳过 TC 削减）
         return accel;
     }
@@ -421,9 +440,9 @@ static float proxy_traction_filter(void *this, float accel) {
 // IRDSCarControllInput::HandleABS() — ABS 入口。
 // 签名: void HandleABS(void *this)
 // 当模块 ABS 开关关闭时，直接返回（不调 orig），跳过游戏自带 ABS。
-// 只作用玩家车。
+// 只作用玩家车（白名单比对；HandleABS 实测为死方法，此 hook 是保险层）。
 static void proxy_handle_abs(void *this) {
-    if (!g_config.enable_abs && this != NULL && is_player_controller(this)) {
+    if (!g_config.enable_abs && is_target_player_car(this)) {
         // ABS 关闭：跳过整个 HandleABS
         return;
     }
@@ -443,7 +462,10 @@ static void proxy_handle_abs(void *this) {
 // carController RVA = FixedUpdate RVA + 0xA8（同类内方法统一偏移，
 // 8.0.0 和 8.0.4 中差值一致）。
 static void proxy_car_controller(void *this) {
-    if (!g_config.enable_abs && this != NULL && is_player_controller(this)) {
+    // ⚠️ 白名单比对（is_target_player_car）：此 hook 对所有车每物理帧触发，
+    // 用 is_player_controller 会把 absEnable=false + usesABS=false 写到 AI 车
+    // 上（误关 AI 的 ABS），与关 TC 波及 AI 是同一根因。
+    if (!g_config.enable_abs && is_target_player_car(this)) {
         write_bool_field(this, 0xC4, false);
 
         // per-wheel: 写 usesABS=false (0x3CE)，直接禁用每个轮子的 ABS。
@@ -750,6 +772,7 @@ void pedal_uninstall_hooks(void) {
     }
 
     g_last_controller = NULL;
+    g_player_controller = NULL;  // 清白名单，防残留旧实例指针误命中新场景的车
     g_player_drivetrain = 0;
     g_hooks_installed = 0;
     g_config.enable_control_replacement = false;

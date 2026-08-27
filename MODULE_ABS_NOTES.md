@@ -16,7 +16,11 @@ native 层四层机制（`native/src/pedal_hook.c`），全部经 logcat 与实�
 
 ```c
 // proxy_fixed_update() — pedal_hook.c
-if (!g_config.enable_abs && is_player_controller(this)) {
+// ⚠️ 拦截判定用白名单 is_target_player_car（this == g_player_controller）。
+// 旧版用 is_player_controller（0x108 字段探测），AI 车该字段可能非空，
+// 会把 absEnable=false + usesABS=false 误写到 AI 车（与关 TC 波及 AI 同根因，
+// 2026-08-27 修复）。
+if (!g_config.enable_abs && is_target_player_car(this)) {
     write_bool_field(this, 0xC4, false);   // absEnable — 无读者，仅防御性保留
     void *wheels_arr = *(void **)((uintptr_t)this + 0x28);
     for (int i = 0; i < 4; i++) {
@@ -137,7 +141,15 @@ $NDK_OBJDUMP -d --start-address=0x1A7B35C --stop-address=0x1A7BE44 lib/arm64-v8a
 hook `TractionFilter` 入口，TC 关闭时直接 `return accel` 不调 orig——
 完全绕过游戏削减逻辑，不依赖任何字段状态。与 `carController` 的补偿合成
 数学兼容：返回原值 → 削减量 Δ = 0 → `actualInputTorque = τ`（无副作用）。
-AI 车经 `is_player_controller` 过滤天然豁免。
+
+> ⚠️ **玩家车判定必须是白名单比对**（`is_target_player_car`，
+> `this == g_player_controller`），不能用 `is_player_controller`（0x108
+> 字段探测）做拦截判定。AI 车的 `playerControls` (0x108) 可能非空，实测
+> 曾导致关 TC 波及全部 AI（AI 无 TC 保护 → 打滑失控 → 失误率暴增）。
+> `TractionFilter` 是每辆车每物理帧的必经路径，误判必现；setter 路径 AI
+> 未必经过，所以油门修复后此缺陷潜伏到 TC hook 上线才暴露。拦截类 hook
+> 一律白名单；`is_player_controller` 只用于 setter 透传的宽松过滤和野指针
+> 二次校验。
 
 其他理论路径（均未采用）：
 1. hook `TractionControlDynamicAssist` 直接 return——会跳过其中的圈速无效化
