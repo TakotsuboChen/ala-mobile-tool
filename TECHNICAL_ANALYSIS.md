@@ -7,7 +7,6 @@
 > 以及 **`libil2cpp.so` 的 ARM64 指令级反汇编**与模块原生钩子的运行时交叉验证。
 >
 > **文档范围**：本文按子系统分篇，随逆向进度陆续补充。
-> **文档范围**：本文按子系统分篇，随逆向进度陆续补充。
 > 篇章编号按成篇追加顺序分配（详见总目录），当前已完成 ABS 篇；
 > 空气动力学与 DRS、车辆动力学（TC/ESC/转向辅助）、传动与多线程轮子物理等
 > 为规划中的占位篇目（见各篇导语）。
@@ -41,7 +40,7 @@
 
 1. 从游戏 APK 提取 `libil2cpp.so`（arm64-v8a）；
 2. 以 Il2CppDumper 输出（`dump.cs`、`script.json`）获取类型布局与方法地址表
-   （该 so 中 RVA $=$ VA $=$ 文件偏移）；
+   （该 so 中 RVA = VA = 文件偏移）；
 3. 使用 `llvm-objdump`（NDK 26.1.10909125）按地址区间反汇编目标方法；
 4. 解析 ELF program header 将 VA 映射到文件偏移，读取 `.rodata` 浮点常数池。
 
@@ -78,19 +77,19 @@
 
 | 符号 | 字段（偏移） | 含义 |
 |---|---|---|
-| $T_b$ | `brakeFrictionTorque` (0x88) | 制动摩擦扭矩上限 |
-| $p_{\mathrm{brake}}$ | `wheel.brake` (0xF0) | 车辆级刹车输入，$\in[0,1]$ |
-| $\sigma$ | `slipRatio` (0x104) | 归一化接地点滑动速度（§2.4） |
-| $\alpha$ | `slipAngle` (0x170) | 侧偏角 |
-| $\alpha_{\max}$ | `maxAngle` (0x1AC) | 峰值侧偏角 |
-| $s_{\max}$ | `maxSlip` (0x1A8) | 动态峰值滑移（仅视觉/声音使用） |
-| $b$ | `rawBrakeBiasValue` (0x3E0) | 制动偏置（序列化值） |
-| $p_0$ | `legacyLowBrakePressureF/R` (0x3E4/0x3E8) | 低速压力下限（序列化值） |
-| $s_{\mathrm{ABS}}$ | `usesABS` (0x3CE) | per-wheel ABS 门控 |
-| $\pi$ | `carModifier.playercar` (0x9C) | 玩家车标志 |
-| $\lambda$ | `ABSSlip` (0x30) | ABS 容差因子（死字段） |
-| $k_P$ | `kP` (0x40C) | 连续衰减增益（恒为 0） |
-| $\Delta t$ | — | 物理帧时长 $= 1/50\,\mathrm{s}$ |
+| $`T_b`$ | `brakeFrictionTorque` (0x88) | 制动摩擦扭矩上限 |
+| $`p_{\mathrm{brake}}`$ | `wheel.brake` (0xF0) | 车辆级刹车输入，$`\in[0,1]`$ |
+| $`\sigma`$ | `slipRatio` (0x104) | 归一化接地点滑动速度（§2.4） |
+| $`\alpha`$ | `slipAngle` (0x170) | 侧偏角 |
+| $`\alpha_{\max}`$ | `maxAngle` (0x1AC) | 峰值侧偏角 |
+| $`s_{\max}`$ | `maxSlip` (0x1A8) | 动态峰值滑移（仅视觉/声音使用） |
+| $`b`$ | `rawBrakeBiasValue` (0x3E0) | 制动偏置（序列化值） |
+| $`p_0`$ | `legacyLowBrakePressureF/R` (0x3E4/0x3E8) | 低速压力下限（序列化值） |
+| $`s_{\mathrm{ABS}}`$ | `usesABS` (0x3CE) | per-wheel ABS 门控 |
+| $`\pi`$ | `carModifier.playercar` (0x9C) | 玩家车标志 |
+| $`\lambda`$ | `ABSSlip` (0x30) | ABS 容差因子（死字段） |
+| $`k_P`$ | `kP` (0x40C) | 连续衰减增益（恒为 0） |
+| $`\Delta t`$ | — | 物理帧时长 $`= 1/50\,\mathrm{s}`$ |
 
 ## 2.2 ABS 控制架构
 
@@ -163,7 +162,7 @@ flowchart TD
 
 关键结构事实 [V]：`FixedUpdate` 以**尾跳**（`b 0x1A645CC`）进入 `carController`，
 这解释了二者 RVA 差值恒为 0xA8 的现象；`carController` 将车辆级刹车输入
-（$p_{\mathrm{brake}} \in [0,1]$）广播至四轮，随后**每轮独立**在 `RoadForce` 中执行 ABS 调制。
+（$`p_{\mathrm{brake}} \in [0,1]`$）广播至四轮，随后**每轮独立**在 `RoadForce` 中执行 ABS 调制。
 
 ### 2.2.4 `usesABS`：唯一活跃门控及其写入路径
 
@@ -186,16 +185,16 @@ flowchart LR
 
 ### 2.3.1 门控条件
 
-设 $\alpha_v$ 为速度因子（§2.3.2），则 ABS 调制段被激活当且仅当：
+设 $`\alpha_v`$ 为速度因子（§2.3.2），则 ABS 调制段被激活当且仅当：
 
-$$
+```math
 \text{active} \;\Longleftrightarrow\;
 \bigl(s_{\mathrm{ABS}} \;\wedge\; \alpha_v > 0\bigr)
 \;\vee\;
 \bigl(\neg s_{\mathrm{ABS}} \;\wedge\; \neg\pi \;\wedge\; \alpha_v > 0\bigr)
-$$
+```
 
-即：玩家车（$\pi = \text{true}$）必须 $s_{\mathrm{ABS}} = \text{true}$；
+即：玩家车（$`\pi = \text{true}`$）必须 $`s_{\mathrm{ABS}} = \text{true}`$；
 AI 车无视 `usesABS` 强制参与。
 
 ```mermaid
@@ -212,67 +211,67 @@ flowchart TD
 
 ### 2.3.2 速度因子
 
-$$
+```math
 \alpha_v \;=\; \mathrm{clamp}_{[0,1]}\!\left(\frac{\lVert\mathbf{v}\rVert - v_{\mathrm{low}}}{v_{\mathrm{full}} - v_{\mathrm{low}}}\right)
 \;=\; \mathrm{clamp}_{[0,1]}\!\left(\frac{\lVert\mathbf{v}\rVert}{13.89}\right)
-$$
+```
 
-其中 $v_{\mathrm{low}} = 0$（`lowAbsDisableSpeed`，无写入者）、$v_{\mathrm{full}} = 13.89\,\mathrm{m/s}$
+其中 $`v_{\mathrm{low}} = 0`$（`lowAbsDisableSpeed`，无写入者）、$`v_{\mathrm{full}} = 13.89\,\mathrm{m/s}`$
 （`fullAbsEnableSpeed`，构造函数常数 0x415E3D71）。
 即 50 km/h 以上 ABS 满强度，低于此速度按比例线性减弱 [V]。
 
 ### 2.3.3 组合摩擦圆权重（侧向让渡）
 
-$$
+```math
 \gamma = \mathrm{clamp}_{[0,1]}\!\left(1 - \frac{|\alpha|}{\alpha_{\max}}\right),
 \qquad
 \beta = \mathrm{clamp}_{[0,1]}\!\left(\frac{b}{0.3}\right),
 \qquad
 \Omega = \gamma + \beta\,(1-\gamma)
-$$
+```
 
-其中 $\gamma$ 度量侧向余量（侧偏角越接近峰值，纵向可用余量越少），
-$\beta$ 为以硬编码常数 $0.3$ 归一化的制动偏置因子。
+其中 $`\gamma`$ 度量侧向余量（侧偏角越接近峰值，纵向可用余量越少），
+$`\beta`$ 为以硬编码常数 $`0.3`$ 归一化的制动偏置因子。
 该权重实现**组合滑移管理**：侧滑增大时主动让渡纵向刹车力给侧向抓地，
 属于对摩擦圆的合理利用而非冗余。
 
 ### 2.3.4 速度相关的刹车压力上限
 
-$$
+```math
 r = \mathrm{clamp}_{[0,1]}\!\left(\frac{\lVert\mathbf{v}\rVert}{80}\right)
-$$
+```
 
-其中 $80$ 为 `tempRearBrakeBalancerSpeed` 的构造函数默认值。
+其中 $`80`$ 为 `tempRearBrakeBalancerSpeed` 的构造函数默认值。
 
-$$
+```math
 p_{\mathrm{lim}} = p_0 + r\,(T_b - p_0)
-$$
+```
 
-$$
+```math
 F_{\mathrm{base}} \;=\; p_{\mathrm{lim}} + r\,(T_b - p_{\mathrm{lim}})
 \;=\; p_0 + (2r - r^2)\,(T_b - p_0)
-$$
+```
 
-即两段线性插值逼近满压上限。$r \to 1$（$\ge 80\,\mathrm{m/s}$）时 $F_{\mathrm{base}} \to T_b$；
-低速时 $F_{\mathrm{base}}$ 显著低于 $T_b$。
-$p_0$ 取驱动轮的 `legacyLowBrakePressureRear` 或非驱动轮的 `legacyLowBrakePressureFront`。
+即两段线性插值逼近满压上限。$`r \to 1`$（$`\ge 80\,\mathrm{m/s}`$）时 $`F_{\mathrm{base}} \to T_b`$；
+低速时 $`F_{\mathrm{base}}`$ 显著低于 $`T_b`$。
+$`p_0`$ 取驱动轮的 `legacyLowBrakePressureRear` 或非驱动轮的 `legacyLowBrakePressureFront`。
 
 ### 2.3.5 脉冲方波与滑移调制
 
 `pulseBrakes` (0x408) 在 ABS 段内**每帧无条件翻转**
 （`ldrb` → `eor w8, w8, #1` → `strb`），在 50 Hz 物理帧下构成 **25 Hz 方波、50% 占空比**。
 
-$$
+```math
 T \;=\;
 \begin{cases}
 F_{\mathrm{base}}\,\Omega, & |\sigma| \le 0.15 \\[4pt]
 F_{\mathrm{base}}\,\Omega\cdot b, & |\sigma| > 0.15 \;\wedge\; \text{pulse} \\[4pt]
 F_{\mathrm{base}}\,\Omega\cdot\Bigl(1 - \alpha_v\,\kappa\,k_P\,\bigl(|\sigma| - 0.15\bigr)\,\Delta t\Bigr), & |\sigma| > 0.15 \;\wedge\; \neg\,\text{pulse}
 \end{cases}
-$$
+```
 
-其中 $\kappa$ 为驱动轮偏置派生因子（$s_8$），且 $k_P \equiv 0$（无写入者，§2.2.2），
-故第三分支恒等于 $F_{\mathrm{base}}\,\Omega$——**非释放相位不存在连续比例抑制**。
+其中 $`\kappa`$ 为驱动轮偏置派生因子（$`s_8`$），且 $`k_P \equiv 0`$（无写入者，§2.2.2），
+故第三分支恒等于 $`F_{\mathrm{base}}\,\Omega`$——**非释放相位不存在连续比例抑制**。
 
 ```mermaid
 xychart-beta
@@ -284,11 +283,11 @@ xychart-beta
 
 最终制动扭矩合成：
 
-$$
+```math
 \tau_{\mathrm{brake}} \;=\; T \cdot p_{\mathrm{brake}}
-$$
+```
 
-无 ABS 路径下为 $\tau_0 = T_b \cdot p_{\mathrm{brake}}$。
+无 ABS 路径下为 $`\tau_0 = T_b \cdot p_{\mathrm{brake}}`$。
 
 ### 2.3.6 控制律汇总
 
@@ -314,21 +313,21 @@ $$
 
 来自 `IRDSWheel.SlipRatio()`（0x1A7B244）的反汇编：
 
-$$
+```math
 \sigma \;=\;
 \frac{-v_{L,z}}{\max\bigl(\lVert\mathbf{w}\rVert,\,1\bigr)}
 \;\cdot\;
 \mathrm{clamp}_{[0,1]}\!\left(\frac{c\,\bigl|v_{\mathrm{local},z}\bigr|}{8\,\Delta t}\right),
 \qquad c = 0.02,\;\; \Delta t = \tfrac{1}{50}
-$$
+```
 
-- $v_L$（0x24C）：接地点相对地面的局部滑动速度（自由滚动 $\approx 0$，锁死 $\approx -\lVert\mathbf{v}\rVert$）；
-- $\lVert\mathbf{w}\rVert$ 为轮速矢量模长（参数），低速由 $\max(\cdot, 1)$ 兜底；
-- 低速衰减因子 $\mathrm{clamp}_{[0,1]}(|v_{\mathrm{local},z}|\cdot 0.125)$：$v_{\mathrm{local},z} < 8\,\mathrm{m/s}$ 时按比例压缩 $\sigma$，抑制低速误触发。
+- $`v_L`$（0x24C）：接地点相对地面的局部滑动速度（自由滚动 $`\approx 0`$，锁死 $`\approx -\lVert\mathbf{v}\rVert`$）；
+- $`\lVert\mathbf{w}\rVert`$ 为轮速矢量模长（参数），低速由 $`\max(\cdot, 1)`$ 兜底；
+- 低速衰减因子 $`\mathrm{clamp}_{[0,1]}(|v_{\mathrm{local},z}|\cdot 0.125)`$：$`v_{\mathrm{local},z} < 8\,\mathrm{m/s}`$ 时按比例压缩 $`\sigma`$，抑制低速误触发。
 
-**语义**：$\sigma$ 是归一化的接地点滑动速度——完全锁死时 $\approx 1.0$，自由滚动时为 0。
-它与经典滑移率 $(\omega r - v)/v$ 同向不同式，但数量级等效：
-**阈值常数 $0.15$ 等效于经典滑移率约 15%**。
+**语义**：$`\sigma`$ 是归一化的接地点滑动速度——完全锁死时 $`\approx 1.0`$，自由滚动时为 0。
+它与经典滑移率 $`(\omega r - v)/v`$ 同向不同式，但数量级等效：
+**阈值常数 $`0.15`$ 等效于经典滑移率约 15%**。
 
 ## 2.5 轮胎模型与 ABS 的解耦
 
@@ -337,9 +336,9 @@ $$
 `IRDSWheel` 持有 `a[]`(0xB0)、`b[]`（0xC8）、`cCoefficients`（0xE0）系数组，
 配合 `PseudoAtan`（0x1A7D91C）实现 Pacejka 魔术公式：
 
-$$
+```math
 F_x \;=\; D\,\sin\!\Bigl(C\,\arctan\!\bigl(B\,\sigma - E\,\bigl(B\,\sigma - \arctan(B\,\sigma)\bigr)\bigr)\Bigr)
-$$
+```
 
 相关方法：`CalcLongitudinalForce`（0x1A78EC0）、`CalcLateralForce`（0x1A79050）、
 `CombinedForce`（0x1A79314）、`InitSlipMaxima`（0x1A796CC）、`UpdateMaxSlips`（0x1A7D020）。
@@ -347,9 +346,9 @@ $$
 ### 2.5.2 `maxSlip` 动态峰值系统及其用途边界
 
 `InitSlipMaxima` 构建 100 点"载重 → 峰值滑移"查找表（`slipR[]`/`slipA[]`，0x2A0/0x2A8），
-`UpdateMaxSlips` 依据当前 `normalForce` 插值更新 $s_{\max}$。
+`UpdateMaxSlips` 依据当前 `normalForce` 插值更新 $`s_{\max}`$。
 
-然而对 $s_{\max}$ (0x1A8) 的**全部读者**扫描结果为：
+然而对 $`s_{\max}`$ (0x1A8) 的**全部读者**扫描结果为：
 
 | 读者 | 用途 |
 |---|---|
@@ -357,8 +356,8 @@ $$
 | `IRDSSoundController`（`CreateTireBumpSound` 等） | 打滑 / ABS 音效 |
 | `InGameUIManager` 等 | UI |
 
-**没有任何 ABS 控制代码读取 $s_{\max}$**——轮胎模型的动态峰值与 ABS 完全解耦 [V]。
-ABS 使用的是与工况无关的编译期常数 $0.15$。
+**没有任何 ABS 控制代码读取 $`s_{\max}`$**——轮胎模型的动态峰值与 ABS 完全解耦 [V]。
+ABS 使用的是与工况无关的编译期常数 $`0.15`$。
 二者仅在"典型工况"下数值巧合地接近；载荷/胎温偏移时，ABS 工作点将系统性偏离真实峰值。
 
 ```mermaid
@@ -369,7 +368,7 @@ xychart-beta
     line [0.0, 0.62, 0.94, 1.0, 0.97, 0.9, 0.78, 0.6, 0.45]
 ```
 
-示意曲线的峰值置于 $\sigma \approx 0.12$：阈值 $0.15$ 位于**峰后下降段**——
+示意曲线的峰值置于 $`\sigma \approx 0.12`$：阈值 $`0.15`$ 位于**峰后下降段**——
 ABS 介入时轮胎通常已经越过峰值，控制器通过方波将滑移拉回，而非将工作点伺服锁定于峰值。
 
 ## 2.6 僵尸代码与僵尸字段
@@ -405,29 +404,29 @@ flowchart LR
 
 ### 2.8.1 与理想滑移伺服的偏差来源
 
-理想的极限刹车是**滑移伺服**：将滑移率连续稳定于 Pacejka 峰值 $s_{\max}$。
+理想的极限刹车是**滑移伺服**：将滑移率连续稳定于 Pacejka 峰值 $`s_{\max}`$。
 本实现的偏差来自三点：
 
-1. **无滑移闭环**：$k_P \equiv 0$，非释放相位不存在连续比例抑制 [V]。
-   控制器只有"全力 / $\times b$"两个状态，工作点在阈值两侧**极限环振荡**而非稳定于峰值；
-2. **阈值固定、与 $s_{\max}$ 解耦** [V]：峰值随载荷与胎温漂移，阈值恒为 0.15；
-3. **方波振荡的固有损失**：释放相位制动扭矩乘 $b$，稳态平均
+1. **无滑移闭环**：$`k_P \equiv 0`$，非释放相位不存在连续比例抑制 [V]。
+   控制器只有"全力 / $`\times b`$"两个状态，工作点在阈值两侧**极限环振荡**而非稳定于峰值；
+2. **阈值固定、与 $`s_{\max}`$ 解耦** [V]：峰值随载荷与胎温漂移，阈值恒为 0.15；
+3. **方波振荡的固有损失**：释放相位制动扭矩乘 $`b`$，稳态平均
 
-$$
+```math
 \bar{\tau}_{\mathrm{ABS}} \;=\; \frac{1+b}{2}\; F_{\mathrm{base}}\,\Omega\,p_{\mathrm{brake}}
-$$
+```
 
-（$b$ 为序列化值，具体数值未知 [?]；若 $b=0.5$ 则平均约 75%，若 $b \to 0$ 则 50%。）
+（$`b`$ 为序列化值，具体数值未知 [?]；若 $`b=0.5`$ 则平均约 75%，若 $`b \to 0`$ 则 50%。）
 
 ### 2.8.2 冗余的定量分解
 
-压力上限模型（§2.3.4）在 $p_0 = 0$ 假设下的归一化占比：
+压力上限模型（§2.3.4）在 $`p_0 = 0`$ 假设下的归一化占比：
 
-$$
+```math
 \frac{F_{\mathrm{base}} - p_0}{T_b - p_0} \;=\; 2r - r^2,
 \qquad
 r = \mathrm{clamp}_{[0,1]}\!\left(\frac{\lVert\mathbf{v}\rVert}{80}\right)
-$$
+```
 
 ```mermaid
 xychart-beta
@@ -437,20 +436,20 @@ xychart-beta
     line [0, 32, 57, 77, 91, 95, 100]
 ```
 
-关键事实：**只要门控激活（$s_{\mathrm{ABS}}$ 且 $\|\mathbf{v}\| > 0$），
-$T$ 即被重算为 $F_{\mathrm{base}}\Omega \le T_b$——与轮胎是否打滑无关** [V]。
+关键事实：**只要门控激活（$`s_{\mathrm{ABS}}`$ 且 $`\|\mathbf{v}\| > 0`$），
+$`T`$ 即被重算为 $`F_{\mathrm{base}}\Omega \le T_b`$——与轮胎是否打滑无关** [V]。
 真实 ABS 在低速时几乎不干预（低速车轮不易抱死），而此实现把"低速限压"做成
-**无条件的压力上限**：50 km/h 时上限仅为满压的 ~32%（若 $p_0 \approx 0$），
+**无条件的压力上限**：50 km/h 时上限仅为满压的 ~32%（若 $`p_0 \approx 0`$），
 且该削减不依赖任何打滑证据。这是抓地力冗余的最大来源。
 
 按影响排序的冗余来源分解：
 
 | 来源 | 机制 | 定性量级 |
 |---|---|---|
-| 低速压力上限 | $F_{\mathrm{base}} = p_0 + (2r - r^2)(T_b - p_0)$，$r = \lVert\mathbf{v}\rVert/80$ | 低速区（$< 100\,$km/h）最为显著 [V] |
-| 方波占空比 | 25 Hz 方波，释放相位 $\times\, b$ | 平均力 $\times\,(1+b)/2$ [V] |
-| 侧向让渡 | $\Omega = \gamma + \beta(1-\gamma)$ | 合理设计（摩擦圆组合滑移管理），不计为冗余 |
-| 无连续伺服 | $k_P \equiv 0$ | 非 pulse 相位无衰减项 [V] |
+| 低速压力上限 | $`F_{\mathrm{base}} = p_0 + (2r - r^2)(T_b - p_0)`$，$`r = \lVert\mathbf{v}\rVert/80`$ | 低速区（$`< 100\,`$km/h）最为显著 [V] |
+| 方波占空比 | 25 Hz 方波，释放相位 $`\times\, b`$ | 平均力 $`\times\,(1+b)/2`$ [V] |
+| 侧向让渡 | $`\Omega = \gamma + \beta(1-\gamma)`$ | 合理设计（摩擦圆组合滑移管理），不计为冗余 |
+| 无连续伺服 | $`k_P \equiv 0`$ | 非 pulse 相位无衰减项 [V] |
 
 ### 2.8.3 防锁死有效性
 
@@ -462,8 +461,8 @@ $T$ 即被重算为 $F_{\mathrm{base}}\Omega \le T_b$——与轮胎是否打滑
 ### 2.8.4 本篇结论
 
 > Ala Mobile 的 ABS **不是将滑移伺服于最大抓地力点的控制器**，
-> 而是"检测到滑动（$|\sigma| > 0.15$）即以 25 Hz 方波间歇泄压"的防锁死器。
-> 其阈值恰位于典型峰值滑移附近，但执行方式粗糙（两态方波、$k_P = 0$、无峰值反馈），
+> 而是"检测到滑动（$`|\sigma| > 0.15`$）即以 25 Hz 方波间歇泄压"的防锁死器。
+> 其阈值恰位于典型峰值滑移附近，但执行方式粗糙（两态方波、$`k_P = 0`$、无峰值反馈），
 > 叠加低速段与打滑无关的强力限压，
 > **综合抓地力冗余显著，且集中于 100 km/h 以下的制动区**。
 > 它交换的是防抱死与转向保持，而非最短制动距离。
@@ -509,31 +508,31 @@ $T$ 即被重算为 $F_{\mathrm{base}}\Omega \le T_b$——与轮胎是否打滑
 | `RoadForce` 是 ABS 唯一执行体 | [V] | `usesABS`/`pulseBrakes`/`kP`/速度因子/阈值全部在此访问 |
 | `usesABS` 为唯一 per-wheel 门控 | [V] | 全文件扫描：仅 `SettingsChanged` 写、`RoadForce` 读 |
 | `usesABS=false` 且 `playercar` → 跳过 ABS | [V] | 反汇编分支 + 实测禁用生效 |
-| 滑移阈值 0.15 硬编码 | [V] | `.rodata` 0x929A54 $= -0.15$ |
+| 滑移阈值 0.15 硬编码 | [V] | `.rodata` 0x929A54 $`= -0.15`$ |
 | `pulseBrakes` 每帧翻转（25 Hz 方波） | [V] | `eor w8, w8, #1` + `strb` |
-| pulse 相位 $\times b$ | [V] | 反汇编分支 |
-| $k_P \equiv 0$ | [V] | 全文件无写入 |
-| 速度因子 $\alpha_v = \mathrm{clamp}(\lVert v\rVert/13.89)$ | [V] | ctor 默认 13.89 / 0 |
+| pulse 相位 $`\times b`$ | [V] | 反汇编分支 |
+| $`k_P \equiv 0`$ | [V] | 全文件无写入 |
+| 速度因子 $`\alpha_v = \mathrm{clamp}(\lVert v\rVert/13.89)`$ | [V] | ctor 默认 13.89 / 0 |
 | 压力上限两段插值 | [V] | `F_base = p_0 + (2r−r²)(T_b−p_0)` |
-| $\sigma$ 为归一化滑动速度 | [V] | `SlipRatio` 反汇编 |
-| $s_{\max}$ 仅用于视觉/声音 | [V] | 全文件读者扫描 |
+| $`\sigma`$ 为归一化滑动速度 | [V] | `SlipRatio` 反汇编 |
+| $`s_{\max}`$ 仅用于视觉/声音 | [V] | 全文件读者扫描 |
 | 玩家设置链断裂 | [V] | `acceptNewValues → SetPlayerSettings →` 死字段 |
 | `abs` 默认值 0.4 | [V] | `IRDSPlayerSettings..ctor`（0x3ECCCCCD） |
 | `SettingsChanged` 触发时机 | [?] | 无直接调用者，间接调用路径未验证 |
-| $b$、`legacyLowBrakePressure*` 实际值 | [?] | Unity 序列化资产，静态分析不可得 |
+| $`b`$、`legacyLowBrakePressure*` 实际值 | [?] | Unity 序列化资产，静态分析不可得 |
 | 80（限压分母）的单位 | [?] | m/s 假设（Rigidbody.velocity 原始单位） |
 | ~~HandleABS 被内联至 carController~~ | [X] | carController 反汇编无 ABS 逻辑；HandleABS 有完整方法体、无调用者 |
 | ~~ABSSlip 为滑移率阈值~~ | [X] | 系（死设计中的）容差因子，且无读者 |
 | ~~阈值定义于 Pacejka 峰值附近（动态）~~ | [X] | 真实阈值硬编码 0.15，与轮胎曲线解耦 |
 | ~~`brakeReducerMultiplier` 渐进控制~~ | [X] | 死字段 |
-| ~~速度区间线性渐进启用 ABS~~ | [X] | 修正为 $\alpha_v$ 门控（0 / 13.89）与另一路压力限值 |
+| ~~速度区间线性渐进启用 ABS~~ | [X] | 修正为 $`\alpha_v`$ 门控（0 / 13.89）与另一路压力限值 |
 
 ## 附录 B：ABS 篇关键常数与地址表
 
 | 名称 | 值 / 地址 | 出处 |
 |---|---|---|
-| 滑移阈值 | $0.15$（`.rodata` @ 0x929A54，存储为 $-0.15$） | [V] |
-| 滑移归一化斜率 $c$ | 0.02（`.rodata` @ 0x929B70） | [V] |
+| 滑移阈值 | $`0.15`$（`.rodata` @ 0x929A54，存储为 $`-0.15`$） | [V] |
+| 滑移归一化斜率 $`c`$ | 0.02（`.rodata` @ 0x929B70） | [V] |
 | 偏置归一化除数 | 0.3（`.rodata` @ 0x929EAC） | [V] |
 | `fullAbsEnableSpeed` | 13.89 m/s（0x415E3D71，ctor @ 0x1A7DCA8） | [V] |
 | `lowAbsDisableSpeed` | 0（无写入者） | [V] |
@@ -541,4 +540,4 @@ $T$ 即被重算为 $F_{\mathrm{base}}\Omega \le T_b$——与轮胎是否打滑
 | 死设计车速门槛 | 15.0 m/s（`HandleABS` 内硬编码） | [V，死代码] |
 | `IRDSPlayerSettings.abs` 默认值 | 0.4（ctor @ 0x199DD78） | [V] |
 | 压力平滑常数 | 0.15（`.rodata` @ 0x9297B4） | [V] |
-| 角度→弧度 | $\pi/180$（`.rodata` @ 0x929A14） | [V] |
+| 角度→弧度 | $`\pi/180`$（`.rodata` @ 0x929A14） | [V] |
