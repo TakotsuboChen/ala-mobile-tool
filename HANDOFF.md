@@ -1,120 +1,108 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-08-27T21:57+08:00 · Git HEAD: `f49af03`
+生成时间: 2026-08-27T22:18+08:00 · Git HEAD: `669be92`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: `main` @ `f49af03` (2026-08-27)
-- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `f49af03`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA
+- 锚点: `main` @ `669be92` (2026-08-27)
+- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `669be92`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA
 - 待重探的 [?]: 见下方标记
-- 先读: `HANDOFF.md` + `CLAUDE.md` + `TECHNICAL_ANALYSIS.md`（§1 方法论 + §2 ABS 篇 + §3 TC/ESC 篇）+ `MODULE_ABS_NOTES.md`（ABS+TC 工程笔记）
+- 先读: `HANDOFF.md` + `CLAUDE.md` + `MODULE_ABS_NOTES.md`（ABS+TC 工程笔记，§5.2 白名单规则）+ `TECHNICAL_ANALYSIS.md`（§1 方法论 + §2 ABS + §3 TC/ESC）
 
 ## 1. 当前目标
 
-TC（牵引力控制）深度反汇编分析与技术报告**已完成并提交推送**（`TECHNICAL_ANALYSIS.md` §3 车辆动力学篇成篇）。多指触摸修复（commit `2b5997c`）**用户测试不成功**，仍是当前头号任务。
+**关 TC 误伤 AI 车已修复并实机验证通过**（白名单判定），已提交推送。头号未解任务回到**多指触摸 bug**（用户此前反馈 findPointerIndex 修复不成功）。
 
 ## 2. 已验证状态 — 工作实际停在哪
 
-- [V] **TC/ESC/转向辅助篇成篇** — `git show f49af03 --stat`（2 commits：9793120 + 4fac57e）。§3 共 12 小节 + 附录 C/D，19 Mermaid + 20 math 块，校验脚本（/tmp/abs-analysis/check_doc.py）输出"全部通过"。
-- [V] **TC 控制律闭合** — `τ' = τ·(1 − 0.85·smoothstep(clamp01(0.55W−1)))`；执行体 `TractionFilter` (0x1A64CE4)，由 `carController`+0xBC 调用；削减上限 85%、零时间常数、一挡豁免、生效区间约 3.6–79 km/h（> 22 m/s 被 `TractionControlDynamicAssist` 每帧强制关闭）。全部细节见 TECHNICAL_ANALYSIS.md §3。
-- [V] **车辆级 TC/ESC/SteerHelp 全部是活代码** — 与 ABS 的"死车辆级层"（§2.2）形成对照；三者共享 carController 管线（TractionFilter→SteerHelp→escFilter）与轮级感知（slipRatio/slipAngle 均出自 RoadForce）。
-- [V] **设置链分级结论** — ESC/SteerHelp 完整有效（`escEnable` 唯一写入者 = `SetPlayerSettings`）；TC 参数链（tcl=0.45/tclMinSpd=1.0，双字传递）有效，但 `tclEnable` 开关被每帧重算器覆写，游戏内关 TC 能否生效 [?] 待实测。
-- [V] **模块已有 TC hook** — `pedal_hook.c` 的 `proxy_traction_filter`：TC 关闭时 hook 入口直接返回原始 accel，绕过覆写陷阱；与补偿合成数学兼容（Δ=0 → τ'=τ）。README 的 TC 功能描述准确。
-- [V] **修正旧扫描脚本两个系统性 bug** — ① 地址域混用（代码段 file = VA−0x4000，旧 find_bl.py 直接拿 RVA 匹配文件偏移 → 调用扫描全错；修正后复核 HandleABS 仍零调用者，ABS 死方法结论保住）；② 浮点 ldr/str imm12 需 <<2。③ 补充双字 `ldr d0`/`stur d0` 漏报（SetPlayerSettings 双字写 TCLSlip+TCLminSPD）。已固化 MODULE_ABS_NOTES.md §4 + 持久记忆 il2cpp-arm64-scan-pitfalls。
-- [V] **持久记忆新增** — il2cpp-arm64-scan-pitfalls（三坑 + 交叉验证要求）。
-- [X] **多指触摸修复不成功** — commit `2b5997c` 的 findPointerIndex/active pointer 跟踪未解决，用户明确反馈"依然存在问题"。头号未解任务。
-- 工作区: 干净。本次 4 个切片已提交推送（9793120 工作 / 4fac57e 工作修正 / f49af03 持久文档 / 本 handoff）。
+- [V] **TC 误伤 AI 车根因与修复** — commit `74f5ee5`（`git show 74f5ee5 --stat`）。根因：`proxy_traction_filter` 用 `is_player_controller`（0x108 字段探测）做拦截判定，AI 车该字段可能非空 → 关 TC 时 19 辆 AI 的 `TractionFilter` 一并被跳过 → AI 失去 TC 保护打滑失控。`TractionFilter` 是每车每物理帧必经路径，误判必现。
+- [V] **修复方案：拦截类 hook 一律白名单比对** — 新增 `is_target_player_car()`（`this == g_player_controller`，由只挂玩家车的 `IRDSPlayerControls.Update` 设置）。改动四处：`proxy_traction_filter`（主修）、`proxy_car_controller`、`proxy_handle_abs`、`proxy_fixed_update` ABS 块（同根因 ABS 波及面顺带修）；`pedal_uninstall_hooks` 补清 `g_player_controller`。`proxy_player_controls_update` 不改——写入目标由组件挂载天然保证。
+- [V] **实机验证通过** — 用户实测：关 TC 后 AI 正常跑（"AI 都正常跑了"），玩家车 TC 关闭仍生效。
+- [V] **构建/安装链** — `./gradlew :app:assembleRelease -q` → 成功（APK 22:10 产出）；`adb install -r` → Success；`dumpsys package tools.alamobile.mod` lastUpdateTime 22:11:35。
+- [V] **ABS 开关同样不再影响 AI** — 与 TC 同根因，本次一并白名单化；层 3（`proxy_player_controls_update`）写入目标由组件挂载结构保证，保持原判据。
+- [V] **长期约定已入 CLAUDE.md** — commit `669be92`：拦截类 hook 必须白名单判定，禁用 `is_player_controller` 做拦截（Key Code Conventions 新条目）。
+- [V] **工程笔记同步** — MODULE_ABS_NOTES.md §5.2（白名单规则 + 踩坑记录替换"天然豁免"错误断言）、§1 层 1 代码引用更新。
+- 工作区: 干净（仅 `.handoffs/20260827221758-handoff.md` 未跟踪，随本 handoff 提交）。
 
 ### 验证输出（本次交接 run）
 ```
-python3 /tmp/abs-analysis/check_doc.py → 退出码 0 → "全部通过"
-（公式内中文/表格裸竖线/跨行行内公式/operatorname 四类检查）
-git push → 4216a65..f49af03 main → main
+git push → 2625b44..74f5ee5（工作切片）→ 74f5ee5..669be92（CLAUDE.md）→ main
+实机测试（用户）: 关 TC → AI 正常 + 玩家车 TC 关闭生效 → 通过
 ```
 
 ## 3. 决策与理由
 
-- **TC 篇取号 §3（追加式）** [V]——ABS 是 §2，TC/ESC 成篇取下一个可用编号；空气动力学仍是占位不占号。否决：预写死编号——用户明确要求顺序随内容动态联动。
-- **TC 篇含 ESC/SteerHelp** [V]——三者共享 carController 管线与感知字段（SteerHelp 写 driftAngle、escFilter 读），拆开写会丢失管线级结论；正好填满篇章标题"TC / ESC / 转向辅助"。
-- **工程笔记补 proxy_traction_filter 对齐** [V]——发现模块既有 TC hook 后，把 §5.2 的"理论路径"改为"现行实现 + 原理注解"，避免下会话误以为关 TC 是未做功能。
-- **"设置链有效"分级表述** [V]——ESC/SteerHelp 无保留成立；TC 开关位标 [?]（覆写事实 [V]、最终效果未实测）。不把未实测结论写成事实。
+- **拦截类 hook 一律白名单实例比对** [V]——AI 车误判实证（实测 AI 失误率暴增）。否决：继续用 `is_player_controller` 并加固探测——字段探测无法杜绝误报，白名单来源已实机验证。
+- **ABS 波及面顺带修复** [V]——与 TC 同一根因、同一判定函数，不修则用户关 ABS 测试又是一轮往返。否决：只修用户报告的 TC——同类 bug 零容忍，单点修复会重演"修复不成功"往返。
+- **`proxy_player_controls_update` 判据不改** [V]——写入目标 `car_inputs` 来自只挂玩家车的组件，结构保证强于字段探测。否决：统一白名单——无增益。
+- **`proxy_fixed_update` 的 `hide_pedals_tick` 留在宽松判定内** [V]——计时赛 `PlayerControls.Update` 可能 2s 才一次，隐藏踏板依赖 FixedUpdate 50Hz 路径，换白名单会在加载早期破坏隐藏。
+- **白名单加载早期为 NULL 的代价可接受** [V]——`IRDSPlayerControls.Update` 首跑前玩家车短暂保持默认 TC/ABS（约一个物理帧 20ms），不可感知；换来 AI 绝对不被波及。
 
 ## 4. 失败的尝试 — 不要再试
 
 > 全部前向搬运，永不丢弃。完整历史见 `.handoffs/` 目录。
 
-### 本次会话新增（TC 分析）
-- [X] 全 so bl/b 调用扫描直接拿 dump.cs 的 RVA 匹配 `文件偏移 + imm×4` → 系统性零命中。代码段文件偏移 = VA − 0x4000，必须换算同一地址域。修正后 HandleABS 仍零调用者（ABS 死方法结论靠 proxy hook 无日志交叉验证保住，但扫描本身当时是错的）。
-- [X] 浮点 ldr/str 的 imm12 直接当偏移 → 大量误报（imm12=0x34 实为偏移 0xD0 = inputClutch）。实际偏移 = imm12 << 2；ldrb/strb scale=1 不受影响。
-- [X] 单 float 偏移扫描漏报双字拷贝 → 差点误判"TC 设置链断裂"。SetPlayerSettings 用 `ldr d0`/`stur d0` 一条指令写 TCLSlip+TCLminSPD 两个 float。
-- [X] "TractionControlDynamicAssist 是 AI 车的 TCL 管理器" → 调用点（carModifier.Update+0xAC）之前有 playercar (0x9C) 门控，仅玩家车每帧执行，AI 车不经过。修正见 §3.10。
-- [X] "TC 设置链无保留完整有效" → tclEnable 有 3 处每帧覆写（TractionControlDynamicAssist），开关位被重算；参数链（TCLSlip/TCLminSPD）有效。
-- [X] "escFilter 制动量与侧偏角 β 成正比" → 实为 min(escFactor, 2000/BFT)，β 只做触发判据；escFactor 是强度上限。
-- [X] "IRDSPlayerControls.tractionControl (0x38) 驱动油门斜率调制" → 死字段（全类零读者）；真实斜率调制在 CarControllerMobile 直接比较 drivetrain.slipRatio (0xCC) ≥ 0.2。
-- [X] math 公式内放中文（\text{默认}/\text{释放斜率}/\text{度}/\max_{\text{驱动轮}}）→ KaTeX 坑，改 \mathrm{}/\text{英文} 或移出公式。已固化持久记忆。
-- [X] 表格单元格内行内公式放裸竖线（max(|a|,|b|)）→ 破坏表格列解析，改 \lvert\rvert。
-- [X] 行内公式 $`...`$ 跨行 → GitHub 不渲染，合并单行。
-- [X] 行内公式反引号误写为 \`（反斜杠+反引号，13 处）→ $`..`$ 配对破坏（179≠192），sed 全局修复后 192=192。
+### 本次会话新增（TC 误伤 AI）
+- [X] "AI 车经 `is_player_controller` 过滤天然豁免"（旧 HANDOFF/工程笔记原断言）→ 证伪：AI 车的 `playerControls` (0x108) 可能非空，关 TC 时 AI 全体被误拦。修正：拦截类 hook 一律白名单（`is_target_player_car`），已固化 CLAUDE.md + MODULE_ABS_NOTES §5.2。
+- [X] "油门修复成功说明 `is_player_controller` 判据可靠" → 证伪：setter 路径 AI 未必经过，误判不可观测；`TractionFilter` 是每车必经路径才暴露。判据可靠与否要看调用面是否全量覆盖。
 
 ### 从旧 HANDOFF 搬运
-- [X] "HandleABS 被内联到 carController"推断方式 → 证伪：hook 无日志 ≠ 被内联，可能是死方法。判断方法死活须做全 so bl/b 目标解码扫描（且注意地址域换算）。
-- [X] 只修 operatorname 宏白名单 → 根因是 Markdown 预处理破坏 $..$ 内的下划线/花括号，与宏白名单是两层独立防线。行内 $`..`$、块 ```math。
-- [X] 把"当前正在写的篇章"当成"文档全部范围" → TECHNICAL_ANALYSIS.md 是全引擎多篇章文档，编号追加式。
-- [V] 只写 absEnable=false 不写 per-wheel usesABS=false → ABS 仍工作——唯一有效门控是 per-wheel usesABS。
-- [V] 后台 pthread 调 Unity API / 主线程 Handler.postDelayed 调 il2cpp_runtime_invoke / 直接调 SetActive RVA + NULL MethodInfo* → 崩溃。不要再试。
-- [V] dlopen("libil2cpp.so") → LSPosed 独立 linker namespace 失败，改用 ELF 符号查找。
+- [X] 全 so bl/b 调用扫描直接拿 dump.cs 的 RVA 匹配文件偏移 → 地址域混用系统性零命中（代码段 file = VA−0x4000）；浮点 imm12 需 <<2；双字 `ldr d0`/`stur d0` 拷贝漏报。三坑已固化 MODULE_ABS_NOTES §4。
+- [X] "TractionControlDynamicAssist 是 AI 车的 TCL 管理器" → 仅玩家车每帧执行（playercar 0x9C 门控）。
+- [X] "escFilter 制动量与侧偏角 β 成正比" → 实为 min(escFactor, 2000/BFT)，β 只做触发判据。
+- [X] "IRDSPlayerControls.tractionControl (0x38) 驱动油门斜率调制" → 死字段；真实调制在 CarControllerMobile 直接比较 slipRatio ≥ 0.2。
+- [X] math 公式内放中文 / 表格内裸竖线 / 行内公式跨行 / 反引号误写 \` → GitHub 渲染坑，已固化持久记忆。
+- [X] "HandleABS 被内联到 carController"推断方式 → hook 无日志 ≠ 被内联，可能死方法；死活判定须全 so bl/b 扫描（注意地址域）。
+- [X] 只修 operatorname 宏白名单 → 根因是 Markdown 预处理破坏 $..$ 内下划线/花括号，两层独立防线。
+- [X] 把"当前正在写的篇章"当成"文档全部范围" → TECHNICAL_ANALYSIS.md 是多篇章追加式。
+- [V] 只写 absEnable=false 不写 per-wheel usesABS=false → ABS 仍工作；唯一有效门控是 per-wheel usesABS。
+- [V] 后台 pthread 调 Unity API / 主线程 Handler.postDelayed 调 il2cpp_runtime_invoke / 直接调 SetActive RVA + NULL MethodInfo* → 崩溃。
+- [V] dlopen("libil2cpp.so") → LSPosed namespace 失败，改 ELF 符号查找。
 - [V] Component.get_gameObject() RVA 直接调用 → 返回 this 非 GameObject。
-- [V] Transform.Find via il2cpp_runtime_invoke / 直接调 RVA + NULL MethodInfo* → 崩溃/不稳定。
-- [V] GameObject.Find 作为唯一路径 → 重新开始后返回 NULL。
-- [V] 递归遍历每帧执行 / + GameObject.Find 双路径每帧 → 卡顿 / 误隐藏按键。
+- [V] Transform.Find via invoke / GameObject.Find 唯一路径 / 递归遍历每帧 → 崩溃/NULL/卡顿。
 - [V] proxy_fixed_update is_player 块外调 hide_pedals_tick → 重新开始后 is_player 返回 false。
 - [?] event.rawY 不做 active pointer 跟踪 → 多指漂移。findPointerIndex 修复用户测试不成功，需重新排查。
 - [V] Path.op(INTERSECT)/(DIFFERENCE) → 圆角缝隙/弧线折角。
-- [V] alphaOf(ratio)=ratio*255 语义反 / borderPaint 用 WHITE 不读 alpha / drawRoundRect 边框不内缩 / clipPath 裁到 (0,0,w,h) → 绘制类坑。
+- [V] alphaOf 语义反 / borderPaint 不读 alpha / drawRoundRect 边框不内缩 / clipPath 裁到 (0,0,w,h) → 绘制坑。
 - [V] LAST_TOUCHED 每次 MOVE 更新 → 先按的手指微动夺回优先。
 - [V] adb install -r 覆盖安装时旧版运行 → force-stop 再安装。
-- [V] awaitLsposedSettled → NPatch 太慢；等"非 Connecting" → App 1.5s 兜底；等 Connected 5s 超时 → NPatch binder 先到；NONROOT 立即写缓存 → LSPosed 后到补不上。
-- [V] clearAll 调 App.clearService() / 保留 onResume 重新检测 / onServiceDied 不检查身份 / 去掉 evaluate() service 检查 / onServiceBind 不区分框架 / 弹窗并行 / hasShownDialog 只弹一次 → 激活检测各类坑，均已修。
-- [V] kkgithub.com 404 / mirror.ghproxy.com DNS 失败 → 用 gh-proxy.com。
+- [V] awaitLsposedSettled → NPatch 太慢；等"非 Connecting" 1.5s 兜底 / 等 Connected 5s 超时 → NPatch binder 先到；NONROOT 立即写缓存 → LSPosed 后到补不上。
+- [V] 激活检测各坑（clearAll 调 clearService / onResume 重新检测 / onServiceDied 不查身份 / 不分框架 / 弹窗并行 / 只弹一次）→ 均已修。
+- [V] kkgithub 404 / mirror.ghproxy DNS 失败 → gh-proxy.com。
 - [V] CHUNK_SIZE=256K → TransactionTooLargeException / ANR。
 - [V] 手动 rememberNavigationEventDispatcherOwner → 弹窗收不到返回键。
 - [V] LSPosed 下 ContentProvider IPC / Remote Preferences commit() → Unknown authority / UnsupportedOperationException。
 
 ## 5. 已知坑
 
-- ⚠️ 多指触摸修复不成功 [V]——findPointerIndex 修复后仍存在踏板值漂移，需重新排查根因（头号任务）。
-- ⚠️ TC 开关位被每帧重算 [V]——`tclEnable` 被 TractionControlDynamicAssist（仅玩家车）覆写：每帧先置 true，高速 > 22 m/s 或条件 A 时置 false。模块关 TC 已用正确路径（hook TractionFilter 入口），但"游戏内设置关 TC 是否生效"未实测 [?]。
-- ⚠️ 游戏内 ABS 设置对物理无效 [V]——设置链终点死字段（absEnable 无运行时读者），模块才有真开关。
-- ⚠️ .rodata 常数不可直接改 [V]——TC 补偿系数 −0.85 (0x929E7C)、ABS 阈值 0.15 (0x929A54) 均在只读段。
-- ⚠️ flyme 后台白名单限制 [?]——非白名单应用 checkAllowBackgroundLocked 返回 DISABLED。
-- ⚠️ miuix TopAppBar spring 不跟随 fraction / 内部自带状态栏 inset [?]。
-- ⚠️ 广播 JSON 不含 position 字段 [?]——从本地 externalFilesDir 合并。
-- ⚠️ miuix 无 LinearProgressIndicator [?]——用 Text 显示百分比。
-- ⚠️ lint NewApi 拦 minSdk 26 下高版本 API [?]——照搬 KernelSU 注意 minSdk 差异。
-- ⚠️ OffsetTable.AUDIO_SOURCE_SET_VOLUME 实为 TweenVolume.set_volume [?]——introSound 用真 AudioSource.set_volume。
-- ⚠️ 计时赛 IRDSUIMobileControls 初始化比正赛晚 ~2s [V]；计时赛重新开始后 proxy_player_controls_update 每 ~2s 才调用一次 [V]。
-- ⚠️ LSPosed 下 Remote Preferences/Files 在 Hook 进程只读 [V]；游戏进程对模块包不可见 [V]——用 setComponent 显式组件广播。
-- ⚠️ BillingHook 在 NPatch 模式下永远失败 [V]——解锁靠 native hook。
-- ⚠️ GitHub 公式/Mermaid 渲染坑 [V]——已全部修复并固化持久记忆；再写带公式/图表的 GitHub 文档前先读 github-math-rendering-pitfalls、mermaid-chart-pitfalls。
-- ⚠️ IL2CPP ARM64 扫描三坑 [V]——地址域混用、浮点 imm12 缩放、双字拷贝；已固化 MODULE_ABS_NOTES.md §4 + 持久记忆 il2cpp-arm64-scan-pitfalls；死方法结论必须双证据交叉验证。
+- ⚠️ 多指触摸修复不成功 [V]——findPointerIndex 修复后仍存在踏板值漂移（用户反馈），头号任务，需重新复现+抓 logcat。
+- ⚠️ TC 开关位被每帧重算 [V]——`tclEnable` 被 TractionControlDynamicAssist 覆写；模块已用正确路径（hook TractionFilter 入口，白名单）实测生效。"游戏内设置关 TC 是否生效"仍未实测 [?]。
+- ⚠️ 游戏内 ABS 设置对物理无效 [V]——设置链终点死字段，模块才有真开关。
+- ⚠️ is_player_controller 判据边界 [V]——只可用于 setter 透传宽松过滤与野指针二次校验；拦截类 hook 必须白名单（CLAUDE.md 已立约）。
+- ⚠️ .rodata 常数不可直接改 [V]——TC 补偿系数 −0.85 (0x929E7C)、ABS 阈值 0.15 (0x929A54) 在只读段。
+- ⚠️ 计时赛 IRDSUIMobileControls 初始化比正赛晚 ~2s [V]；重新开始后 proxy_player_controls_update 每 ~2s 才一次 [V]。
+- ⚠️ LSPosed 下 Remote Preferences/Files 在 Hook 进程只读 [V]；游戏进程对模块包不可见 [V]——用 setComponent 显式广播。
+- ⚠️ BillingHook 在 NPatch 模式永远失败 [V]——解锁靠 native hook。
+- ⚠️ flyme 后台白名单限制 [?]；miuix TopAppBar spring 不跟随 fraction [?]；广播 JSON 不含 position 字段 [?]（从本地合并）；miuix 无 LinearProgressIndicator [?]；lint NewApi 拦 minSdk 26 下高版本 API [?]；OffsetTable.AUDIO_SOURCE_SET_VOLUME 实为 TweenVolume.set_volume [?]。
+- ⚠️ GitHub 公式/Mermaid 渲染坑 [V]——写公式/图表文档前先读持久记忆 github-math-rendering-pitfalls、mermaid-chart-pitfalls。
+- ⚠️ IL2CPP ARM64 扫描三坑 [V]——死方法结论必须双证据交叉验证（MODULE_ABS_NOTES §4 + 持久记忆）。
 
 ## 6. 下一步（有序）
 
-1. **重新排查多指触摸 bug** — 用户明确反馈 active pointer 跟踪修复不成功。需重新复现问题、抓 logcat、分析实际 pointer 行为（PedalOverlayView）。
-2. **实测验证游戏内 TC 开关** [?] — §3.7 存疑项：enableTCL 被 TractionControlDynamicAssist 每帧覆写，游戏内关 TC 是否真实生效需实机确认；顺带实测 TC 参数（tcl 0.45）调整手感。
-3. **计时赛延迟优化（可选）** — 当前 0.5s 延迟可接受但不够好。
-4. **真机验证 NPatch 未安装路径** — 未装 NPatch 点卡片弹 Toast 路径仍未验证。
-5. **清理 ConfigProvider 无用代码** — pushGameLog/readGameLog 已被广播方案替代。
-6. **全量替换裸 `Log.*` 为 `Logger.*`**
-7. **继续排查 janky 根因** — R8 映射文件对比。
-8. **正规化 carController offset** — 当前固定偏移 0xA8，可改配置传递。
-9. **V10 第二阶段（可选）** — 游戏内引擎声浪。
-10. **ABS 增强功能（可选）** — 见 MODULE_ABS_NOTES.md §2：ABS 强度旋钮、ABS 灯（读 pulseBrakes）、per-wheel 选择性 ABS。
-11. **技术解析后续篇章（可选）** — 空气动力学与 DRS（下一个可用编号 §4）/ 传动与多线程轮子物理（占位见 TECHNICAL_ANALYSIS.md，编号追加式）。
+1. **重新排查多指触摸 bug**（头号）——用户此前反馈 findPointerIndex / active pointer 跟踪修复不成功。先向用户确认具体现象（漂移？跳变？哪块 overlay？），再抓 logcat 复现分析（PedalOverlayView）。
+2. **实测游戏内 TC 设置开关** [?]——§3.7 存疑：enableTCL 被每帧覆写，游戏内关 TC 是否生效需实机确认（模块路径已实测生效，此项只关游戏自带设置）。
+3. 计时赛延迟优化（可选）——当前 0.5s 延迟可接受。
+4. 真机验证 NPatch 未安装路径（未装时点卡片弹 Toast）。
+5. 清理 ConfigProvider 无用代码（pushGameLog/readGameLog 已被广播替代）。
+6. 全量替换裸 `Log.*` 为 `Logger.*`。
+7. 排查 janky 根因（R8 映射文件对比）。
+8. 正规化 carController offset（固定 0xA8 → 配置传递）。
+9. V10 第二阶段（可选）——游戏内引擎声浪。
+10. ABS 增强（可选）——强度旋钮、ABS 灯（读 pulseBrakes）、per-wheel 选择性 ABS（MODULE_ABS_NOTES §2）。
+11. 技术解析后续篇章（可选）——空气动力学与 DRS（§4）/ 传动与多线程轮子物理（编号追加式）。
 
 ## 7. 留给用户的开放问题
 
-- 多指触摸 bug 的实际复现条件和根因是什么？用户说"依然存在问题"但未描述具体现象。
-- 游戏内 TC 开关实际能否关掉 TC？（tclEnable 覆写链的实测）用户是否需要"TC 强度调节"功能（游戏设置链已通，模块增益有限）？
-- 计时赛 0.5s 延迟是否需要进一步优化？
-- V10 游戏内引擎声浪是否继续实现？
+- 多指触摸 bug 的具体现象与复现条件？（单手双指？踏板+挡位同按？值漂移还是跳变？）
+- 用户是否需要"TC 强度调节"功能（游戏设置链已通，模块增益有限）？
+- 计时赛 0.5s 延迟是否需进一步优化？V10 游戏内声浪是否继续？
