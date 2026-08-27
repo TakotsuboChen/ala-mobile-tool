@@ -265,9 +265,12 @@ static void proxy_set_brake(void *this, float value) {
     }
 }
 
+// 透传 hook：proxy 只把调用转给 orig，无行为改写。挂在所有车的
+// shiftUp/shiftDown 上（AI 车换挡也经过），任何这里的 LOGI 都会造成
+// 日志洪水（实测 21 分钟 18810 条，enableManualShift=false 时同样打），
+// 并淹没其他诊断日志——保持无日志纯透传。
 static void proxy_shift_up(void *this) {
     typedef void (*orig_t)(void *);
-    LOGI("proxy_shift_up called");
     if (g_shift_up_orig != NULL) {
         ((orig_t) g_shift_up_orig)(this);
     }
@@ -275,7 +278,6 @@ static void proxy_shift_up(void *this) {
 
 static void proxy_shift_down(void *this) {
     typedef void (*orig_t)(void *);
-    LOGI("proxy_shift_down called");
     if (g_shift_down_orig != NULL) {
         ((orig_t) g_shift_down_orig)(this);
     }
