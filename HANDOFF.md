@@ -1,50 +1,63 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-08-27T22:18+08:00 · Git HEAD: `669be92`
+生成时间: 2026-08-27T23:28+08:00 · Git HEAD: `f858cc3`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: `main` @ `669be92` (2026-08-27)
-- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `669be92`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA
+- 锚点: `main` @ `f858cc3` (2026-08-27)
+- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `f858cc3`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA
 - 待重探的 [?]: 见下方标记
-- 先读: `HANDOFF.md` + `CLAUDE.md` + `MODULE_ABS_NOTES.md`（ABS+TC 工程笔记，§5.2 白名单规则）+ `TECHNICAL_ANALYSIS.md`（§1 方法论 + §2 ABS + §3 TC/ESC）
+- 先读: `HANDOFF.md` 全文 + `CLAUDE.md`（Key Code Conventions 两条 hook 约定）+ §2 的现象描述（用户原话，上次丢过一次，禁止再丢）
 
 ## 1. 当前目标
 
-**关 TC 误伤 AI 车已修复并实机验证通过**（白名单判定），已提交推送。头号未解任务回到**多指触摸 bug**（用户此前反馈 findPointerIndex 修复不成功）。
+**多指触摸 bug（头号任务）已进入"插桩完毕、等用户复现回传日志"状态**。本会话完成诊断插桩 + 删日志洪水，未再改任何修复逻辑——等数据，不盲修。
 
-## 2. 已验证状态 — 工作实际停在哪
+## 2. 用户补充的现象（用户原话，勿再丢失）
 
-- [V] **TC 误伤 AI 车根因与修复** — commit `74f5ee5`（`git show 74f5ee5 --stat`）。根因：`proxy_traction_filter` 用 `is_player_controller`（0x108 字段探测）做拦截判定，AI 车该字段可能非空 → 关 TC 时 19 辆 AI 的 `TractionFilter` 一并被跳过 → AI 失去 TC 保护打滑失控。`TractionFilter` 是每车每物理帧必经路径，误判必现。
-- [V] **修复方案：拦截类 hook 一律白名单比对** — 新增 `is_target_player_car()`（`this == g_player_controller`，由只挂玩家车的 `IRDSPlayerControls.Update` 设置）。改动四处：`proxy_traction_filter`（主修）、`proxy_car_controller`、`proxy_handle_abs`、`proxy_fixed_update` ABS 块（同根因 ABS 波及面顺带修）；`pedal_uninstall_hooks` 补清 `g_player_controller`。`proxy_player_controls_update` 不改——写入目标由组件挂载天然保证。
-- [V] **实机验证通过** — 用户实测：关 TC 后 AI 正常跑（"AI 都正常跑了"），玩家车 TC 关闭仍生效。
-- [V] **构建/安装链** — `./gradlew :app:assembleRelease -q` → 成功（APK 22:10 产出）；`adb install -r` → Success；`dumpsys package tools.alamobile.mod` lastUpdateTime 22:11:35。
-- [V] **ABS 开关同样不再影响 AI** — 与 TC 同根因，本次一并白名单化；层 3（`proxy_player_controls_update`）写入目标由组件挂载结构保证，保持原判据。
-- [V] **长期约定已入 CLAUDE.md** — commit `669be92`：拦截类 hook 必须白名单判定，禁用 `is_player_controller` 做拦截（Key Code Conventions 新条目）。
-- [V] **工程笔记同步** — MODULE_ABS_NOTES.md §5.2（白名单规则 + 踩坑记录替换"天然豁免"错误断言）、§1 层 1 代码引用更新。
-- 工作区: 干净（仅 `.handoffs/20260827221758-handoff.md` 未跟踪，随本 handoff 提交）。
+> 一只手按着踏板，另一只手点屏幕上别的空白处，**行程填充就会漂到 100%**，**反复点空白处就反复抽搐**。
+
+- 环境：**共存版（NPatch）**，pairip 壳确认存在（log 有 `com.pairip.application.Application@6af64a2`）[V]
+- **SINGLE 和 DUAL 两种模式都漂**（用户 AskUserQuestion 确认）
+- findPointerIndex 修复（`2b5997c`，8月26 21:50）后实测不成功：用户 8月26 22:27 会话复现（上一会话 handoff `a01a6ec` §5 记录的结论 [?]——修复版是否已装入 22:27 会话的 APK 无直接证据，但时间上来得及且上会话已与用户确认）
+- 用户上一轮发的 log：`/mnt/d/Downloads/ala_tool_log_20260826_223006.txt`（23957 行）/ `ala_tool_log_20260826_223333.txt`（17597 行），Windows 原路径 `D:\Downloads\`
+
+## 2b. 已验证状态 — 工作实际停在哪
+
+- [V] **两个 log 里没有触摸数据**——PedalOverlayView 当时无任何日志输出（grep "pedal" 全是 `pedalMode=` 配置行）；native 段只有 `proxy_shift_up called`（18810 条，8月26 中午 12:51–13:12 会话，`enableManualShift=false` 也打）；8月26 22:27 复现会话（pid=24030，SINGLE+enableTc）连 native 日志都没有。**这批 log 对触摸 bug 零价值，诊断必须先插桩再复现。**
+- [V] **onTouchEvent 静态审查自洽**——id 跟踪 + findPointerIndex 实现无 bug；穷举推演（事件流重排 / ViewGroup split / rawY 语义 / pairip relayout / 游戏原生按钮 / native active 语义）无一条能自洽产生"点空白→100%"。根因在"id 跟踪正确"假设覆盖不到处。
+- [V] **native active 语义是真实存在的抽搐链**——`pedal_set_throttle_value(0)` 清 `g_throttle_active`（pedal_hook.c:815-840）→ FixedUpdate hook 停止每帧覆写 → **游戏原生输入接管油门**；指 A 下次 MOVE 又夺回。任何意外 reset 都触发此链。是否是当前根因待日志裁决。
+- [V] **overlay 架构事实**——overlay 是 addView 进游戏 decorView 的 `android.R.id.content`（非独立 window，OverlayManager.kt:84）；同 window 内 ViewGroup split 分发，每个 view 只收自己 pointer 的事件。
+- [V] **触摸诊断插桩已落地**（commit `18c8d87`）——DOWN 打布局对比（getLocationOnScreen vs 配置 topPx/cfgH，证伪/证实 pairip relayout）；POINTER_DOWN/UP/UP/CANCEL 全打带决策；MOVE 节流（t 变化>2% 或 500ms 心跳）记 rawY→relY→t→raw/mapped 值链；findPointerIndex==-1 无条件打。走 logEnabled 门控。
+- [V] **日志洪水已修**（commit `e3d9815`）——proxy_shift_up/down 的 LOGI 删除，纯透传保留。
+- [V] **构建通过**——`./gradlew :app:assembleRelease` → `app/build/outputs/apk/release/app-release.apk`（8月27 22:35，10429601 字节）。adb 设备 381QYFCN22B9A offline，安装由用户执行。
+- [V] **透传 hook 无日志约定已入 CLAUDE.md**（commit `f858cc3`，Key Code Conventions）。
+- 工作区: 干净（仅 `.handoffs/20260827232800-handoff.md` 未跟踪，随本 handoff 提交）。
 
 ### 验证输出（本次交接 run）
 ```
-git push → 2625b44..74f5ee5（工作切片）→ 74f5ee5..669be92（CLAUDE.md）→ main
-实机测试（用户）: 关 TC → AI 正常 + 玩家车 TC 关闭生效 → 通过
+git log --oneline -5 → f858cc3(docs) 18c8d87(feat 插桩) e3d9815(fix 洪水) a01a6ec(docs handoff) 669be92(docs)
+git push × 3 → a01a6ec..f858cc3 main
+./gradlew :app:assembleRelease -q → 退出码 0，APK 22:35 产出
 ```
 
 ## 3. 决策与理由
 
-- **拦截类 hook 一律白名单实例比对** [V]——AI 车误判实证（实测 AI 失误率暴增）。否决：继续用 `is_player_controller` 并加固探测——字段探测无法杜绝误报，白名单来源已实机验证。
-- **ABS 波及面顺带修复** [V]——与 TC 同一根因、同一判定函数，不修则用户关 ABS 测试又是一轮往返。否决：只修用户报告的 TC——同类 bug 零容忍，单点修复会重演"修复不成功"往返。
-- **`proxy_player_controls_update` 判据不改** [V]——写入目标 `car_inputs` 来自只挂玩家车的组件，结构保证强于字段探测。否决：统一白名单——无增益。
-- **`proxy_fixed_update` 的 `hide_pedals_tick` 留在宽松判定内** [V]——计时赛 `PlayerControls.Update` 可能 2s 才一次，隐藏踏板依赖 FixedUpdate 50Hz 路径，换白名单会在加载早期破坏隐藏。
-- **白名单加载早期为 NULL 的代价可接受** [V]——`IRDSPlayerControls.Update` 首跑前玩家车短暂保持默认 TC/ABS（约一个物理帧 20ms），不可感知；换来 AI 绝对不被波及。
+- **不再盲修，插桩拿数据** [V]——id 跟踪修复已失败一次（用户实测复现），本会话穷举静态推演到极限无解。否决：继续猜根因改代码——每次盲修都是一轮低效往返（用户原话："一来一回不能现场调试效率就是这么低"）。
+- **MOVE 日志节流用值变化+时间双条件** [V]——>2% 行程或 500ms 心跳。否决：每条 MOVE 都打——60Hz 事件会重演日志洪水；心跳保留"手指没动值在变"的竞态侦测。
+- **proxy_shift_up/down 保留 hook 只删日志** [V]——hook 卸载后若用户游戏内切配置开手动挡，hook 不重装 → 挡位失效。否决：按 enableManualShift 条件装 hook——状态同步复杂度不值。
+- **native `g_throttle_active` 语义暂不改** [V]——改成"踏板开启期间每帧写（写 0 也写）"是候选修复，但未经日志证实是根因，且改动涉及 Java→native 开关传递，风险面大。等数据。
+- **插桩只加在 PedalOverlayView** [V]——GearShiftView 只处理 DOWN（点击换挡）无多指跟踪；用户现象聚焦踏板填充。
 
 ## 4. 失败的尝试 — 不要再试
 
 > 全部前向搬运，永不丢弃。完整历史见 `.handoffs/` 目录。
 
-### 本次会话新增（TC 误伤 AI）
-- [X] "AI 车经 `is_player_controller` 过滤天然豁免"（旧 HANDOFF/工程笔记原断言）→ 证伪：AI 车的 `playerControls` (0x108) 可能非空，关 TC 时 AI 全体被误拦。修正：拦截类 hook 一律白名单（`is_target_player_car`），已固化 CLAUDE.md + MODULE_ABS_NOTES §5.2。
-- [X] "油门修复成功说明 `is_player_controller` 判据可靠" → 证伪：setter 路径 AI 未必经过，误判不可观测；`TractionFilter` 是每车必经路径才暴露。判据可靠与否要看调用面是否全量覆盖。
+### 本次会话新增（触摸 bug）
+- [X] "id 跟踪 + findPointerIndex 能修多指漂移" → 修复 `2b5997c` 后用户实测仍复现（8月26 22:27 会话）。**不要再提同类 index/id 层修复**——根因不在此层。
+- [X] "静态审查能定位触摸根因" → 本会话穷举六类机制推演全部无法自洽产生现象 [V]。下一步必须走日志数据。
+- [X] "用户发来的 log 里能找到触摸现场" → 修复前版本无插桩，log 里触摸数据为零 [V]。让用户复现前必须先装插桩版。
+- [X] "proxy_shift_up 打日志无副作用" → 挂所有车 + enableManualShift=false 也打，21 分钟 18810 条洪水（pedal_hook.c 旧代码）[V]。已修，透传 hook 禁止无差别 LOGI 已入 CLAUDE.md。
 
 ### 从旧 HANDOFF 搬运
 - [X] 全 so bl/b 调用扫描直接拿 dump.cs 的 RVA 匹配文件偏移 → 地址域混用系统性零命中（代码段 file = VA−0x4000）；浮点 imm12 需 <<2；双字 `ldr d0`/`stur d0` 拷贝漏报。三坑已固化 MODULE_ABS_NOTES §4。
@@ -55,13 +68,14 @@ git push → 2625b44..74f5ee5（工作切片）→ 74f5ee5..669be92（CLAUDE.md�
 - [X] "HandleABS 被内联到 carController"推断方式 → hook 无日志 ≠ 被内联，可能死方法；死活判定须全 so bl/b 扫描（注意地址域）。
 - [X] 只修 operatorname 宏白名单 → 根因是 Markdown 预处理破坏 $..$ 内下划线/花括号，两层独立防线。
 - [X] 把"当前正在写的篇章"当成"文档全部范围" → TECHNICAL_ANALYSIS.md 是多篇章追加式。
+- [X] "AI 车经 is_player_controller 过滤天然豁免" → AI 车 playerControls (0x108) 可能非空，关 TC 时 AI 全体被误拦；拦截类 hook 一律白名单（is_target_player_car），已固化 CLAUDE.md + MODULE_ABS_NOTES §5.2。
+- [X] "油门修复成功说明 is_player_controller 判据可靠" → setter 路径 AI 未必经过；判据可靠与否看调用面是否全量覆盖。
 - [V] 只写 absEnable=false 不写 per-wheel usesABS=false → ABS 仍工作；唯一有效门控是 per-wheel usesABS。
 - [V] 后台 pthread 调 Unity API / 主线程 Handler.postDelayed 调 il2cpp_runtime_invoke / 直接调 SetActive RVA + NULL MethodInfo* → 崩溃。
 - [V] dlopen("libil2cpp.so") → LSPosed namespace 失败，改 ELF 符号查找。
 - [V] Component.get_gameObject() RVA 直接调用 → 返回 this 非 GameObject。
 - [V] Transform.Find via invoke / GameObject.Find 唯一路径 / 递归遍历每帧 → 崩溃/NULL/卡顿。
 - [V] proxy_fixed_update is_player 块外调 hide_pedals_tick → 重新开始后 is_player 返回 false。
-- [?] event.rawY 不做 active pointer 跟踪 → 多指漂移。findPointerIndex 修复用户测试不成功，需重新排查。
 - [V] Path.op(INTERSECT)/(DIFFERENCE) → 圆角缝隙/弧线折角。
 - [V] alphaOf 语义反 / borderPaint 不读 alpha / drawRoundRect 边框不内缩 / clipPath 裁到 (0,0,w,h) → 绘制坑。
 - [V] LAST_TOUCHED 每次 MOVE 更新 → 先按的手指微动夺回优先。
@@ -75,7 +89,7 @@ git push → 2625b44..74f5ee5（工作切片）→ 74f5ee5..669be92（CLAUDE.md�
 
 ## 5. 已知坑
 
-- ⚠️ 多指触摸修复不成功 [V]——findPointerIndex 修复后仍存在踏板值漂移（用户反馈），头号任务，需重新复现+抓 logcat。
+- ⚠️ **多指触摸 bug 未解** [V]——现象见 §2（用户原话）。插桩已就位，等复现日志。三个候选根因待裁决：(a) 意外事件（DOWN/CANCEL 重排）(b) 坐标混入他指 (c) pairip relayout 布局漂移；附加链：reset→游戏接管抽搐（§2b native 语义）。
 - ⚠️ TC 开关位被每帧重算 [V]——`tclEnable` 被 TractionControlDynamicAssist 覆写；模块已用正确路径（hook TractionFilter 入口，白名单）实测生效。"游戏内设置关 TC 是否生效"仍未实测 [?]。
 - ⚠️ 游戏内 ABS 设置对物理无效 [V]——设置链终点死字段，模块才有真开关。
 - ⚠️ is_player_controller 判据边界 [V]——只可用于 setter 透传宽松过滤与野指针二次校验；拦截类 hook 必须白名单（CLAUDE.md 已立约）。
@@ -89,20 +103,12 @@ git push → 2625b44..74f5ee5（工作切片）→ 74f5ee5..669be92（CLAUDE.md�
 
 ## 6. 下一步（有序）
 
-1. **重新排查多指触摸 bug**（头号）——用户此前反馈 findPointerIndex / active pointer 跟踪修复不成功。先向用户确认具体现象（漂移？跳变？哪块 overlay？），再抓 logcat 复现分析（PedalOverlayView）。
-2. **实测游戏内 TC 设置开关** [?]——§3.7 存疑：enableTCL 被每帧覆写，游戏内关 TC 是否生效需实机确认（模块路径已实测生效，此项只关游戏自带设置）。
-3. 计时赛延迟优化（可选）——当前 0.5s 延迟可接受。
-4. 真机验证 NPatch 未安装路径（未装时点卡片弹 Toast）。
-5. 清理 ConfigProvider 无用代码（pushGameLog/readGameLog 已被广播替代）。
-6. 全量替换裸 `Log.*` 为 `Logger.*`。
-7. 排查 janky 根因（R8 映射文件对比）。
-8. 正规化 carController offset（固定 0xA8 → 配置传递）。
-9. V10 第二阶段（可选）——游戏内引擎声浪。
-10. ABS 增强（可选）——强度旋钮、ABS 灯（读 pulseBrakes）、per-wheel 选择性 ABS（MODULE_ABS_NOTES §2）。
-11. 技术解析后续篇章（可选）——空气动力学与 DRS（§4）/ 传动与多线程轮子物理（编号追加式）。
+1. **等用户回传复现日志**（用户已领走 22:35 APK `app/build/outputs/apk/release/app-release.apk`）——用户需 force-stop 后安装、**确认日志开关开启**、复现"一手踏板+一手点空白"、导出日志发回。
+2. **分析日志裁决三个候选根因**——(a) 跳变瞬间 pedalView 收到的 action 序列（有无意外 DOWN/CANCEL/POINTER 重排）；(b) MOVE 值链里 rawY/idx 是否混入他指坐标；(c) DOWN 布局对比是否显示 pairip relayout 漂移（onScreen ≠ cfgTop）。
+3. **若日志显示 reset 后游戏接管抽搐**（pedalView 收到 CANCEL/reset 后游戏内油门跳变）→ 评估 native 写入策略改动：踏板功能开启期间每帧强制写（写 0 也是写），仅 pedalMode=OFF 停写。
+4. 若 (c) 证实布局漂移 → 评估改用运行时 getLocationOnScreen 做换算基准（需重新权衡 pairip 漂移与配置稳定性的取舍）。
 
 ## 7. 留给用户的开放问题
 
-- 多指触摸 bug 的具体现象与复现条件？（单手双指？踏板+挡位同按？值漂移还是跳变？）
-- 用户是否需要"TC 强度调节"功能（游戏设置链已通，模块增益有限）？
-- 计时赛 0.5s 延迟是否需进一步优化？V10 游戏内声浪是否继续？
+- 复现日志回传后：跳变瞬间日志显示的 action 序列是什么？（决定走根因 a/b/c 哪条）
+- 用户测试时游戏原生踏板按钮是隐藏还是显示状态？（影响"游戏原生输入接管"假设的权重）
