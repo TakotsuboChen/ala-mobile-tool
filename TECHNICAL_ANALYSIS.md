@@ -144,6 +144,18 @@ flowchart TB
 `HandleABS` 拥有完整的方法体却无调用者——hook 从不触发的真实原因是
 IL2CPP 保留死方法体，而非内联。
 
+死代码判定的工作流（可复现，方法细节见第一部分 §1.2）：
+
+```mermaid
+flowchart TD
+    A["枚举全文件 4 字节对齐机器字"] --> B["解码 bl / b 指令<br/>26 位有符号立即数 → 跳转目标"]
+    B --> C{"目标 == HandleABS (0x1A65258) ?"}
+    C -->|"命中"| D["记录调用者方法"]
+    C -->|"不命中"| C
+    C -.->|"扫描完毕，命中 = 0"| E["结论：无调用者 → 死方法"]
+    F["同理：偏移访问扫描<br/>absEnable 0xC4 / ABSSlip 0x30"] -->|"读者 = 0（除死代码）"| G["结论：僵尸字段"]
+```
+
 ### 2.2.3 调用链
 
 ```mermaid
@@ -164,6 +176,28 @@ flowchart TD
 这解释了二者 RVA 差值恒为 0xA8 的现象；`carController` 将车辆级刹车输入
 （$`p_{\mathrm{brake}} \in [0,1]`$）广播至四轮，随后**每轮独立**在 `RoadForce` 中执行 ABS 调制。
 
+单个物理帧（20 ms）内的执行时序：
+
+```mermaid
+sequenceDiagram
+    participant CC as carController
+    participant WH as IRDSWheel (×4)
+    participant RF as RoadForce (ABS 执行体)
+    CC->>WH: wheel.brake ← actualBrake（刹车输入 0~1）
+    loop 每物理帧（50 Hz）
+        RF->>RF: 速度因子 / 压力上限 / 摩擦圆权重
+        RF->>RF: pulseBrakes 翻转（25 Hz 方波）
+        alt 滑移超阈（> 0.15）且 pulse 帧
+            RF->>WH: tempBrakeF = base × b（释放相位）
+        else 滑移超阈且非 pulse 帧
+            RF->>WH: tempBrakeF = base（kP = 0，无削减）
+        else 未超阈
+            RF->>WH: tempBrakeF = base
+        end
+        RF->>WH: 制动扭矩 = tempBrakeF × brakePressure
+    end
+```
+
 ### 2.2.4 `usesABS`：唯一活跃门控及其写入路径
 
 ```mermaid
@@ -183,6 +217,28 @@ flowchart LR
 
 以下全部来自 `RoadForce`（0x1A7B35C–0x1A7BE44，约 700 条指令）的逐行反汇编解读 [V]。
 
+控制信号的完整数据流（各符号定义见 §2.1）：
+
+```mermaid
+flowchart LR
+    V["车速模长 ‖v‖"] --> A["速度因子<br/>（÷13.89 截断）"]
+    V --> R["速度比 r<br/>（÷80 截断）"]
+    R --> PB["压力上限<br/>两段插值"]
+    ANG["侧偏角 / 峰值侧偏角"] --> OM["摩擦圆权重"]
+    BIAS["rawBrakeBiasValue b"] --> OM
+    BIAS --> REL
+    SIG["slipRatio σ"] --> TH{"滑移超阈（> 0.15）?"}
+    A --> MOD["方波调制"]
+    PB --> MOD
+    OM --> MOD
+    TH -->|"pulse 帧"| M1["× b（释放）"]
+    TH -->|"非 pulse 帧"| M2["× 1（kP ≡ 0）"]
+    TH -->|"未超阈"| M2
+    M1 --> TAU["制动扭矩 τ"]
+    M2 --> TAU
+    IN["刹车输入"] --> TAU
+```
+
 ### 2.3.1 门控条件
 
 设 $`\alpha_v`$ 为速度因子（§2.3.2），则 ABS 调制段被激活当且仅当：
@@ -200,13 +256,25 @@ AI 车无视 `usesABS` 强制参与。
 ```mermaid
 flowchart TD
     A["RoadForce 每物理帧"] --> B{"usesABS ?"}
-    B -->|"true"| C{"α_v > 0 ?"}
-    B -->|"false"| D{"playercar (π) ?"}
-    D -->|"true（玩家车）"| S["跳过 ABS 段<br/>满刹车上限 T_b"]
+    B -->|"true"| C{"速度因子 > 0 ?"}
+    B -->|"false"| D{"playercar（玩家车标志）?"}
+    D -->|"true（玩家车）"| S["跳过 ABS 段<br/>满刹车扭矩上限"]
     D -->|"false（AI 车）"| E["执行 ABS 调制"]
     C -->|"> 0"| E
     C -->|"≤ 0（低速）"| S
     E --> F["pulseBrakes 翻转 → 25 Hz 方波<br/>滑移超阈时施加释放相位"]
+```
+
+`pulseBrakes` 的两态状态机（翻转由物理帧驱动，无任何条件分支）：
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    state "非释放相位：扭矩 = base" as P0
+    state "释放相位：扭矩 = base × b" as P1
+    [*] --> P0
+    P0 --> P1: 下一物理帧（20 ms）
+    P1 --> P0: 下一物理帧（20 ms）
 ```
 
 ### 2.3.2 速度因子
@@ -219,6 +287,14 @@ flowchart TD
 其中 $`v_{\mathrm{low}} = 0`$（`lowAbsDisableSpeed`，无写入者）、$`v_{\mathrm{full}} = 13.89\,\mathrm{m/s}`$
 （`fullAbsEnableSpeed`，构造函数常数 0x415E3D71）。
 即 50 km/h 以上 ABS 满强度，低于此速度按比例线性减弱 [V]。
+
+```mermaid
+xychart-beta
+    title "速度因子随车速线性上升，50 km/h 起恒为 1"
+    x-axis "车速 (m/s)" [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
+    y-axis "速度因子" 0 --> 1.1
+    line [0.0, 0.14, 0.29, 0.43, 0.58, 0.72, 0.86, 1.0, 1.0, 1.0, 1.0]
+```
 
 ### 2.3.3 组合摩擦圆权重（侧向让渡）
 
@@ -275,7 +351,7 @@ F_{\mathrm{base}}\,\Omega\cdot\Bigl(1 - \alpha_v\,\kappa\,k_P\,\bigl(|\sigma| - 
 
 ```mermaid
 xychart-beta
-    title "tempBrakeF 方波调制时序（示意，释放深度取 b = 0.5）"
+    title "制动扭矩方波调制时序（示意：释放相位深度取 0.5）"
     x-axis "物理帧序号" [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     y-axis "归一化制动扭矩" 0 --> 1.2
     bar [1.0, 0.5, 1.0, 0.5, 1.0, 0.5, 1.0, 0.5, 1.0, 0.5, 1.0, 0.5]
@@ -325,6 +401,14 @@ xychart-beta
 - $`\lVert\mathbf{w}\rVert`$ 为轮速矢量模长（参数），低速由 $`\max(\cdot, 1)`$ 兜底；
 - 低速衰减因子 $`\mathrm{clamp}_{[0,1]}(|v_{\mathrm{local},z}|\cdot 0.125)`$：$`v_{\mathrm{local},z} < 8\,\mathrm{m/s}`$ 时按比例压缩 $`\sigma`$，抑制低速误触发。
 
+```mermaid
+xychart-beta
+    title "低速衰减因子：接地点局部速度低于 8 m/s 时按比例压缩滑移值"
+    x-axis "接地点局部速度 (m/s)" [0.0, 0.8, 1.6, 2.4, 3.2, 4.0, 4.8, 5.6, 6.4, 7.2, 8.0, 8.8, 9.6]
+    y-axis "衰减因子" 0 --> 1.1
+    line [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.0, 1.0]
+```
+
 **语义**：$`\sigma`$ 是归一化的接地点滑动速度——完全锁死时 $`\approx 1.0`$，自由滚动时为 0。
 它与经典滑移率 $`(\omega r - v)/v`$ 同向不同式，但数量级等效：
 **阈值常数 $`0.15`$ 等效于经典滑移率约 15%**。
@@ -362,10 +446,10 @@ ABS 使用的是与工况无关的编译期常数 $`0.15`$。
 
 ```mermaid
 xychart-beta
-    title "归一化纵向力—滑移曲线（定性示意，非实测）与阈值 0.15 的相对位置"
-    x-axis "σ" [0.0, 0.05, 0.1, 0.12, 0.15, 0.2, 0.3, 0.5, 1.0]
-    y-axis "Fx (归一化)" 0 --> 1.15
-    line [0.0, 0.62, 0.94, 1.0, 0.97, 0.9, 0.78, 0.6, 0.45]
+    title "归一化纵向力—滑移曲线（Pacejka 简化式示意，非实测）与阈值 0.15 的相对位置"
+    x-axis "σ" [0, 0.04, 0.08, 0.12, 0.16, 0.2, 0.24, 0.28, 0.32, 0.36, 0.4, 0.44, 0.48, 0.52, 0.56, 0.6]
+    y-axis "Fx (归一化)" 0 --> 1.1
+    line [0.0, 0.67, 0.95, 1.0, 0.97, 0.93, 0.89, 0.86, 0.82, 0.8, 0.78, 0.76, 0.74, 0.73, 0.71, 0.7]
 ```
 
 示意曲线的峰值置于 $`\sigma \approx 0.12`$：阈值 $`0.15`$ 位于**峰后下降段**——
@@ -430,10 +514,24 @@ r = \mathrm{clamp}_{[0,1]}\!\left(\frac{\lVert\mathbf{v}\rVert}{80}\right)
 
 ```mermaid
 xychart-beta
-    title "刹车压力上限占比 F_base / T_b 随车速变化（假设 p_0 = 0）"
-    x-axis "车速 (km/h)" [0, 50, 100, 150, 200, 250, 288]
-    y-axis "占比 (%)" 0 --> 110
-    line [0, 32, 57, 77, 91, 95, 100]
+    title "刹车压力上限占满压百分比随车速变化（低速下限取 0）"
+    x-axis "车速 (km/h)" [0, 24, 48, 72, 96, 120, 144, 168, 192, 216, 240, 264, 288]
+    y-axis "上限占比 (%)" 0 --> 110
+    line [0, 16, 31, 44, 56, 66, 75, 83, 89, 94, 97, 99, 100]
+```
+
+该曲线是抛物线 $`2r - r^2`$（$`r`$ 为速度比）：50 km/h 处仅 32%、100 km/h 处 57%——
+**制动区前半段的刹车压力被压到满压的一半以下，且与轮子是否打滑无关**。
+
+以 50 km/h 工况为例（假设低速下限为零、释放深度 0.5、摩擦圆权重为 1），
+ABS 激活期间平均可用的制动扭矩相对满压的构成：
+
+```mermaid
+pie showData
+    title 50 km/h 制动扭矩构成（相对满压，示意）
+    "低速压力上限直接削减" : 68
+    "方波占空比损失" : 8
+    "方波平均后实际可用" : 24
 ```
 
 关键事实：**只要门控激活（$`s_{\mathrm{ABS}}`$ 且 $`\|\mathbf{v}\| > 0`$），
