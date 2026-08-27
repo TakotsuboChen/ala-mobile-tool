@@ -72,6 +72,8 @@ Run lint:
 ./gradlew :app:lint
 ```
 
+> ⚠️ `:app:assembleDebug/Release` do **not** run lint — CI's `:app:lint` step is the only lint gate. After any Kotlin/Java change, run `./gradlew :app:lint` (require 0 errors) before pushing; misses surface as long streaks of red CI runs (once 20+ from a single API-29 call under minSdk 26).
+
 Clean build outputs:
 ```bash
 ./gradlew clean
