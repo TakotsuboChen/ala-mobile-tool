@@ -34,6 +34,7 @@ import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.PriorityHigh
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Straighten
 import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.Opacity
@@ -58,6 +59,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
+import kotlin.math.roundToInt
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import tools.alamobile.mod.config.ModConfig
@@ -173,9 +175,26 @@ fun ConfigurePagerMiuix(
                                 checked = uiState.hideGamePedals,
                                 onCheckedChange = actions::setHideGamePedals
                             )
-                            SwitchPreference(
+                            // TC 调节：游戏设置没有任何 TC 参数可调（仅手柄生效的
+                            // 开关且被游戏每帧覆写），模块档位是移动端唯一调节途径。
+                            // 游戏默认 = 纯透传；自定义展开强度/时机两个滑条。
+                            // 分隔线成组逻辑：游戏默认（子卡片全收）时 TC 行与前后
+                            // 行无分隔线，完全融入卡片；自定义时整块上下各一条线
+                            //（下线在 Column 内部，跟随内层收回动画——TC 关闭时
+                            // 贴削减强度下边缘，不关时贴介入时机下边缘）。
+                            AnimatedVisibility(
+                                visible = uiState.tcMode == ModConfig.TcMode.CUSTOM,
+                                enter = fadeIn(),
+                                exit = fadeOut()
+                            ) {
+                                top.yukonga.miuix.kmp.basic.HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 16.dp)
+                                )
+                            }
+                            OverlayDropdownPreference(
                                 title = "牵引力控制",
-                                summary = "启用游戏原生 TC",
+                                summary = "游戏原生 TC 控制",
+                                items = ModConfig.TcMode.entries.map { tcModeName(it) },
                                 startAction = {
                                     Icon(
                                         tools.alamobile.mod.ui.TcIcon,
@@ -184,9 +203,76 @@ fun ConfigurePagerMiuix(
                                         tint = colorScheme.onBackground
                                     )
                                 },
-                                checked = uiState.enableTc,
-                                onCheckedChange = actions::setEnableTc
+                                selectedIndex = ModConfig.TcMode.entries.indexOf(uiState.tcMode),
+                                onSelectedIndexChange = { index ->
+                                    actions.setTcMode(ModConfig.TcMode.entries[index])
+                                },
                             )
+                            AnimatedVisibility(
+                                visible = uiState.tcMode == ModConfig.TcMode.CUSTOM,
+                                enter = expandVertically() + fadeIn(),
+                                exit = shrinkVertically() + fadeOut()
+                            ) {
+                                Column {
+                                    // 强度档 = TractionFilter 返回值插值 mix
+                                    //（等价于把游戏削减系数 0.85 缩放为 0.85×mix）。
+                                    SliderPreference(
+                                        title = "削减强度",
+                                        summary = "修改 TractionFilter 返回值",
+                                        value = ModConfig.TcStrength.entries.indexOf(uiState.tcStrength).toFloat(),
+                                        onValueChange = { v ->
+                                            actions.setTcStrength(
+                                                ModConfig.TcStrength.entries[
+                                                    v.roundToInt().coerceIn(0, ModConfig.TcStrength.entries.lastIndex)
+                                                ]
+                                            )
+                                        },
+                                        valueRange = 0f..(ModConfig.TcStrength.entries.lastIndex).toFloat(),
+                                        displayFormat = { v ->
+                                            tcStrengthName(
+                                                ModConfig.TcStrength.entries[
+                                                    v.roundToInt().coerceIn(0, ModConfig.TcStrength.entries.lastIndex)
+                                                ]
+                                            )
+                                        },
+                                        icon = Icons.Rounded.Tune
+                                    )
+                                    // 强度=关闭时 TC 整体不介入，时机无意义 → 卡片收回，
+                                    // 走既有 enableTc=false 的 return accel 关闭路径。
+                                    AnimatedVisibility(
+                                        visible = uiState.tcStrength != ModConfig.TcStrength.OFF,
+                                        enter = expandVertically() + fadeIn(),
+                                        exit = shrinkVertically() + fadeOut()
+                                    ) {
+                                        SliderPreference(
+                                            title = "介入时机",
+                                            summary = "修改滑移指标条件",
+                                            value = ModConfig.TcTiming.entries.indexOf(uiState.tcTiming).toFloat(),
+                                            onValueChange = { v ->
+                                                actions.setTcTiming(
+                                                    ModConfig.TcTiming.entries[
+                                                        v.roundToInt().coerceIn(0, ModConfig.TcTiming.entries.lastIndex)
+                                                    ]
+                                                )
+                                            },
+                                            valueRange = 0f..(ModConfig.TcTiming.entries.lastIndex).toFloat(),
+                                            displayFormat = { v ->
+                                                tcTimingName(
+                                                    ModConfig.TcTiming.entries[
+                                                        v.roundToInt().coerceIn(0, ModConfig.TcTiming.entries.lastIndex)
+                                                    ]
+                                                )
+                                            },
+                                            icon = Icons.Rounded.Bolt
+                                        )
+                                    }
+                                    // TC 区域下分隔线：放 Column 末尾使其跟随内层
+                                    // 收回动画，下边缘自动贴住最后可见项。
+                                    top.yukonga.miuix.kmp.basic.HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 16.dp)
+                                    )
+                                }
+                            }
                             SwitchPreference(
                                 title = "防抱死制动系统",
                                 summary = "启用游戏原生 ABS",
@@ -522,7 +608,7 @@ private fun SliderPreference(
             )
             Column(modifier = Modifier.weight(1f)) {
                 top.yukonga.miuix.kmp.basic.Text(
-                    text = "$title: ${displayFormat(value)}",
+                    text = "$title：${displayFormat(value)}",
                     fontSize = androidx.compose.ui.unit.TextUnit(15f, androidx.compose.ui.unit.TextUnitType.Sp)
                 )
                 top.yukonga.miuix.kmp.basic.Text(
@@ -544,6 +630,26 @@ private fun SliderPreference(
 private fun curveName(curve: ModConfig.PedalCurve): String = when (curve) {
     ModConfig.PedalCurve.LINEAR -> "不修改（线性）"
     ModConfig.PedalCurve.CUSTOM -> "自定义"
+}
+
+private fun tcModeName(mode: ModConfig.TcMode): String = when (mode) {
+    ModConfig.TcMode.DEFAULT -> "游戏默认"
+    ModConfig.TcMode.CUSTOM -> "自定义"
+}
+
+private fun tcStrengthName(strength: ModConfig.TcStrength): String = when (strength) {
+    ModConfig.TcStrength.OFF -> "关闭 TC"
+    ModConfig.TcStrength.WEAK -> "低"
+    ModConfig.TcStrength.MEDIUM -> "中等"
+    ModConfig.TcStrength.STRONG -> "强"
+    ModConfig.TcStrength.STOCK -> "最强（默认）"
+}
+
+private fun tcTimingName(timing: ModConfig.TcTiming): String = when (timing) {
+    ModConfig.TcTiming.DEFAULT -> "默认"
+    ModConfig.TcTiming.EARLIER -> "较早"
+    ModConfig.TcTiming.VERY_EARLY -> "非常早"
+    ModConfig.TcTiming.REALTIME -> "实时"
 }
 
 /**
