@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import android.view.MotionEvent
@@ -307,7 +308,7 @@ class PedalOverlayView(
         val screenHeight = resources.displayMetrics.heightPixels
         val viewTop = position.topPx(screenHeight)
         val viewHeight = position.heightPx(context, screenHeight).toFloat()
-        val relativeY = event.getRawY(pointerIndex) - viewTop
+        val relativeY = event.rawYAt(pointerIndex) - viewTop
         updateValues(relativeY, viewHeight)
         diagMaybeLogMove(event, pointerIndex, relativeY, viewHeight)
     }
@@ -322,7 +323,7 @@ class PedalOverlayView(
         if (abs(t - diagLastT) <= 0.02f && now - diagLastLogMs < 500L) return
         diagLastT = t
         diagLastLogMs = now
-        val rawY = event.getRawY(pointerIndex)
+        val rawY = event.rawYAt(pointerIndex)
         Logger.i(
             "pedal[$role] MOVE idx=$pointerIndex rawY=$rawY relY=$relativeY " +
                 "t=${"%.3f".format(t)} thr=$rawThrottle brk=$rawBrake " +
@@ -557,3 +558,10 @@ class PedalOverlayView(
         }
     }
 }
+
+// getRawY(pointerIndex) 是 API 29+（本项目 minSdk 26）。同一事件内
+// raw 偏移对全部 pointer 一致：rawY(i) = rawY(0) − y(0) + y(i)。
+// SDK ≥ 29 走官方 API；以下走数学等价式，多指语义完全一致。
+private fun MotionEvent.rawYAt(pointerIndex: Int): Float =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) getRawY(pointerIndex)
+    else getRawY() - getY() + getY(pointerIndex)
