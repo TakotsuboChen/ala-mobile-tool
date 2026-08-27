@@ -5,11 +5,14 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.os.SystemClock
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import tools.alamobile.mod.NativeBridge
 import tools.alamobile.mod.config.ModConfig
+import tools.alamobile.mod.util.Logger
+import kotlin.math.abs
 import kotlin.math.pow
 
 /**
@@ -122,6 +125,13 @@ class PedalOverlayView(
     // 防止其他手指的触摸事件干扰踏板值。详见 onTouchEvent。
     private var activePointerId = MotionEvent.INVALID_POINTER_ID
 
+    // ── 触摸诊断日志（多指漂移排查，logEnabled 门控，写入导出日志）──
+    // MOVE 节流状态（实例级，DUAL 两 view 各自节流）：最近一次 MOVE 日志的
+    // 归一 t 与时间戳。滑动按行程采样（>2%），静止时 500ms 心跳——心跳能
+    // 揭示"手指没动值在变"的竞态。
+    private var diagLastT = -1f
+    private var diagLastLogMs = 0L
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val w = width.toFloat()
@@ -212,6 +222,11 @@ class PedalOverlayView(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 activePointerId = event.getPointerId(0)
+                // DOWN 打布局对比：view 实际屏幕位置 vs 配置换算位置。共存版
+                // pairip 壳可能反复 relayout 移动 view——若两者不一致，
+                // rawY−配置topPx 的换算基准失真，踏板值随 relayout 漂移。
+                // 该日志直接证实/证伪布局漂移假设。
+                logEvent(event, "DOWN", layoutDiag())
                 updateValuesFromPointer(event)
                 return true
             }
@@ -222,25 +237,50 @@ class PedalOverlayView(
             MotionEvent.ACTION_POINTER_DOWN -> {
                 // 新手指按下，不改变 active pointer——踏板始终由第一指控制。
                 // 消费事件避免落入 super（返回 false 可能导致系统误判）。
+                logEvent(event, "POINTER_DOWN",
+                    "newId=${event.getPointerId(event.actionIndex)} → keep active")
                 return true
             }
             MotionEvent.ACTION_POINTER_UP -> {
                 // 如果抬起的是 active pointer（控制踏板的手指）→ 重置踏板；
                 // 非 active pointer 抬起 → 忽略，不影响踏板值。
                 val pointerId = event.getPointerId(event.actionIndex)
-                if (pointerId == activePointerId) {
+                val isActive = pointerId == activePointerId
+                logEvent(event, "POINTER_UP",
+                    "upId=$pointerId ${if (isActive) "→ RESET" else "→ ignore"}")
+                if (isActive) {
                     resetPedalState()
                     activePointerId = MotionEvent.INVALID_POINTER_ID
                 }
                 return true
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                logEvent(event,
+                    if (event.actionMasked == MotionEvent.ACTION_CANCEL) "CANCEL" else "UP",
+                    "→ RESET")
                 resetPedalState()
                 activePointerId = MotionEvent.INVALID_POINTER_ID
                 return true
             }
         }
         return super.onTouchEvent(event)
+    }
+
+    // 触摸诊断日志 helper（logEnabled 门控，只省字符串构造，logcat 由
+    // Logger 内部决定）：低频事件（DOWN/POINTER_*/UP/CANCEL）全打。
+    private fun logEvent(event: MotionEvent, action: String, extra: String) {
+        if (!Logger.isEnabled()) return
+        Logger.i("pedal[$role] $action activeId=$activePointerId ptrCount=${event.pointerCount} $extra")
+    }
+
+    // 布局诊断：view 实际屏幕位置/尺寸 vs 配置值。两者不一致 = 布局漂移
+    //（共存版 pairip 壳 relayout），是踏板值漂移的候选根因。
+    private fun layoutDiag(): String {
+        val loc = IntArray(2)
+        getLocationOnScreen(loc)
+        val screenHeight = resources.displayMetrics.heightPixels
+        return "onScreen=(${loc[0]},${loc[1]}) size=${width}x$height " +
+            "cfgTop=${position.topPx(screenHeight)} cfgH=${position.heightPx(context, screenHeight)}"
     }
 
     // 用 active pointer 的屏幕绝对坐标重建相对坐标。
@@ -257,12 +297,37 @@ class PedalOverlayView(
     private fun updateValuesFromPointer(event: MotionEvent) {
         if (activePointerId == MotionEvent.INVALID_POINTER_ID) return
         val pointerIndex = event.findPointerIndex(activePointerId)
-        if (pointerIndex == -1) return
+        if (pointerIndex == -1) {
+            // 理论不可达（active pointer 抬起会走 POINTER_UP/UP 分支并先清
+            // activePointerId）。真出现说明事件流被系统重排——多指漂移的
+            // 重要线索，无条件打。
+            Logger.i("pedal[$role] MOVE activeId=$activePointerId NOT_FOUND ptrCount=${event.pointerCount}")
+            return
+        }
         val screenHeight = resources.displayMetrics.heightPixels
         val viewTop = position.topPx(screenHeight)
         val viewHeight = position.heightPx(context, screenHeight).toFloat()
         val relativeY = event.getRawY(pointerIndex) - viewTop
         updateValues(relativeY, viewHeight)
+        diagMaybeLogMove(event, pointerIndex, relativeY, viewHeight)
+    }
+
+    // MOVE 高频（60Hz+）节流：t 变化超 2% 或距上条 ≥500ms 才打。
+    // 记录 rawY → relY → t → raw/mapped 值的完整换算链，配合 DOWN 的
+    // 布局对比日志可定位漂移发生在哪一环。
+    private fun diagMaybeLogMove(event: MotionEvent, pointerIndex: Int, relativeY: Float, viewHeight: Float) {
+        if (!Logger.isEnabled()) return
+        val t = if (viewHeight > 0f) relativeY / viewHeight else 0f
+        val now = SystemClock.uptimeMillis()
+        if (abs(t - diagLastT) <= 0.02f && now - diagLastLogMs < 500L) return
+        diagLastT = t
+        diagLastLogMs = now
+        val rawY = event.getRawY(pointerIndex)
+        Logger.i(
+            "pedal[$role] MOVE idx=$pointerIndex rawY=$rawY relY=$relativeY " +
+                "t=${"%.3f".format(t)} thr=$rawThrottle brk=$rawBrake " +
+                "mappedT=$mappedThrottle mappedB=$mappedBrake"
+        )
     }
 
     // 重置踏板值到零，并同步清理双踏板共享状态。
