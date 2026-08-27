@@ -7,8 +7,10 @@
 > 以及 **`libil2cpp.so` 的 ARM64 指令级反汇编**与模块原生钩子的运行时交叉验证。
 >
 > **文档范围**：本文按子系统分篇，随逆向进度陆续补充。
-> 当前已完成**第二篇（ABS）**；空气动力学与 DRS、车辆动力学（TC/ESC/转向辅助）、
-> 传动系统等篇章为规划中的占位篇目（见各篇导语）。
+> **文档范围**：本文按子系统分篇，随逆向进度陆续补充。
+> 篇章编号按成篇追加顺序分配（详见总目录），当前已完成 ABS 篇；
+> 空气动力学与 DRS、车辆动力学（TC/ESC/转向辅助）、传动与多线程轮子物理等
+> 为规划中的占位篇目（见各篇导语）。
 >
 > **版本适用性**：本文全部 RVA / 字段偏移 / 常数地址均为 8.0.4 (200146) 专属；
 > 升级目标版本时须按各篇验证清单重新验证。
@@ -17,17 +19,21 @@
 
 ## 总目录
 
-- [第一部分　研究方法与证据体系](#第一部分研究方法与证据体系)
-- [第二部分　ABS 防抱死制动系统](#第二部分abs-防抱死制动系统) ← 当前已完成
-- [第三部分　空气动力学与 DRS](#第三部分空气动力学与-drs待补充)（待补充）
-- [第四部分　车辆动力学：TC / ESC / 转向辅助](#第四部分车辆动力学tc--esc--转向辅助待补充)（待补充）
-- [第五部分　传动与多线程轮子物理](#第五部分传动与多线程轮子物理待补充)（待补充）
-- [附录 A：ABS 篇证据置信度矩阵](#附录-aabs-篇证据置信度矩阵)
-- [附录 B：ABS 篇关键常数与地址表](#附录-babs-篇关键常数与地址表)
+> 篇章编号按**成篇追加顺序**分配（共享方法篇固定为 §1），不预设规划篇章的编号与顺序；
+> 新篇章完成后追加于文末并取下一个可用编号，已有篇章编号不变。
+
+- **共享方法篇**：[1　研究方法与证据体系](#1研究方法与证据体系)
+- **已完成**：
+  - [2　ABS 防抱死制动系统](#2abs-防抱死制动系统)
+- **规划中**（顺序与编号待成篇时确定）：
+  - 空气动力学与 DRS
+  - 车辆动力学：TC / ESC / 转向辅助
+  - 传动与多线程轮子物理
+- **附录**：[A　ABS 篇证据置信度矩阵](#附录-aabs-篇证据置信度矩阵) · [B　ABS 篇关键常数与地址表](#附录-babs-篇关键常数与地址表)
 
 ---
 
-# 第一部分　研究方法与证据体系
+# 1　研究方法与证据体系
 
 > 本部分为全部篇章共享的方法论。各篇结论的可信度判定均以此为准。
 
@@ -62,7 +68,7 @@
 
 ---
 
-# 第二部分　ABS 防抱死制动系统
+# 2　ABS 防抱死制动系统
 
 > 本篇回答两个问题：该游戏的 ABS 在运行时**由哪段代码、以何种算法执行**；
 > 该算法的**实际控制效果**——是帮助玩家将轮胎滑移维持在最大抓地力极限
@@ -207,8 +213,8 @@ flowchart TD
 ### 2.3.2 速度因子
 
 $$
-\alpha_v \;=\; \operatorname{clamp}_{[0,1]}\!\left(\frac{\lVert\mathbf{v}\rVert - v_{\mathrm{low}}}{v_{\mathrm{full}} - v_{\mathrm{low}}}\right)
-\;=\; \operatorname{clamp}_{[0,1]}\!\left(\frac{\lVert\mathbf{v}\rVert}{13.89}\right)
+\alpha_v \;=\; \mathrm{clamp}_{[0,1]}\!\left(\frac{\lVert\mathbf{v}\rVert - v_{\mathrm{low}}}{v_{\mathrm{full}} - v_{\mathrm{low}}}\right)
+\;=\; \mathrm{clamp}_{[0,1]}\!\left(\frac{\lVert\mathbf{v}\rVert}{13.89}\right)
 $$
 
 其中 $v_{\mathrm{low}} = 0$（`lowAbsDisableSpeed`，无写入者）、$v_{\mathrm{full}} = 13.89\,\mathrm{m/s}$
@@ -218,9 +224,9 @@ $$
 ### 2.3.3 组合摩擦圆权重（侧向让渡）
 
 $$
-\gamma = \operatorname{clamp}_{[0,1]}\!\left(1 - \frac{|\alpha|}{\alpha_{\max}}\right),
+\gamma = \mathrm{clamp}_{[0,1]}\!\left(1 - \frac{|\alpha|}{\alpha_{\max}}\right),
 \qquad
-\beta = \operatorname{clamp}_{[0,1]}\!\left(\frac{b}{0.3}\right),
+\beta = \mathrm{clamp}_{[0,1]}\!\left(\frac{b}{0.3}\right),
 \qquad
 \Omega = \gamma + \beta\,(1-\gamma)
 $$
@@ -233,9 +239,10 @@ $\beta$ 为以硬编码常数 $0.3$ 归一化的制动偏置因子。
 ### 2.3.4 速度相关的刹车压力上限
 
 $$
-r = \operatorname{clamp}_{[0,1]}\!\left(\frac{\lVert\mathbf{v}\rVert}{80}\right)
-\quad (80 = \texttt{tempRearBrakeBalancerSpeed},\ \text{ctor 默认})
+r = \mathrm{clamp}_{[0,1]}\!\left(\frac{\lVert\mathbf{v}\rVert}{80}\right)
 $$
+
+其中 $80$ 为 `tempRearBrakeBalancerSpeed` 的构造函数默认值。
 
 $$
 p_{\mathrm{lim}} = p_0 + r\,(T_b - p_0)
@@ -279,8 +286,9 @@ xychart-beta
 
 $$
 \tau_{\mathrm{brake}} \;=\; T \cdot p_{\mathrm{brake}}
-\qquad\text{（无 ABS 路径： } \tau_0 = T_b\cdot p_{\mathrm{brake}}\text{）}
 $$
+
+无 ABS 路径下为 $\tau_0 = T_b \cdot p_{\mathrm{brake}}$。
 
 ### 2.3.6 控制律汇总
 
@@ -310,13 +318,13 @@ $$
 \sigma \;=\;
 \frac{-v_{L,z}}{\max\bigl(\lVert\mathbf{w}\rVert,\,1\bigr)}
 \;\cdot\;
-\operatorname{clamp}_{[0,1]}\!\left(\frac{c\,\bigl|v_{\mathrm{local},z}\bigr|}{8\,\Delta t}\right),
+\mathrm{clamp}_{[0,1]}\!\left(\frac{c\,\bigl|v_{\mathrm{local},z}\bigr|}{8\,\Delta t}\right),
 \qquad c = 0.02,\;\; \Delta t = \tfrac{1}{50}
 $$
 
 - $v_L$（0x24C）：接地点相对地面的局部滑动速度（自由滚动 $\approx 0$，锁死 $\approx -\lVert\mathbf{v}\rVert$）；
 - $\lVert\mathbf{w}\rVert$ 为轮速矢量模长（参数），低速由 $\max(\cdot, 1)$ 兜底；
-- 低速衰减因子 $\operatorname{clamp}_{[0,1]}(|v_{\mathrm{local},z}|\cdot 0.125)$：$v_{\mathrm{local},z} < 8\,\mathrm{m/s}$ 时按比例压缩 $\sigma$，抑制低速误触发。
+- 低速衰减因子 $\mathrm{clamp}_{[0,1]}(|v_{\mathrm{local},z}|\cdot 0.125)$：$v_{\mathrm{local},z} < 8\,\mathrm{m/s}$ 时按比例压缩 $\sigma$，抑制低速误触发。
 
 **语义**：$\sigma$ 是归一化的接地点滑动速度——完全锁死时 $\approx 1.0$，自由滚动时为 0。
 它与经典滑移率 $(\omega r - v)/v$ 同向不同式，但数量级等效：
@@ -418,7 +426,7 @@ $$
 $$
 \frac{F_{\mathrm{base}} - p_0}{T_b - p_0} \;=\; 2r - r^2,
 \qquad
-r = \operatorname{clamp}_{[0,1]}\!\left(\frac{\lVert\mathbf{v}\rVert}{80}\right)
+r = \mathrm{clamp}_{[0,1]}\!\left(\frac{\lVert\mathbf{v}\rVert}{80}\right)
 $$
 
 ```mermaid
@@ -462,7 +470,7 @@ $T$ 即被重算为 $F_{\mathrm{base}}\Omega \le T_b$——与轮胎是否打滑
 
 ---
 
-# 第三部分　空气动力学与 DRS（待补充）
+# 空气动力学与 DRS（待补充）
 
 > **占位篇目**——逆向进行中，本篇将覆盖：
 > - `IRDSAerodynamicResistance`（空气阻力模型，含 `SetABSSlip` 的异常调用点，待查）
@@ -471,7 +479,7 @@ $T$ 即被重算为 $F_{\mathrm{base}}\Omega \le T_b$——与轮胎是否打滑
 > - `IRDSCarControllInput.drsToggle()`（0x1A64CC8）与 DRS 区间判定
 > - 模块已实现的 auto DRS hook（`native/src/drs_hook.c`）所对应的游戏侧逻辑
 
-# 第四部分　车辆动力学：TC / ESC / 转向辅助（待补充）
+# 车辆动力学：TC / ESC / 转向辅助（待补充）
 
 > **占位篇目**——本篇将覆盖牵引力控制、电子稳定程序与转向辅助的运行时验证。
 > 已知入口：`TractionFilter(accel)` @ 0x1A64CE4（TC，未被内联、hook 有效 [V]）、
@@ -479,6 +487,13 @@ $T$ 即被重算为 $F_{\mathrm{base}}\Omega \le T_b$——与轮胎是否打滑
 > `LockSteerAtVelocity` / `LockSteerAtSlipAngle`。
 > **未验证**：其车辆级开关（`tclEnable`/`escEnable`/`steerHelpEnable`）是否与 ABS 一样
 > 存在设置链断裂——`ABS` 篇的断裂结论不能未经反汇编地外推 [?]。
+
+# 传动与多线程轮子物理（待补充）
+
+> **占位篇目**——本篇将覆盖 `IRDSDrivetrain`（引擎扭矩计算、换挡、离合、涡轮）
+> 与 `multithreadWheelManager` 的 Jobs System 轮子物理管线
+> （`BuildRaycastCommandsJob` / `GenerateAllWheelRaysJob` / `ComputeAveragedHitsJob`），
+> 以及轮子物理与主线程（`RoadForce` 等）的同步边界。
 
 ---
 
@@ -498,7 +513,7 @@ $T$ 即被重算为 $F_{\mathrm{base}}\Omega \le T_b$——与轮胎是否打滑
 | `pulseBrakes` 每帧翻转（25 Hz 方波） | [V] | `eor w8, w8, #1` + `strb` |
 | pulse 相位 $\times b$ | [V] | 反汇编分支 |
 | $k_P \equiv 0$ | [V] | 全文件无写入 |
-| 速度因子 $\alpha_v = \operatorname{clamp}(\lVert v\rVert/13.89)$ | [V] | ctor 默认 13.89 / 0 |
+| 速度因子 $\alpha_v = \mathrm{clamp}(\lVert v\rVert/13.89)$ | [V] | ctor 默认 13.89 / 0 |
 | 压力上限两段插值 | [V] | `F_base = p_0 + (2r−r²)(T_b−p_0)` |
 | $\sigma$ 为归一化滑动速度 | [V] | `SlipRatio` 反汇编 |
 | $s_{\max}$ 仅用于视觉/声音 | [V] | 全文件读者扫描 |
