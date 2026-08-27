@@ -273,6 +273,12 @@ class AlaMobileModule : XposedModule() {
         // tclEnable/absEnable，让游戏自带 TC/ABS 在非手柄模式下也生效。
         val enableTc = settings?.enableTc ?: true
         val enableAbs = settings?.enableAbs ?: true
+        // TC 档位（强度插值 + 时机 ε/minSPD 配对覆写）。**经 tcEffectiveParams 按 mode 派生**：
+        // mode=default 恒为原厂透传（mix=1/eps=minspd=0），无视缓存的 strength/timing。
+        // settings==null（NPatch 早期）时同语义（游戏默认）。
+        val (tcMix, tcEps, tcMinspd) = if (settings != null) {
+            ModConfig.tcEffectiveParams(settings.tcMode, settings.tcStrength, settings.tcTiming)
+        } else Triple(1.0f, 0f, 0f)
 
         // 初始化 Logger：游戏进程用 externalFilesDir 写日志文件。
         // logEnabled 开关控制文件写入，logcat 始终输出。
@@ -418,6 +424,14 @@ class AlaMobileModule : XposedModule() {
                         enableTc = enableTc,
                         enableAbs = enableAbs
                     )
+                    // TC 档位下发：init 兜底为游戏默认（mix=1/eps=minspd=0 不覆写），
+                    // 这里把用户档位补上。独立 setter，不动 init() 44 参数签名。
+                    try {
+                        NativeBridge.setTcParams(tcMix, tcEps, tcMinspd)
+                        logX(Log.INFO, TAG, "setTcParams mix=$tcMix eps=$tcEps minspd=$tcMinspd")
+                    } catch (e: Throwable) {
+                        logX(Log.ERROR, TAG, "setTcParams failed: ${e.message}")
+                    }
                     // 主菜单音乐替换：native hooks 装好后初始化播放器。
                     // 提取 APK 内置 MP3 → 轮询主菜单状态 → 在主菜单播放。
                     // 开关由广播/初始化同步。

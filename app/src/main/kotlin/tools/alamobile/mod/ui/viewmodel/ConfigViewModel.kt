@@ -48,7 +48,9 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
                 disableAutoGear = s.disableAutoGear,
                 enableManualShift = s.enableManualShift,
                 enableUnlock = s.enableUnlock,
-                enableTc = s.enableTc,
+                tcMode = s.tcMode,
+                tcStrength = s.tcStrength,
+                tcTiming = s.tcTiming,
                 enableAbs = s.enableAbs,
                 enableMusicReplace = s.enableMusicReplace,
                 enableV10Sound = s.enableV10Sound,
@@ -79,7 +81,9 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
             disableAutoGear = s.disableAutoGear,
             enableManualShift = s.enableManualShift,
             enableUnlock = s.enableUnlock,
-            enableTc = s.enableTc,
+            tcMode = s.tcMode,
+            tcStrength = s.tcStrength,
+            tcTiming = s.tcTiming,
             enableAbs = s.enableAbs,
             enableMusicReplace = s.enableMusicReplace,
             enableV10Sound = s.enableV10Sound,
@@ -120,7 +124,11 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
     fun setDisableAutoGear(v: Boolean) { _uiState.value = _uiState.value.copy(disableAutoGear = v); scheduleSave() }
     fun setEnableManualShift(v: Boolean) { _uiState.value = _uiState.value.copy(enableManualShift = v); scheduleSave() }
     fun setEnableUnlock(v: Boolean) { _uiState.value = _uiState.value.copy(enableUnlock = v); scheduleSave() }
-    fun setEnableTc(v: Boolean) { _uiState.value = _uiState.value.copy(enableTc = v); scheduleSave() }
+    // TC 档位三 setter。enableTc 不再直接暴露——它是派生值
+    //（DEFAULT 恒 true；CUSTOM 时 strength≠OFF），在 toSettings 里派生。
+    fun setTcMode(v: ModConfig.TcMode) { _uiState.value = _uiState.value.copy(tcMode = v); scheduleSave() }
+    fun setTcStrength(v: ModConfig.TcStrength) { _uiState.value = _uiState.value.copy(tcStrength = v); scheduleSave() }
+    fun setTcTiming(v: ModConfig.TcTiming) { _uiState.value = _uiState.value.copy(tcTiming = v); scheduleSave() }
     fun setEnableAbs(v: Boolean) { _uiState.value = _uiState.value.copy(enableAbs = v); scheduleSave() }
     fun setEnableMusicReplace(v: Boolean) { _uiState.value = _uiState.value.copy(enableMusicReplace = v); scheduleSave() }
     fun setEnableV10Sound(v: Boolean) { _uiState.value = _uiState.value.copy(enableV10Sound = v); scheduleSave() }
@@ -165,7 +173,9 @@ data class ConfigUiState(
     val disableAutoGear: Boolean,
     val enableManualShift: Boolean,
     val enableUnlock: Boolean,
-    val enableTc: Boolean,
+    val tcMode: ModConfig.TcMode,
+    val tcStrength: ModConfig.TcStrength,
+    val tcTiming: ModConfig.TcTiming,
     val enableAbs: Boolean,
     val enableMusicReplace: Boolean,
     val enableV10Sound: Boolean,
@@ -191,8 +201,13 @@ data class ConfigUiState(
         disableAutoGear = disableAutoGear,
         enableManualShift = enableManualShift,
         enableUnlock = enableUnlock,
-        enableTc = enableTc,
+        // enableTc 派生：游戏默认恒开；自定义时强度=关闭才关（旧"TC 开关关闭"
+        // 语义）。native 侧 mix<=0 分支与 enableTc=false 双保险，行为一致。
+        enableTc = tcMode == ModConfig.TcMode.DEFAULT || tcStrength != ModConfig.TcStrength.OFF,
         enableAbs = enableAbs,
+        tcMode = tcMode,
+        tcStrength = tcStrength,
+        tcTiming = tcTiming,
         enableMusicReplace = enableMusicReplace,
         enableV10Sound = enableV10Sound,
         hideGamePedals = hideGamePedals,

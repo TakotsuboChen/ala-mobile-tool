@@ -15,6 +15,15 @@
 #include "shadowhook.h"
 
 static pedal_hook_config_t g_config = {0};
+// TC 时机档接管状态：>0 表示当前正在覆写 TCLSlip/TCLminSPD（用于切回
+// "游戏默认"时的一次性基线恢复，见 proxy_traction_filter 注释）。
+static int g_tc_taking_over = 0;
+// 游戏真实 TC 参数基线（v1.4）：TractionFilter 首次覆写前捕获的 0x34/0x38
+// 值。游戏进赛道时经 SetPlayerSettings 写入真正参数（实测 ε=0.40、
+// minSPD=11.0，与 ctor 默认 0.45/1.0 不同），且之后不每帧重写——所以恢复
+// 必须写回捕获的基线，不能写 ctor 默认。-1 = 尚未捕获（兜底用实测常量）。
+static float g_tc_base_slip = -1.0f;
+static float g_tc_base_minspd = -1.0f;
 
 static volatile float g_throttle_value = 0.0f;
 static volatile float g_brake_value = 0.0f;
@@ -422,17 +431,123 @@ static void proxy_player_controls_update(void *this) {
 }
 
 // IRDSCarControllInput::TractionFilter(float accel) — TC 入口。
+// TC 诊断插桩：玩家车白名单分支内限频调用（每 25 次 ≈ 0.5s 一条，LOGI 走
+// native_log_print——logcat 恒打 + logEnabled 门控文件写入）。读回运行时
+// TCLSlip/TCLminSPD（写前值，可观测游戏侧复位行为）+ 各驱动轮 σ/α/maxSlip/
+// maxAngle 与 W、削减比值。标定完成后可整段移除。
+static void tc_diag_log(void *this, float filtered_out, float accel_in,
+                        float slip_pre, float minspd_pre) {
+    static int diag_counter = 0;
+    if (++diag_counter < 25) {
+        return;
+    }
+    diag_counter = 0;
+
+    float w = 0.0f, sig = 0.0f, s_max = 0.0f, ang = 0.0f, a_max = 0.0f;
+    void *dt = *(void **) ((char *) this + 0x98);
+    if (dt != NULL) {
+        void *arr = *(void **) ((char *) dt + 0x58);   // poweredIRDSWheels
+        if (arr != NULL) {
+            int n = *(int *) ((char *) arr + 0x18);
+            void **data = (void **) ((char *) arr + 0x20);
+            for (int i = 0; i < n; i++) {
+                void *wheel = data[i];
+                if (wheel == NULL) continue;
+                float s = *(float *) ((char *) wheel + 0x104);
+                float sm = *(float *) ((char *) wheel + 0x1a8);
+                float a = *(float *) ((char *) wheel + 0x170);
+                float am = *(float *) ((char *) wheel + 0x1ac);
+                // 与 orig 一致：先 fabs 再比较（先比符号再取绝对值会漏掉大负数）。
+                float wr = (sm != 0.0f) ? s / sm : 0.0f;
+                float wa = (am != 0.0f) ? a / am : 0.0f;
+                if (wr < 0.0f) wr = -wr;
+                if (wa < 0.0f) wa = -wa;
+                float wi = wr > wa ? wr : wa;
+                if (wi > w) { w = wi; sig = s; s_max = sm; ang = a; a_max = am; }
+            }
+        }
+    }
+    int gear = 0;
+    float sigma_bar = 0.0f;
+    if (dt != NULL) {
+        gear = *(int *) ((char *) dt + 0xc0);
+        sigma_bar = *(float *) ((char *) dt + 0xcc);   // 传动系聚合滑移（触发层信号源）
+    }
+    LOGI("TCdiag: spd=%.1f gear=%d tclEn=%d mix=%.2f epsCfg=%.3f slipPre=%.3f minSpdPre=%.3f "
+         "W=%.2f sig=%.3f smax=%.3f ang=%.3f amax=%.3f sbar=%.3f in=%.3f out=%.3f",
+         *(float *) ((char *) this + 0x84),
+         gear,
+         (int) *(unsigned char *) ((char *) this + 0xc6),
+         g_config.tc_mix,
+         g_config.tc_eps,
+         slip_pre,
+         minspd_pre,
+         w, sig, s_max, ang, a_max, sigma_bar, accel_in, filtered_out);
+}
+
 // 签名: float TractionFilter(void *this, float accel)
 // 返回削减后的 accel。当模块 TC 开关关闭时，直接返回原始 accel（不削减），
 // 绕过游戏自带 TC。比写字段更可靠——不依赖 tclEnable 是否被游戏覆盖。
 // 只作用玩家车（白名单比对，见 is_target_player_car 注释——本 hook 会被
 // 所有车每物理帧调用，用 is_player_controller 会误拦 AI 车的 TC）。
 static float proxy_traction_filter(void *this, float accel) {
-    if (!g_config.enable_tc && is_target_player_car(this)) {
-        // TC 关闭：直接返回原始 accel，不调 orig（跳过 TC 削减）
-        return accel;
-    }
     typedef float (*orig_t)(void *, float);
+    if (is_target_player_car(this)) {
+        // 强度=关闭（tc_mix<=0，含旧 enable_tc=false 路径）：直接返回原始
+        // accel，不调 orig（跳过 TC 削减）。
+        if (!g_config.enable_tc || g_config.tc_mix <= 0.0f) {
+            return accel;
+        }
+        // TC 时机档（仅在用户选了非默认时机时覆写）：成对写 TCLSlip (0x34)
+        // 和 TCLminSPD (0x38)。
+        // **v1.4 关键修复**：反汇编确认 TractionFilter 门控顺序是
+        // ①carSpeed<TCLminSPD → 透传（在读 ε 之前）→ ②TCLSlip==0 → ③tclEnable
+        // → ④(1-ε)·W>1。游戏运行时 minSPD=11.0（≈40km/h）：只调 ε 时起步打滑
+        // 区间被门控①整段挡死，这是 v1.1/v1.3 "调时机无效果"的根因。故时机档
+        // 必须 (eps, minspd) 成对覆写。**v1.3 教训保留**：不无条件写——只在
+        // 用户配置偏离原厂时写，切回"游戏默认"一次性恢复基线。
+        // 必须每帧写绝对值，勿缩放写（防复利衰减）。
+        float slip_pre = *(float *) ((char *) this + 0x34);
+        float minspd_pre = *(float *) ((char *) this + 0x38);
+        if (g_tc_base_slip < 0.0f) {
+            // 首次见到玩家车 TractionFilter：此刻字段尚未被模块碰过，值就是
+            // 游戏 SetPlayerSettings 写入的真实参数——记为恢复基线。
+            g_tc_base_slip = slip_pre;
+            g_tc_base_minspd = minspd_pre;
+            LOGI("TCdiag: baseline captured slip=%.3f minspd=%.3f",
+                 g_tc_base_slip, g_tc_base_minspd);
+        }
+        if (g_config.tc_eps > 0.0f || g_config.tc_minspd > 0.0f) {
+            *(float *) ((char *) this + 0x34) = g_config.tc_eps;
+            *(float *) ((char *) this + 0x38) = g_config.tc_minspd;
+            g_tc_taking_over = 1;
+        } else if (g_tc_taking_over) {
+            // 从自定义时机切回"游戏默认"：一次性回写捕获的游戏真实基线
+            // （非 ctor 默认——实测 ε=0.40/minSPD=11.0），清掉残留后字段
+            // 交还游戏自己管理。
+            float slip_r = g_tc_base_slip >= 0.0f ? g_tc_base_slip : 0.40f;
+            float minspd_r = g_tc_base_minspd >= 0.0f ? g_tc_base_minspd : 11.0f;
+            *(float *) ((char *) this + 0x34) = slip_r;
+            *(float *) ((char *) this + 0x38) = minspd_r;
+            LOGI("TCdiag: baseline restored slip=%.3f minspd=%.3f",
+                 slip_r, minspd_r);
+            g_tc_taking_over = 0;
+        }
+        float f = accel;
+        if (g_traction_filter_orig != NULL) {
+            f = ((orig_t) g_traction_filter_orig)(this, accel);
+            // 强度档：TractionFilter 返回值线性插值 f_m = τ + (f−τ)·mix。
+            // 代入 carController 内联合成 τ' = 0.15τ + 0.85·f_m，化简得
+            // τ' = τ·(1 − 0.85·mix·S)：mix=1 逐位等同原厂，mix=0 全关。
+            if (g_config.tc_mix < 1.0f) {
+                f = accel + (f - accel) * g_config.tc_mix;
+            }
+        }
+        tc_diag_log(this, f, accel, slip_pre, minspd_pre);
+        return f;
+    }
+    // 非玩家车（AI）：透传，绝不拦截——白名单比对见 is_target_player_car 注释，
+    // 本 hook 被所有车每物理帧调用，误拦 AI 车会全场失控（历史事故）。
     if (g_traction_filter_orig != NULL) {
         return ((orig_t) g_traction_filter_orig)(this, accel);
     }
@@ -514,6 +629,12 @@ bool pedal_install_hooks(const pedal_hook_config_t *config) {
     if (config) {
         g_config = *config;
     }
+    // TC 档位兜底：g_config={0} 零初始化会把 tc_mix 置 0.0（语义是"关闭"
+    // 而非"游戏默认"）——必须在 install 时显式兜底为游戏默认，真实档位随后
+    // 经 pedal_set_tc_params 从 Java 下发。tc_eps/tc_minspd=0 = 不覆写字段。
+    g_config.tc_mix = 1.0f;
+    g_config.tc_eps = 0.0f;
+    g_config.tc_minspd = 0.0f;
 
     if (!g_config.enable_control_replacement) {
         LOGI("Pedal control replacement disabled");
@@ -810,6 +931,30 @@ void pedal_set_tc_abs(int enable_tc, int enable_abs) {
     g_config.enable_tc = enable_tc ? true : false;
     g_config.enable_abs = enable_abs ? true : false;
     LOGI("pedal_set_tc_abs: enable_tc=%d enable_abs=%d", enable_tc, enable_abs);
+}
+
+// TC 档位 setter。低频（仅配置变更/启动时），LOGI 允许；透传路径内严禁日志。
+void pedal_set_tc_params(float mix, float eps, float minspd) {
+    if (mix < 0.0f) mix = 0.0f;
+    if (mix > 1.0f) mix = 1.0f;
+    g_config.tc_mix = mix;
+    if (eps <= 0.0f || minspd <= 0.0f) {
+        // "游戏默认"档：不覆写（置 0 = 不写标志）；残留由 proxy 的
+        // once-restore 基线回写清理。两参数视为一体：任一 <=0 都整对禁写。
+        g_config.tc_eps = 0.0f;
+        g_config.tc_minspd = 0.0f;
+    } else {
+        // 防御性 clamp：ε=0 会直接踩门控②（TCLSlip≠0）导致 TC 失效；
+        // ε≥1 数学上等于永久关闭。minSPD 抬高会让门控①更难穿透，clamp
+        // 防止误配成"永不介入"。
+        if (eps < 0.01f) eps = 0.01f;
+        if (eps > 0.9f) eps = 0.9f;
+        if (minspd > 30.0f) minspd = 30.0f;
+        g_config.tc_eps = eps;
+        g_config.tc_minspd = minspd;
+    }
+    LOGI("pedal_set_tc_params: mix=%.2f eps=%.3f minspd=%.2f",
+         g_config.tc_mix, g_config.tc_eps, g_config.tc_minspd);
 }
 
 void pedal_set_throttle_value(float value) {

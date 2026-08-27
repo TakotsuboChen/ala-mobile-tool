@@ -55,6 +55,13 @@ object ModConfig {
     // 根治 M18 的 AI 误控（原生输入链路天然只处理玩家车）。
     const val KEY_ENABLE_TC = "enable_tc"
     const val KEY_ENABLE_ABS = "enable_abs"
+    // TC 档位调节（v1 TC_LEVEL_DESIGN）：模式 + 强度 + 时机。
+    // 游戏设置无任何 TC 参数可调（仅手柄生效的开关，且开关位被游戏每帧覆写），
+    // 模块档位是移动端唯一 TC 调节途径。存字符串枚举值（非浮点），实机标定
+    // 改预设表数值不动用户存档。
+    const val KEY_TC_MODE = "tc_mode"
+    const val KEY_TC_STRENGTH = "tc_strength"
+    const val KEY_TC_TIMING = "tc_timing"
 
     // 主菜单音乐替换开关：替换为 Hans Zimmer - F1
     const val KEY_ENABLE_MUSIC_REPLACE = "enable_music_replace"
@@ -234,6 +241,76 @@ object ModConfig {
     }
 
     /**
+     * TC 调节模式。
+     * - DEFAULT: 游戏默认（native 纯透传，行为等价于 CUSTOM + STOCK + DEFAULT）
+     * - CUSTOM: 展开强度/时机两个调节卡片
+     *
+     * 迁移：旧配置无 `tc_mode` 键时，从旧 `enable_tc` 布尔派生
+     *（false → CUSTOM+OFF；true → DEFAULT），见 [migrateTc]。
+     */
+    enum class TcMode(val value: String) {
+        DEFAULT("default"),
+        CUSTOM("custom");
+
+        companion object {
+            fun from(value: String?): TcMode {
+                return entries.find { it.value == value } ?: DEFAULT
+            }
+        }
+    }
+
+    /**
+     * TC 介入强度档：TractionFilter 返回值插值系数 [mix]。
+     *
+     * 游戏原生合成在 carController 内联完成：τ' = 0.15τ + 0.85·filtered。
+     * 模块在 TractionFilter 返回点做线性插值 f_m = τ + (f−τ)·[mix]，代入得
+     * τ' = τ·(1 − 0.85·[mix]·S)——数学上严格等价于把削减系数缩放为 0.85×mix：
+     * mix=1 逐位等同游戏原厂（削减上限 85%），mix=0 完全关闭（proxy 直接
+     * return accel，走既有实测路径）。
+     *
+     * 初值标定于 2026-08；实机手感调优只改 [mix] 常数，不动存档结构。
+     */
+    enum class TcStrength(val value: String, val mix: Float) {
+        OFF("off", 0f),
+        WEAK("weak", 0.25f),
+        MEDIUM("medium", 0.5f),
+        STRONG("strong", 0.75f),
+        STOCK("stock", 1f);
+
+        companion object {
+            fun from(value: String?): TcStrength {
+                return entries.find { it.value == value } ?: STOCK
+            }
+        }
+    }
+
+    /**
+     * TC 介入时机档：每帧覆写 TCLSlip (0x34) 实例字段为 [eps]（绝对值，勿缩放写，
+     * 防每帧复利衰减）。游戏削减触发条件 W > 1/(1−ε)，ε=0.45（游戏默认）→ W>1.82。
+     * [eps] 越小介入越早、曲线越陡；ε=0.02 ≈ W>1.02（几乎任何打滑立即削）。
+     *
+     * [eps] = 0 表示"游戏默认"——不覆写字段，TC 阈值行为与原生一致
+     *（游戏设置无 TC 参数 UI，原生值即实际行为）。
+     */
+    // 介入时机档 = (eps, minspd) 配对。反汇编确认（v1.4）：TractionFilter
+    // 门控顺序 ①carSpeed<TCLminSPD → 透传（在读 ε 之前）→ ②TCLSlip==0 →
+    // ③tclEnable → ④(1-ε)·W>1。游戏运行时 minSPD=11.0 m/s（≈40km/h），
+    // 只调 ε 时起步打滑区间被门控①整段挡死——所以每个非默认时机档必须
+    // 同时给出 minSPD 覆写值（m/s）。DEFAULT 双 0 = 不写字段。
+    enum class TcTiming(val value: String, val eps: Float, val minspd: Float) {
+        DEFAULT("default", 0f, 0f),
+        EARLIER("earlier", 0.30f, 8.0f),
+        VERY_EARLY("very_early", 0.18f, 4.0f),
+        REALTIME("realtime", 0.02f, 0.5f);
+
+        companion object {
+            fun from(value: String?): TcTiming {
+                return entries.find { it.value == value } ?: DEFAULT
+            }
+        }
+    }
+
+    /**
      * Monotone cubic interpolation (Fritsch–Carlson) through the control
      * points plus the fixed endpoints (0,0) and (1,1).
      *
@@ -296,6 +373,10 @@ object ModConfig {
         // 原生 TC/ABS 默认开启。
         const val ENABLE_TC = true
         const val ENABLE_ABS = true
+        // TC 档位默认：游戏默认（纯透传，等价于旧 enableTc=true 的行为）。
+        val TC_MODE = TcMode.DEFAULT
+        val TC_STRENGTH = TcStrength.STOCK
+        val TC_TIMING = TcTiming.DEFAULT
         // 主菜单音乐替换默认开启
         const val ENABLE_MUSIC_REPLACE = true
         // V10 引擎声浪默认关闭
@@ -380,6 +461,7 @@ object ModConfig {
             }
 
             val json = JSONObject(file.readText())
+            val (tcMode, tcStrength, tcTiming) = migrateTc(json)
             Settings(
                 pedalMode = migratePedalMode(json),
                 // 自动 DRS 功能未实现，强制读成 false，忽略任何旧配置里的 true，
@@ -397,14 +479,14 @@ object ModConfig {
                     KEY_ENABLE_UNLOCK,
                     Defaults.ENABLE_UNLOCK
                 ),
-                enableTc = json.optBoolean(
-                    KEY_ENABLE_TC,
-                    Defaults.ENABLE_TC
-                ),
+                enableTc = tcMode == TcMode.DEFAULT || tcStrength != TcStrength.OFF,
                 enableAbs = json.optBoolean(
                     KEY_ENABLE_ABS,
                     Defaults.ENABLE_ABS
                 ),
+                tcMode = tcMode,
+                tcStrength = tcStrength,
+                tcTiming = tcTiming,
                 enableMusicReplace = json.optBoolean(
                     KEY_ENABLE_MUSIC_REPLACE,
                     Defaults.ENABLE_MUSIC_REPLACE
@@ -484,6 +566,11 @@ object ModConfig {
             put(KEY_ENABLE_UNLOCK, settings.enableUnlock)
             put(KEY_ENABLE_TC, settings.enableTc)
             put(KEY_ENABLE_ABS, settings.enableAbs)
+            // TC 档位：字符串枚举值持久化。enableTc 上行照写（派生值），
+            // 供旧版本 APK 回滚时读取。
+            put(KEY_TC_MODE, settings.tcMode.value)
+            put(KEY_TC_STRENGTH, settings.tcStrength.value)
+            put(KEY_TC_TIMING, settings.tcTiming.value)
             put(KEY_ENABLE_MUSIC_REPLACE, settings.enableMusicReplace)
             put(KEY_ENABLE_V10_SOUND, settings.enableV10Sound)
             put(KEY_HIDE_GAME_PEDALS, settings.hideGamePedals)
@@ -747,14 +834,18 @@ object ModConfig {
     fun fromJson(json: String): Settings {
         return try {
             val j = JSONObject(json)
+            val (tcMode, tcStrength, tcTiming) = migrateTc(j)
             Settings(
                 pedalMode = migratePedalMode(j),
                 enableAutoDrs = false,
                 disableAutoGear = j.optBoolean(KEY_DISABLE_AUTO_GEAR, Defaults.DISABLE_AUTO_GEAR),
                 enableManualShift = j.optBoolean(KEY_ENABLE_MANUAL_SHIFT, Defaults.ENABLE_MANUAL_SHIFT),
                 enableUnlock = j.optBoolean(KEY_ENABLE_UNLOCK, Defaults.ENABLE_UNLOCK),
-                enableTc = j.optBoolean(KEY_ENABLE_TC, Defaults.ENABLE_TC),
+                enableTc = tcMode == TcMode.DEFAULT || tcStrength != TcStrength.OFF,
                 enableAbs = j.optBoolean(KEY_ENABLE_ABS, Defaults.ENABLE_ABS),
+                tcMode = tcMode,
+                tcStrength = tcStrength,
+                tcTiming = tcTiming,
                 enableMusicReplace = j.optBoolean(KEY_ENABLE_MUSIC_REPLACE, Defaults.ENABLE_MUSIC_REPLACE),
                 enableV10Sound = j.optBoolean(KEY_ENABLE_V10_SOUND, Defaults.ENABLE_V10_SOUND),
                 hideGamePedals = j.optBoolean(KEY_HIDE_GAME_PEDALS, Defaults.HIDE_GAME_PEDALS),
@@ -810,6 +901,45 @@ object ModConfig {
         val explicit = json.optString(KEY_PEDAL_INVERT, "")
         if (explicit.isNotEmpty()) return PedalInvert.from(explicit)
         return if (json.optBoolean(KEY_LEGACY_BRAKE_INVERT, false)) PedalInvert.BRAKE else PedalInvert.OFF
+    }
+
+    /**
+     * TC 档位生效值派生：模式说了算。DEFAULT 恒为原厂透传（mix=1 / eps=minspd=0
+     * 不覆写），与缓存的 strength/timing 无关——否则"调回游戏默认"无法恢复原生
+     * 行为（strength/timing 是记忆值，mode 才是生效开关）。CUSTOM 时按所选档
+     * 生效，返回 (mix, eps, minspd) 三元组——eps/minspd 必须成对覆写（v1.4，
+     * 见 [TcTiming] 注释）。
+     */
+    fun tcEffectiveParams(
+        mode: TcMode,
+        strength: TcStrength,
+        timing: TcTiming
+    ): Triple<Float, Float, Float> {
+        return if (mode == TcMode.DEFAULT) Triple(1f, 0f, 0f)
+        else Triple(strength.mix, timing.eps, timing.minspd)
+    }
+
+    /**
+     * TC 档位读取 + 一代迁移（与 brake_invert → pedal_invert 的单向迁移模式一致）：
+     * 新键 `tc_mode` 存在时直接用三键；否则从旧 `enable_tc` 布尔派生——
+     * true（默认）→ 游戏默认；false → 自定义+关闭（旧"TC 开关关闭"语义）。
+     * `enable_tc` 本身不再直接读取（由 [TcMode]/[TcStrength] 派生），
+     * write 时照写派生值供旧版本回滚兼容。
+     */
+    private fun migrateTc(json: JSONObject): Triple<TcMode, TcStrength, TcTiming> {
+        val explicitMode = json.optString(KEY_TC_MODE, "")
+        if (explicitMode.isNotEmpty()) {
+            return Triple(
+                TcMode.from(explicitMode),
+                TcStrength.from(json.optString(KEY_TC_STRENGTH, Defaults.TC_STRENGTH.value)),
+                TcTiming.from(json.optString(KEY_TC_TIMING, Defaults.TC_TIMING.value))
+            )
+        }
+        return if (json.optBoolean(KEY_ENABLE_TC, Defaults.ENABLE_TC)) {
+            Triple(TcMode.DEFAULT, Defaults.TC_STRENGTH, Defaults.TC_TIMING)
+        } else {
+            Triple(TcMode.CUSTOM, TcStrength.OFF, Defaults.TC_TIMING)
+        }
     }
 
     private fun readOverlayPosition(
@@ -883,6 +1013,9 @@ object ModConfig {
             enableUnlock = Defaults.ENABLE_UNLOCK,
             enableTc = Defaults.ENABLE_TC,
             enableAbs = Defaults.ENABLE_ABS,
+            tcMode = Defaults.TC_MODE,
+            tcStrength = Defaults.TC_STRENGTH,
+            tcTiming = Defaults.TC_TIMING,
             enableMusicReplace = Defaults.ENABLE_MUSIC_REPLACE,
             enableV10Sound = Defaults.ENABLE_V10_SOUND,
             hideGamePedals = Defaults.HIDE_GAME_PEDALS,
@@ -916,6 +1049,12 @@ object ModConfig {
         val enableUnlock: Boolean,
         val enableTc: Boolean = Defaults.ENABLE_TC,
         val enableAbs: Boolean = Defaults.ENABLE_ABS,
+        // TC 档位。enableTc 为派生值（DEFAULT 恒 true；CUSTOM 时 strength≠OFF），
+        // 由 read()/ViewModel 维护一致性。三字段带默认值——PedalOverlayView 的
+        // 命名参数部分构造无需改动。
+        val tcMode: TcMode = Defaults.TC_MODE,
+        val tcStrength: TcStrength = Defaults.TC_STRENGTH,
+        val tcTiming: TcTiming = Defaults.TC_TIMING,
         val enableMusicReplace: Boolean = Defaults.ENABLE_MUSIC_REPLACE,
         val enableV10Sound: Boolean = Defaults.ENABLE_V10_SOUND,
         val hideGamePedals: Boolean = Defaults.HIDE_GAME_PEDALS,

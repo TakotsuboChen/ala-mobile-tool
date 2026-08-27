@@ -288,6 +288,12 @@ object NativeBridge {
     @JvmStatic
     external fun setTcAbs(enableTc: Boolean, enableAbs: Boolean)
 
+    // TC 档位（强度插值 mix ∈ [0,1]，0=关闭 1=游戏默认；时机 (eps, minspd)
+    // 成对覆写 TCLSlip/TCLminSPD 字段，二者任一 ≤0 = 整对不写=游戏默认）。
+    // 独立 setter——不动 init() 的参数签名，运行中改档经此即时生效。
+    @JvmStatic
+    external fun setTcParams(mix: Float, eps: Float, minspd: Float)
+
     @JvmStatic
     external fun setMusicReplace(enabled: Boolean)
 

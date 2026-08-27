@@ -102,11 +102,27 @@ class ConfigReceiver : BroadcastReceiver() {
             // 实时同步 TC/ABS 开关到 native g_config——ConfigActivity（模块进程）
             // 改了 TC/ABS 后，广播到达游戏进程，这里立刻调 native 更新 g_config，
             // proxy_player_controls_update 下一帧就用新值写 tclEnable/absEnable。
+            // enable_tc 已是派生值（写入端 ViewModel 按 tc_mode/tc_strength 派生）。
             val enableTc = incoming.optBoolean("enable_tc", true)
             val enableAbs = incoming.optBoolean("enable_abs", true)
             if (tools.alamobile.mod.NativeBridge.isAvailable) {
                 tools.alamobile.mod.NativeBridge.setTcAbs(enableTc, enableAbs)
                 Log.i(TAG, "ConfigReceiver: setTcAbs enableTc=$enableTc enableAbs=$enableAbs")
+            }
+
+            // 实时同步 TC 档位（强度插值 + 时机 ε/minSPD 配对覆写）——游戏运行中改档立即生效。
+            // **必须经 tcEffectiveParams 按 tc_mode 派生**：mode=default 时无视
+            // 缓存的 strength/timing（记忆值）恒为原厂透传，否则"调回游戏默认"
+            // 永远恢复不了原生行为。旧广播 JSON（无新键）落到默认，与旧行为一致。
+            val tcMode = ModConfig.TcMode.from(incoming.optString("tc_mode", "default"))
+            val (tcMix, tcEps, tcMinspd) = ModConfig.tcEffectiveParams(
+                tcMode,
+                ModConfig.TcStrength.from(incoming.optString("tc_strength", "stock")),
+                ModConfig.TcTiming.from(incoming.optString("tc_timing", "default"))
+            )
+            if (tools.alamobile.mod.NativeBridge.isAvailable) {
+                tools.alamobile.mod.NativeBridge.setTcParams(tcMix, tcEps, tcMinspd)
+                Log.i(TAG, "ConfigReceiver: setTcParams mix=$tcMix eps=$tcEps minspd=$tcMinspd")
             }
 
             // 实时同步音乐替换开关——用户从配置页切到游戏时即时生效。

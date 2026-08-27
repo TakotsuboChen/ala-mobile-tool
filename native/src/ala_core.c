@@ -278,6 +278,17 @@ Java_tools_alamobile_mod_NativeBridge_setTcAbs(JNIEnv *env, jclass clazz,
     pedal_set_tc_abs((int) enable_tc, (int) enable_abs);
 }
 
+// TC 档位（强度插值 + 时机 ε/minSPD 配对覆写）。低频调用（仅配置变更时），
+// LOGI 只在此处与安装期，TractionFilter 每帧透传路径内严禁日志。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_setTcParams(JNIEnv *env, jclass clazz,
+                                                   jfloat mix, jfloat eps,
+                                                   jfloat minspd) {
+    (void) env;
+    (void) clazz;
+    pedal_set_tc_params(mix, eps, minspd);
+}
+
 // 主动触发一次强制解锁（不依赖 hook 触发时机）。
 // 在 15s 延迟路径中调用：get_Instance → SetUnlocked(true) → OnAlreadyOwned。
 JNIEXPORT jboolean JNICALL
