@@ -103,7 +103,7 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 
 #### 日志系统
 - 「启用日志」开关（默认关闭），`logEnabled` 统一门控 Java 层 `Logger` 与 native 层 `native_log` 两侧
-- 模块进程与游戏进程日志写入统一文件，设置页一键导出并分享（FileProvider + ShareSheet）
+- 模块进程与游戏进程日志写入统一文件，设置页一键导出并分享（FileProvider + ShareSheet），导出仅含最近 24h 条目
 - 游戏→模块日志经定向广播（`setComponent`）推送，规避包可见性与 IntentFirewall 限制
 
 #### AI 车隔离
