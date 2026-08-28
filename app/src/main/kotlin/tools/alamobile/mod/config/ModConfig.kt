@@ -349,7 +349,7 @@ object ModConfig {
      * 根源，ABS_LEVEL_DESIGN v2 §2.2）。抬 b 直接抬方波平均 (1+b)/2；
      * b≥0.3 后 β=clamp01(b/0.3) 饱和、Ω 摩擦圆耦合关死——释放深度成为
      * 零副作用杠杆。游戏原生 UI 上限只能到 0.3（bias=70 单侧钳位），
-     * 档位 LOW 越界到 0.5（贴极限工作区）是模块存在的意义之一。
+     * 档位 LOW 越界到 0.8（贴极限工作区）是模块存在的意义之一。
      *
      * [bOverride] < 0 表示不覆写字段（"最高（默认）"/OFF——恢复捕获基线）；
      * ≥0 时每帧绝对值写（勿用现值×系数，防复利衰减，TC v1.2 教训）。
@@ -360,7 +360,7 @@ object ModConfig {
         OFF("off", -1f),
         LOW("weak", 0.80f),
         MEDIUM("medium", 0.60f),
-        HIGH("strong", 0.50f),
+        HIGH("strong", 0.40f),
         MAX("stock", -1f);
 
         companion object {
