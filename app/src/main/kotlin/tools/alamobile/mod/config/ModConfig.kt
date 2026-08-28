@@ -252,7 +252,7 @@ object ModConfig {
 
     /**
      * TC 调节模式。
-     * - DEFAULT: 游戏默认（native 纯透传，行为等价于 CUSTOM + STOCK + DEFAULT）
+     * - DEFAULT: 游戏默认（native 纯透传，行为等价于 CUSTOM + MAX + LATE）
      * - CUSTOM: 展开强度/时机两个调节卡片
      *
      * 迁移：旧配置无 `tc_mode` 键时，从旧 `enable_tc` 布尔派生
@@ -282,14 +282,15 @@ object ModConfig {
      */
     enum class TcStrength(val value: String, val mix: Float) {
         OFF("off", 0f),
-        WEAK("weak", 0.25f),
-        MEDIUM("medium", 0.5f),
-        STRONG("strong", 0.75f),
-        STOCK("stock", 1f);
+        // value 沿用历史 JSON 键值（"weak"/"strong"/"stock"），改档位名不做存档迁移
+        LOW("weak", 0.15f),
+        MEDIUM("medium", 0.4f),
+        HIGH("strong", 0.6f),
+        MAX("stock", 1f);
 
         companion object {
             fun from(value: String?): TcStrength {
-                return entries.find { it.value == value } ?: STOCK
+                return entries.find { it.value == value } ?: MAX
             }
         }
     }
@@ -306,16 +307,16 @@ object ModConfig {
     // 门控顺序 ①carSpeed<TCLminSPD → 透传（在读 ε 之前）→ ②TCLSlip==0 →
     // ③tclEnable → ④(1-ε)·W>1。游戏运行时 minSPD=11.0 m/s（≈40km/h），
     // 只调 ε 时起步打滑区间被门控①整段挡死——所以每个非默认时机档必须
-    // 同时给出 minSPD 覆写值（m/s）。DEFAULT 双 0 = 不写字段。
+    // 同时给出 minSPD 覆写值（m/s）。LATE 双 0 = 不写字段。
     enum class TcTiming(val value: String, val eps: Float, val minspd: Float) {
-        DEFAULT("default", 0f, 0f),
-        EARLIER("earlier", 0.30f, 8.0f),
-        VERY_EARLY("very_early", 0.18f, 4.0f),
+        LATE("default", 0f, 0f),
+        EARLY("earlier", 0.35f, 8.0f),
+        VERY_EARLY("very_early", 0.25f, 4.0f),
         REALTIME("realtime", 0.02f, 0.5f);
 
         companion object {
             fun from(value: String?): TcTiming {
-                return entries.find { it.value == value } ?: DEFAULT
+                return entries.find { it.value == value } ?: LATE
             }
         }
     }
@@ -348,7 +349,7 @@ object ModConfig {
      * 根源，ABS_LEVEL_DESIGN v2 §2.2）。抬 b 直接抬方波平均 (1+b)/2；
      * b≥0.3 后 β=clamp01(b/0.3) 饱和、Ω 摩擦圆耦合关死——释放深度成为
      * 零副作用杠杆。游戏原生 UI 上限只能到 0.3（bias=70 单侧钳位），
-     * 档位 WEAK 越界到 0.5（贴极限工作区）是模块存在的意义之一。
+     * 档位 LOW 越界到 0.5（贴极限工作区）是模块存在的意义之一。
      *
      * [bOverride] < 0 表示不覆写字段（"最高（默认）"/OFF——恢复捕获基线）；
      * ≥0 时每帧绝对值写（勿用现值×系数，防复利衰减，TC v1.2 教训）。
@@ -357,14 +358,14 @@ object ModConfig {
      */
     enum class AbsStrength(val value: String, val bOverride: Float) {
         OFF("off", -1f),
-        WEAK("weak", 0.80f),
+        LOW("weak", 0.80f),
         MEDIUM("medium", 0.60f),
-        STRONG("strong", 0.50f),
-        STOCK("stock", -1f);
+        HIGH("strong", 0.50f),
+        MAX("stock", -1f);
 
         companion object {
             fun from(value: String?): AbsStrength {
-                return entries.find { it.value == value } ?: STOCK
+                return entries.find { it.value == value } ?: MAX
             }
         }
     }
@@ -434,10 +435,10 @@ object ModConfig {
         const val ENABLE_ABS = true
         // TC 档位默认：游戏默认（纯透传，等价于旧 enableTc=true 的行为）。
         val TC_MODE = TcMode.DEFAULT
-        val TC_STRENGTH = TcStrength.STOCK
-        val TC_TIMING = TcTiming.DEFAULT
+        val TC_STRENGTH = TcStrength.MAX
+        val TC_TIMING = TcTiming.LATE
         val ABS_MODE = AbsMode.DEFAULT
-        val ABS_STRENGTH = AbsStrength.STOCK
+        val ABS_STRENGTH = AbsStrength.MAX
         // 100% = 不缩放 T_b。0-100% 无级（0% 用于观察生效：高速段 F_base→0，
         // 制动几乎消失）。字段写入生效已由 ABSdiag 实证（tb=3375=4500×0.75）。
         const val ABS_PRESSURE = 1.0f
@@ -1043,12 +1044,12 @@ object ModConfig {
      * `enable_abs` 本身不再直接读取（由 [AbsMode]/[AbsStrength] 派生），
      * write 时照写派生值供旧版本回滚兼容。
      * 制动压力独立读取（无 legacy 键，无旧配置时落 1.0 = 不缩放），
-     * clamp [0.75, 1.0] 防御异常值。
+     * clamp [0.5, 1.0] 防御异常值（旧配置存过更低的值会被抬到 0.5）。
      */
     private fun migrateAbs(json: JSONObject): Triple<AbsMode, AbsStrength, Float> {
         val pressure = json.optDouble(KEY_ABS_PRESSURE, Defaults.ABS_PRESSURE.toDouble())
             .toFloat()
-            .coerceIn(0f, 1f)
+            .coerceIn(0.5f, 1f)
         val explicitMode = json.optString(KEY_ABS_MODE, "")
         if (explicitMode.isNotEmpty()) {
             return Triple(

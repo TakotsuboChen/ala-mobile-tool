@@ -295,8 +295,8 @@ object NativeBridge {
     external fun setTcParams(mix: Float, eps: Float, minspd: Float)
 
     // ABS 档位（干预强度 bOverride = pulse 释放深度 b 绝对值，<0 = 不覆写
-    // =恢复捕获基线；制动压力 tbScale = T_b 等比缩放 ∈ [0.75,1.0]，1.0 = 不
-    // 缩放——独立于 ABS 模式，默认档/关闭档下也生效，修"关 ABS 秒锁死"）。
+    // =恢复捕获基线；制动压力 tbScale = T_b 等比缩放，1.0 = 不缩放（Java 侧
+    // 已 clamp [0.5,1.0]）——独立于 ABS 模式，默认档/关闭档下也生效，修"关 ABS 秒锁死"）。
     // mix ≤ 0 时忽略 b 覆写（关闭语义走 setTcAbs 的 enableAbs 通道）。
     // 独立 setter——不动 init() 的参数签名，运行中改档经此即时生效。
     @JvmStatic

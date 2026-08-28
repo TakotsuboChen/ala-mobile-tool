@@ -134,7 +134,7 @@ class ConfigReceiver : BroadcastReceiver() {
             val (absMix, absBOverride, absTbScale) = ModConfig.absEffectiveParams(
                 absMode,
                 ModConfig.AbsStrength.from(incoming.optString("abs_strength", "stock")),
-                incoming.optDouble("abs_pressure", 1.0).toFloat().coerceIn(0f, 1f)
+                incoming.optDouble("abs_pressure", 1.0).toFloat().coerceIn(0.5f, 1f)
             )
             if (tools.alamobile.mod.NativeBridge.isAvailable) {
                 tools.alamobile.mod.NativeBridge.setAbsParams(absMix, absBOverride, absTbScale)

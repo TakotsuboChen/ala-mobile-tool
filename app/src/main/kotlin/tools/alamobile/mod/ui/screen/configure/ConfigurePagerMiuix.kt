@@ -375,8 +375,9 @@ fun ConfigurePagerMiuix(
                                 }
                             }
                             // 最大制动压力：T_b(0x88) 等比缩放（非截断——踏板响应
-                            // 曲线与纵轴完全不受影响，全链一致缩放）。0-100% 无级
-                            //（0% 为观察极端：高速段 F_base→0，制动几乎消失）。
+                            // 曲线与纵轴完全不受影响，全链一致缩放）。50-100% 无级
+                            //（下限 50% 防呆：更低时高速段 F_base→0 制动几乎消失，
+                            // 无实验价值且易误导为"模块坏了"）。
                             SliderPreference(
                                 title = "最大制动压力",
                                 summary = "调整游戏制动摩擦扭矩上限",
@@ -384,7 +385,7 @@ fun ConfigurePagerMiuix(
                                 onValueChange = { v ->
                                     actions.setAbsPressure((v * 100).roundToInt() / 100f)
                                 },
-                                valueRange = 0f..1.0f,
+                                valueRange = 0.5f..1.0f,
                                 displayFormat = { v -> "${(v * 100).roundToInt()}%" },
                                 icon = tools.alamobile.mod.ui.BrakeCurveIcon
                             )
@@ -884,15 +885,15 @@ private fun tcModeName(mode: ModConfig.TcMode): String = when (mode) {
 
 private fun tcStrengthName(strength: ModConfig.TcStrength): String = when (strength) {
     ModConfig.TcStrength.OFF -> "关闭 TC"
-    ModConfig.TcStrength.WEAK -> "低"
+    ModConfig.TcStrength.LOW -> "低"
     ModConfig.TcStrength.MEDIUM -> "中"
-    ModConfig.TcStrength.STRONG -> "高"
-    ModConfig.TcStrength.STOCK -> "最高（默认）"
+    ModConfig.TcStrength.HIGH -> "高"
+    ModConfig.TcStrength.MAX -> "最高（默认）"
 }
 
 private fun tcTimingName(timing: ModConfig.TcTiming): String = when (timing) {
-    ModConfig.TcTiming.DEFAULT -> "较晚（默认）"
-    ModConfig.TcTiming.EARLIER -> "较早"
+    ModConfig.TcTiming.LATE -> "较晚（默认）"
+    ModConfig.TcTiming.EARLY -> "较早"
     ModConfig.TcTiming.VERY_EARLY -> "非常早"
     ModConfig.TcTiming.REALTIME -> "实时"
 }
@@ -904,10 +905,10 @@ private fun absModeName(mode: ModConfig.AbsMode): String = when (mode) {
 
 private fun absStrengthName(strength: ModConfig.AbsStrength): String = when (strength) {
     ModConfig.AbsStrength.OFF -> "关闭 ABS"
-    ModConfig.AbsStrength.WEAK -> "低"
+    ModConfig.AbsStrength.LOW -> "低"
     ModConfig.AbsStrength.MEDIUM -> "中"
-    ModConfig.AbsStrength.STRONG -> "高"
-    ModConfig.AbsStrength.STOCK -> "最高（默认）"
+    ModConfig.AbsStrength.HIGH -> "高"
+    ModConfig.AbsStrength.MAX -> "最高（默认）"
 }
 
 /**

@@ -190,6 +190,8 @@ static float proxy_traction_filter(void *this, float accel) {
 
 **方法论教训**：①覆写 IL2CPP 字段前必须反汇编确认门控顺序，一个前置透传门可让后面的调参静默失效；②ctor 默认 ≠ 运行时真实值，运行时参数只能靠写前值日志实测；③"无条件接管"把修粘连和覆盖游戏配置焊死在一起，高危——条件写 + 基线恢复才是安全模式。
 
+**v1.5 实机手感调优（2026-08-28 同日，用户实测定档）**：强度档 mix 调为 0.15/0.40/0.60（原 0.25/0.5/0.75，用户反馈差异化不足）；时机档 ε 调为 0.35/0.25（原 0.30/0.18，放缓中间两档，minSPD 配对 8.0/4.0 不变）。同轮档位标识符对齐中文 UI 词汇表：WEAK/STRONG/STOCK → LOW/HIGH/MAX，DEFAULT/EARLIER → LATE/EARLY（存档 value 键值不变，无需迁移）。**档位现行值以 `ModConfig.kt` 为单一事实源**，本节保留 v1.4 落地时快照。
+
 ## 7. 行业先例来源（网络调研摘要）
 
 - rFactor2 S397 官方 modding 文档：档位 = Range 三元组 `(base, step, count)` 同时驱动目标滑移角与切断强度；cut method / per-gear 缩放 / 低速门控参数齐全。https://docs.studio-397.com/x/JwCYB
