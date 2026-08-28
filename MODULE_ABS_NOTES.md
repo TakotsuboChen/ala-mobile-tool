@@ -70,6 +70,17 @@ hook 安装正常（配置链完整），但 `HandleABS` 是无调用者的死�
 
 **不建议**：滑移阈值 0.15 位于 `.rodata`（0x929A54），修改需改只读内存页，风险高。
 
+### 2b. 档位实装定案（2026-08-28，工程要点）
+
+ABS 档位已实装（设计全文见 `ABS_LEVEL_DESIGN.md`，机制实测见技术解析 §2.8.2 修正块），工程层只记实现要点：
+
+- **注入点**：`proxy_fixed_update` 白名单分支，**覆写块（abs_apply_gear）必须排在 usesABS=false 关闭块之前**——基线捕获要求字段未被模块碰过，关闭路径先跑会污染 usesABS 基线。
+- **usesABS 残留恢复（实机 bug 教训）**：关闭路径写 `usesABS=false` 后，游戏**永远不会自己写回**（原生唯一写者 Awake 装车写一次）——恢复方向必须模块自己实现：关闭时置 `g_abs_uses_taking_over`，enable_abs 回 true 后一次性恢复捕获基线。漏置位的表现：切到关闭后切回任何档位（含总开关回默认）都停在关闭状态。
+- **三条独立通道**：b（干预强度，绝对值覆写）、T_b（制动压力，基线×tbScale 等比写，独立于 enable_abs/abs_mix 生效）、usesABS（关闭/恢复）。每帧绝对值写防复利（TC v1.2 教训）；换车检测（wheels 数组指针变化）重置基线重捕（T_b 是 per-car 值，multiplier 属 carModifier）。
+- **运行时真值（ABSdiag 实测）**：前轮 `T_b=4500`（75×bias60）、后轮 `T_b=3000`（75×40）、`b=0.000`、uses 基线=1——与 SetBrakeBiasValues 计算式逐位吻合。档位定案：高 0.50 / 中等 0.60 / 低 0.80（方波平均 0.75/0.80/0.90），原厂 b=0（平均 0.50）。
+- **0x3D4（currentBrakeBiasFront）读法未解**：float 读出 denormal≈0、int 读出 2049——非功能字段，abs_diag 已移除该列；bias 真值从 T_b 反推（4500/75=60）。
+- **诊断**：`abs_diag_log`（白名单内限频 25 帧）——标定完可整段移除；0x408 pulseBrakes 是真实介入标志（absTriggered 恒 false 死字段，勿用）。
+
 ---
 
 ## 3. 升级游戏版本时的验证清单
