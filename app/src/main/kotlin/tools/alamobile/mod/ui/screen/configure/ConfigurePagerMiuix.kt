@@ -169,8 +169,8 @@ fun ConfigurePagerMiuix(
                                 onCheckedChange = actions::setEnableUnlock
                             )
                             SwitchPreference(
-                                title = "隐藏油门和刹车按钮",
-                                summary = "隐藏游戏原生油门/刹车踏板，保留离合",
+                                title = "隐藏油门和刹车按键",
+                                summary = "隐藏原生油门和刹车，保留离合",
                                 startAction = {
                                     Icon(
                                         Icons.Rounded.VisibilityOff,
@@ -200,7 +200,7 @@ fun ConfigurePagerMiuix(
                             }
                             OverlayDropdownPreference(
                                 title = "牵引力控制",
-                                summary = "游戏原生 TC 控制",
+                                summary = "调整游戏原生 TC",
                                 items = ModConfig.TcMode.entries.map { tcModeName(it) },
                                 startAction = {
                                     Icon(
@@ -253,7 +253,7 @@ fun ConfigurePagerMiuix(
                                     ) {
                                         SliderPreference(
                                             title = "介入时机",
-                                            summary = "修改滑移指标条件",
+                                            summary = "修改介入的滑移指标条件",
                                             value = ModConfig.TcTiming.entries.indexOf(uiState.tcTiming).toFloat(),
                                             onValueChange = { v ->
                                                 actions.setTcTiming(
@@ -333,7 +333,7 @@ fun ConfigurePagerMiuix(
                                     // [F_base·Ω, 0] 平均 0.5；抬 b 抬方波平均 (1+b)/2。
                                     SliderPreference(
                                         title = "干预强度",
-                                        summary = "修改干预方波平均",
+                                        summary = "修改干预制动偏置",
                                         value = ModConfig.AbsStrength.entries.indexOf(uiState.absStrength).toFloat(),
                                         onValueChange = { v ->
                                             actions.setAbsStrength(
@@ -663,33 +663,34 @@ fun ConfigurePagerMiuix(
     // ABS 自定义切换警示（每次从默认切到自定义时弹出）。标题居中（OverlayDialog
     // 自带）、正文左对齐、单按钮"我已了解"。文案说明制动基数与锁死风险的
     // 因果关系——减弱干预档 + 原厂病态强制动基数 = 重刹严重锁死。
-    if (showAbsWarnDialog) {
-        OverlayDialog(
-            show = true,
-            title = "⚠建议调整最大制动压力",
-            onDismissRequest = { showAbsWarnDialog = false },
-            onDismissFinished = { },
-            content = {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    top.yukonga.miuix.kmp.basic.Text(
-                        text = "由于 Ala Mobile 的制动摩擦扭矩上限显著超出最大垂直载荷下的抓地力极限，" +
-                            "若调低 ABS 档位，重刹可能将会出现严重锁死情况，" +
-                            "强烈建议您适当下调最大制动压力",
-                        fontSize = MiuixTheme.textStyles.body2.fontSize,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(modifier = Modifier.height(20.dp))
-                    TextButton(
-                        text = "我已了解",
-                        onClick = { showAbsWarnDialog = false },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
-                    )
-                }
+    // 常驻组合树 + show 驱动进出动画（与 SupportDialog/EulaDialog 同模式）：
+    // 不能用 if 条件挂载——关闭时组件被直接移出组合树，退出动画没有机会播放
+    //（表现为闪现消失）。
+    OverlayDialog(
+        show = showAbsWarnDialog,
+        title = "⚠️建议调整最大制动压力",
+        onDismissRequest = { showAbsWarnDialog = false },
+        onDismissFinished = { },
+        content = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                top.yukonga.miuix.kmp.basic.Text(
+                    text = "由于 Ala Mobile 的制动摩擦扭矩上限显著超出最大垂直载荷下的抓地力极限，" +
+                        "若调低 ABS 档位，重刹可能将会出现严重锁死情况，" +
+                        "强烈建议您适当下调最大制动压力",
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+                TextButton(
+                    text = "我已了解",
+                    onClick = { showAbsWarnDialog = false },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColorsPrimary()
+                )
             }
-        )
-    }
+        }
+    )
 }
 
 /**
@@ -754,20 +755,20 @@ private fun curveName(curve: ModConfig.PedalCurve): String = when (curve) {
 }
 
 private fun tcModeName(mode: ModConfig.TcMode): String = when (mode) {
-    ModConfig.TcMode.DEFAULT -> "游戏默认"
+    ModConfig.TcMode.DEFAULT -> "默认"
     ModConfig.TcMode.CUSTOM -> "自定义"
 }
 
 private fun tcStrengthName(strength: ModConfig.TcStrength): String = when (strength) {
     ModConfig.TcStrength.OFF -> "关闭 TC"
     ModConfig.TcStrength.WEAK -> "低"
-    ModConfig.TcStrength.MEDIUM -> "中等"
-    ModConfig.TcStrength.STRONG -> "强"
-    ModConfig.TcStrength.STOCK -> "最强（默认）"
+    ModConfig.TcStrength.MEDIUM -> "中"
+    ModConfig.TcStrength.STRONG -> "高"
+    ModConfig.TcStrength.STOCK -> "最高（默认）"
 }
 
 private fun tcTimingName(timing: ModConfig.TcTiming): String = when (timing) {
-    ModConfig.TcTiming.DEFAULT -> "默认"
+    ModConfig.TcTiming.DEFAULT -> "较晚（默认）"
     ModConfig.TcTiming.EARLIER -> "较早"
     ModConfig.TcTiming.VERY_EARLY -> "非常早"
     ModConfig.TcTiming.REALTIME -> "实时"
@@ -781,7 +782,7 @@ private fun absModeName(mode: ModConfig.AbsMode): String = when (mode) {
 private fun absStrengthName(strength: ModConfig.AbsStrength): String = when (strength) {
     ModConfig.AbsStrength.OFF -> "关闭 ABS"
     ModConfig.AbsStrength.WEAK -> "低"
-    ModConfig.AbsStrength.MEDIUM -> "中等"
+    ModConfig.AbsStrength.MEDIUM -> "中"
     ModConfig.AbsStrength.STRONG -> "高"
     ModConfig.AbsStrength.STOCK -> "最高（默认）"
 }
