@@ -6,9 +6,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
@@ -45,8 +47,10 @@ import androidx.compose.material.icons.rounded.RoundedCorner
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -57,16 +61,24 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChangeIgnoreConsumed
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.util.lerp
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import tools.alamobile.mod.config.ModConfig
 import tools.alamobile.mod.ui.theme.LocalEnableBlur
 import tools.alamobile.mod.ui.util.BlurredBar
+import tools.alamobile.mod.ui.util.LocalGestureDirectionLock
+import tools.alamobile.mod.ui.util.blockScrollAxis
 import tools.alamobile.mod.ui.util.rememberBlurBackdrop
 import tools.alamobile.mod.ui.viewmodel.ConfigUiState
 import tools.alamobile.mod.ui.viewmodel.ConfigViewModel
@@ -132,6 +144,9 @@ fun ConfigurePagerMiuix(
                     .fillMaxHeight()
                     .scrollEndHaptic()
                     .overScrollVertical()
+                    // 方向锁为横向（正在横滑切页）时吃掉本页竖向增量——
+                    // AwaitGesturePickup 复活接管也滚不动（见 GestureDirectionLock.kt）。
+                    .blockScrollAxis(LocalGestureDirectionLock.current, Orientation.Vertical)
                     .nestedScroll(scrollBehavior.nestedScrollConnection)
                     .padding(horizontal = 12.dp),
                 // 底部额外留出底栏高度，避免底栏挡住页面底部内容。
@@ -740,13 +755,121 @@ private fun SliderPreference(
                 )
             }
         }
-        top.yukonga.miuix.kmp.basic.Slider(
-            value = value,
-            onValueChange = onValueChange,
+        SliderGestureBox(
             valueRange = valueRange,
-            modifier = Modifier.padding(top = 8.dp)
-        )
+            onValueChange = onValueChange,
+        ) {
+            top.yukonga.miuix.kmp.basic.Slider(
+                value = value,
+                onValueChange = onValueChange,
+                valueRange = valueRange,
+            )
+        }
     }
+}
+
+/**
+ * 滑块手势独占层 v3（横向主导裁决）：起点在本区域的手势，越过 touch slop 时
+ * 按 |dx| vs |dy| 裁决方向——横向主导才独占（消费全部后续事件并自行驱动
+ * 取值），竖向主导整体让位（不消费任何事件，页面正常滚动）。
+ *
+ * v2 教训（冷启动滚动回归）：v2 从 DOWN 起无差别独占，而配置页滑块条是
+ * 全宽的且密度极高——起点落在滑块条上的竖滑全部被吞（帧数掉到基线 1/6，
+ * 用户感知"滑动触发不了"）。v3 只在横向主导时消费，竖向手势完全放行，
+ * 恢复标准方向消歧的滚动体验；横向独占仍挡住 pager 翻页与 LazyColumn
+ * 竖向漂移抢手势。
+ *
+ * 为什么独占时必须同时接管取值（v2 已证）：Compose 的 slop 竞争是自由
+ * 竞争——awaitPointerSlopOrCancellation 在每个未跨阈事件后走 Final pass
+ * 复核，只要本事件被"任何人"消费过就取消检测。独占层的消费会连带取消
+ * miuix Slider 内部的 draggable，所以取值由本层换算：越过水平 slop 后按
+ * 手指绝对 x 映射 value（对齐 miuix onDragStarted 的"抓取跳到手指处"），
+ * 并复刻 Edge 档触边震动。内部 draggable 先抢到横向时与本层双重驱动，
+ * 但两者换算路径相同（绝对 x → fraction → lerp），取值收敛一致。
+ *
+ * 结构约定：必须是 Slider 的祖先节点（本 Box），不能是同节点 modifier。
+ *
+ * 已知代价：独占期间内部 isDragging 失效，取值动画走常态慢弹簧
+ *（stiffness 322），快速拖动时拇指视觉跟随有轻微滞后。
+ */
+@Composable
+private fun SliderGestureBox(
+    valueRange: ClosedFloatingPointRange<Float>,
+    onValueChange: (Float) -> Unit,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val onValueChangeState by rememberUpdatedState(onValueChange)
+    val hapticFeedbackState by rememberUpdatedState(LocalHapticFeedback.current)
+    var widthPx by remember { mutableIntStateOf(0) }
+    var heightPx by remember { mutableIntStateOf(0) }
+
+    Box(
+        modifier = Modifier
+            .onSizeChanged { widthPx = it.width; heightPx = it.height }
+            .pointerInput(valueRange) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val pointerSlop = viewConfiguration.touchSlop
+                    var pointerId = down.id
+                    var claimed = false
+                    var edgeFeedback = false
+                    var total = Offset.Zero
+
+                    // 手指 x → value：与 miuix horizontalVisualFraction /
+                    // resolveValueFromFraction（无 steps、无 keyPoints 路径）
+                    // 完全一致——拇指半径内缩 + lerp。
+                    fun updateValue(x: Float) {
+                        if (widthPx == 0) return
+                        val thumbRadius = heightPx / 2f
+                        val availableWidth = (widthPx - 2f * thumbRadius).coerceAtLeast(0f)
+                        val fraction = if (availableWidth == 0f) 0f
+                        else ((x - thumbRadius) / availableWidth).coerceIn(0f, 1f)
+                        val newValue = lerp(valueRange.start, valueRange.endInclusive, fraction)
+                        onValueChangeState(newValue)
+                        // Edge 档触边震动（对齐 miuix SliderHapticState.handleEdgeHaptic）。
+                        val atEdge = newValue == valueRange.start || newValue == valueRange.endInclusive
+                        if (atEdge && !edgeFeedback) {
+                            hapticFeedbackState.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                            edgeFeedback = true
+                        } else if (!atEdge) {
+                            edgeFeedback = false
+                        }
+                    }
+
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val tracked = event.changes.firstOrNull { it.id == pointerId && it.pressed }
+                            ?: event.changes.firstOrNull { it.pressed }
+                        if (tracked == null) break
+                        pointerId = tracked.id
+                        if (claimed) {
+                            // 已独占：全量消费挡父级（pager/LazyColumn），并驱动取值。
+                            event.changes.forEach { it.consume() }
+                            updateValue(tracked.position.x)
+                        } else {
+                            // 待裁决：不消费——竖向手势必须完整放行给页面滚动。
+                            total += tracked.positionChangeIgnoreConsumed()
+                            val dx = abs(total.x)
+                            val dy = abs(total.y)
+                            if (dx > pointerSlop || dy > pointerSlop) {
+                                if (dx >= dy) {
+                                    // 横向主导：独占 + 抓取跳变（对齐 miuix onDragStarted）。
+                                    claimed = true
+                                    event.changes.forEach { it.consume() }
+                                    updateValue(tracked.position.x)
+                                } else {
+                                    // 竖向主导：整体让位，退出观察，页面正常滚动。
+                                    break
+                                }
+                            }
+                        }
+                        if (event.changes.none { it.pressed }) break
+                    }
+                }
+            }
+            .padding(top = 8.dp),
+        content = content,
+    )
 }
 
 private fun curveName(curve: ModConfig.PedalCurve): String = when (curve) {
