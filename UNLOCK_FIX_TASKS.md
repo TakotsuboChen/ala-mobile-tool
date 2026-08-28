@@ -1,5 +1,7 @@
 # Ala Mobile 8.0.0 付费解锁修复任务
 
+> **📦 历史归档（2026-08-28）**——本文是 8.0.0 (200142) 时代的一次性任务清单，全部方法偏移为 8.0.0 专属、在 8.0.4 (200146) 上已失效。解锁路径此后经历多次重构：走 `SetUnlocked(true)` 完整路径写 PlayerPrefs 持久化（1.0.0）、native `BillingManager.Awake`/`GetInstance` 主路径 + 15 秒延迟 one-shot、Java 层 `BillingBridge` 辅助路径（现状见 README「内购解锁」小节与 `native/src/unlock_hook.c`）。本文仅作历史参考。
+
 ## 问题分析
 - [x] 分析 dump.cs 中 BillingManager 完整结构
 - [x] 确定问题根源：Awake() 触发 InitializeBilling() → CheckOwned() → Google Play 验证

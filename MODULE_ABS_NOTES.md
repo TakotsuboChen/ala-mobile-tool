@@ -77,7 +77,7 @@ ABS 档位已实装（设计全文见 `ABS_LEVEL_DESIGN.md`，机制实测见技
 - **注入点**：`proxy_fixed_update` 白名单分支，**覆写块（abs_apply_gear）必须排在 usesABS=false 关闭块之前**——基线捕获要求字段未被模块碰过，关闭路径先跑会污染 usesABS 基线。
 - **usesABS 残留恢复（实机 bug 教训）**：关闭路径写 `usesABS=false` 后，游戏**永远不会自己写回**（原生唯一写者 Awake 装车写一次）——恢复方向必须模块自己实现：关闭时置 `g_abs_uses_taking_over`，enable_abs 回 true 后一次性恢复捕获基线。漏置位的表现：切到关闭后切回任何档位（含总开关回默认）都停在关闭状态。
 - **三条独立通道**：b（干预强度，绝对值覆写）、T_b（制动压力，基线×tbScale 等比写，独立于 enable_abs/abs_mix 生效）、usesABS（关闭/恢复）。每帧绝对值写防复利（TC v1.2 教训）；换车检测（wheels 数组指针变化）重置基线重捕（T_b 是 per-car 值，multiplier 属 carModifier）。
-- **运行时真值（ABSdiag 实测）**：前轮 `T_b=4500`（75×bias60）、后轮 `T_b=3000`（75×40）、`b=0.000`、uses 基线=1——与 SetBrakeBiasValues 计算式逐位吻合。档位定案：高 0.50 / 中等 0.60 / 低 0.80（方波平均 0.75/0.80/0.90），原厂 b=0（平均 0.50）。
+- **运行时真值（ABSdiag 实测）**：前轮 `T_b=4500`（75×bias60）、后轮 `T_b=3000`（75×40）、`b=0.000`、uses 基线=1——与 SetBrakeBiasValues 计算式逐位吻合。档位定案（第三轮，2026-08-28）：高 0.40 / 中 0.60 / 低 0.80（方波平均 0.70/0.80/0.90），原厂 b=0（平均 0.50）。现行值以 `ModConfig.kt` AbsStrength 为单一事实源，标定史见 `ABS_LEVEL_DESIGN.md` §4。
 - **0x3D4（currentBrakeBiasFront）读法未解**：float 读出 denormal≈0、int 读出 2049——非功能字段，abs_diag 已移除该列；bias 真值从 T_b 反推（4500/75=60）。
 - **诊断**：`abs_diag_log`（白名单内限频 25 帧）——标定完可整段移除；0x408 pulseBrakes 是真实介入标志（absTriggered 恒 false 死字段，勿用）。
 
@@ -91,7 +91,11 @@ ABS 档位已实装（设计全文见 `ABS_LEVEL_DESIGN.md`，机制实测见技
 2. `#0x3CE`（usesABS）访问扫描——确认门控位置（预计仍在 `RoadForce`）；
 3. `.rodata` 0x929A54 浮点值检查——确认阈值仍为 0.15；
 4. 重新 dump IL2CPP 并更新 `OffsetTable.kt` / `offsets_sheet.csv`；
-5. 实测：写 `usesABS=false` 后重刹是否锁死。
+5. 实测：写 `usesABS=false` 后重刹是否锁死；
+6. `SetBrakeBiasValues`（0x1762BF4）计算式复核——`T_b`（0x88）/`b`（0x3E0）派生关系是否仍成立；
+7. `rawBrakeBiasValue`（0x3E0，b 绝对值覆写目标）访问扫描——确认无其他写者；
+8. `T_b`（0x88）与 `pulseBrakes`（0x408）偏移——最大制动压力等比缩放与介入标志依赖二者；
+9. 实测：ABS 自定义档位写入生效（ABSdiag 读回 b/T_b 与档位预期一致）。
 
 ---
 
@@ -145,7 +149,9 @@ $NDK_OBJDUMP -d --start-address=0x1A7B35C --stop-address=0x1A7BE44 lib/arm64-v8a
 
 **直接写 `tclEnable` (0xC6) = false 无效**。玩家车的该字段被
 `carModifier.Update` → `TractionControlDynamicAssist`（0x176935C，仅玩家车调用）
-每帧重算：先无条件写 true，再按条件写 false（高速 > 22 m/s、不在维修区时关闭）。
+每帧重算：先无条件写 true，再按条件写 false（条件写 false 被 singleton 谓词
+双重门控，正常赛道不生效——旧"高速 > 22 m/s 关闭"结论已修正为维修区限速器，
+见 `TC_LEVEL_DESIGN.md` §2b）。
 写 false 后下一物理帧即被覆盖。
 
 **模块现行实现**（`pedal_hook.c` 的 `proxy_traction_filter`，已实测生效）：
@@ -169,8 +175,8 @@ hook `TractionFilter` 入口，TC 关闭时直接 `return accel` 不调 orig—�
 
 ### 5.3 TC 行为速查（实测对照用）
 
-- 生效车速区间：约 3.6–79 km/h（`TCLminSPD` = 1.0 m/s 下限；> 22 m/s 被管理器关闭）；
-- 一挡（gear == 1）完全不干预——起步不受 TC 影响；
+- 生效车速区间：**全速域活跃**（正常赛道行驶 tclEnable 恒为 true；旧"3.6–79 km/h"中的 79 km/h 上限实为维修区限速器，低速端由 TC 时机档 minSPD 门控管辖，见 `TC_LEVEL_DESIGN.md` §2b）；
+- 空挡（gear == 1，UI 显示 N）直通豁免；UI 显示的"1 挡"是 gear==2，起步期间 TC 正常活跃（§2b 反汇编修正）；
 - 满削减保留 15% 油门（`c_T` = −0.85，`.rodata` @ 0x929E7C，只读不建议改）；
 - 判据是**综合滑移指标** W = max(|slipRatio/maxSlip|, |slipAngle/maxAngle|)，
   纵向滑移与横向侧偏都会触发，不限于驱动轮空转；

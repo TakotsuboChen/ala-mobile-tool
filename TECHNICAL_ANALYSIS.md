@@ -562,6 +562,12 @@ $`T`$ 即被重算为 $`F_{\mathrm{base}}\Omega \le T_b`$——与轮胎是否�
 >    恒在 ABS 段内；$`|\sigma|>0.15`$（唯一比较点 0x1A7B760 fcmp/b.le）仅
 >    切换"满压 $`F_{\mathrm{base}}\Omega`$ ↔ 泄压 $`\times b`$"相位 [V]。
 >    pulse 相位乘法后**无任何二次 clamp**（0x1A7B7DC 直接 str）[V]。
+> 5. **模块侧杠杆（v2 档位架构，2026-08-28 实装）**：针对上述冗余来源，模块提供
+>    两组正交旋钮——**干预强度**（绝对值覆写 per-wheel $`b`$，抬高方波平均缓解
+>    "全段过度保护"）与**最大制动压力**（等比缩放 $`T_b`$，修"关 ABS 秒锁死"的
+>    制动基数，关闭 ABS 下亦生效）；关闭 ABS 走 per-wheel `usesABS=false` 双重
+>    门控。档位模型与标定史见 `ABS_LEVEL_DESIGN.md`，工程实现见
+>    `MODULE_ABS_NOTES.md` §2b。
 
 按影响排序的冗余来源分解：
 

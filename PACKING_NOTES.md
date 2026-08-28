@@ -1,5 +1,7 @@
 # Ala Mobile 重打包工作记录
 
+> **📦 历史归档（2026-08-28）**——本文是 2026-07-28 针对 8.0.0 (200142) 的一次性重打包工作记录，**完整流水线已收编进 `.claude/skills/coex-apk-builder/SKILL.md`**（覆盖 Play Protect 绕过、Unity 资源压缩修复、split APK 合并、签名与验证）。当前共存版产物见 `安装包/Ala Mobile 8.0.4 Takotsubo 共存版.apk`。文中 `/tmp` 路径与 8.0.0 偏移仅具历史价值，请勿按本文档操作。
+
 ## 🎉 破解成功！(2026-07-28)
 
 **最终方案：LSPosed 模块 + Java 层 Hook**
@@ -354,9 +356,9 @@ return-object v0
 - `jadx-gui`（可视化反编译，可选）
 
 ### 密钥库信息
-- 路径: `/tmp/ala-apk-work/mod_key.jks`
+- 路径: `/tmp/ala-apk-work/mod_key.jks`（临时目录，已随环境清理不存在）
 - 别名: `mod_signer`
-- 密码: `modpass123`
+- 密码: （已从本文档移除——明文密钥不入库；现行签名配置经环境变量注入，见 `app/build.gradle.kts` 的 `signingConfigs`）
 
 ### 生成的 APK
 - 路径: `/tmp/ala-mobile-tool/AlaMobile_8.0.0_Takotsubo_v9.apk`
