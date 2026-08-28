@@ -125,6 +125,22 @@ class ConfigReceiver : BroadcastReceiver() {
                 Log.i(TAG, "ConfigReceiver: setTcParams mix=$tcMix eps=$tcEps minspd=$tcMinspd")
             }
 
+            // 实时同步 ABS 档位（干预强度 b 覆写 + 制动压力 T_b 等比缩放）——
+            // 与 TC 档位同构：**必须经 absEffectiveParams 按 abs_mode 派生**，
+            // mode=default 恒为原厂透传（bOverride=-1），否则"调回游戏默认"
+            // 恢复不了原生行为。旧广播 JSON（无新键）落到默认，与旧行为一致。
+            // 制动压力独立于模式（absPressure <1.0 时即使默认档/关闭档也生效）。
+            val absMode = ModConfig.AbsMode.from(incoming.optString("abs_mode", "default"))
+            val (absMix, absBOverride, absTbScale) = ModConfig.absEffectiveParams(
+                absMode,
+                ModConfig.AbsStrength.from(incoming.optString("abs_strength", "stock")),
+                incoming.optDouble("abs_pressure", 1.0).toFloat().coerceIn(0f, 1f)
+            )
+            if (tools.alamobile.mod.NativeBridge.isAvailable) {
+                tools.alamobile.mod.NativeBridge.setAbsParams(absMix, absBOverride, absTbScale)
+                Log.i(TAG, "ConfigReceiver: setAbsParams mix=$absMix bOverride=$absBOverride tbScale=$absTbScale")
+            }
+
             // 实时同步音乐替换开关——用户从配置页切到游戏时即时生效。
             // 需要 native 可用（mute 游戏音乐靠 native hook 静音 AudioSource）。
             val enableMusicReplace = incoming.optBoolean("enable_music_replace", false)

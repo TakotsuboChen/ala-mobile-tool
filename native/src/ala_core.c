@@ -289,6 +289,17 @@ Java_tools_alamobile_mod_NativeBridge_setTcParams(JNIEnv *env, jclass clazz,
     pedal_set_tc_params(mix, eps, minspd);
 }
 
+// ABS 档位（干预强度 b 覆写 + 制动压力 T_b 等比缩放）。低频调用（仅配置
+// 变更时），LOGI 只在此处与安装期，RoadForce/卡控 hook 每帧路径内严禁日志。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_setAbsParams(JNIEnv *env, jclass clazz,
+                                                   jfloat mix, jfloat b_override,
+                                                   jfloat tb_scale) {
+    (void) env;
+    (void) clazz;
+    pedal_set_abs_params(mix, b_override, tb_scale);
+}
+
 // 主动触发一次强制解锁（不依赖 hook 触发时机）。
 // 在 15s 延迟路径中调用：get_Instance → SetUnlocked(true) → OnAlreadyOwned。
 JNIEXPORT jboolean JNICALL

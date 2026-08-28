@@ -279,6 +279,12 @@ class AlaMobileModule : XposedModule() {
         val (tcMix, tcEps, tcMinspd) = if (settings != null) {
             ModConfig.tcEffectiveParams(settings.tcMode, settings.tcStrength, settings.tcTiming)
         } else Triple(1.0f, 0f, 0f)
+        // ABS 档位（干预强度 b 覆写 + 制动压力 T_b 等比缩放）。**经 absEffectiveParams
+        // 按 mode 派生**：mode=default 恒为原厂透传（bOverride=-1 不覆写）。
+        // settings==null（NPatch 早期）时同语义（游戏默认 + 不缩放）。
+        val (absMix, absBOverride, absTbScale) = if (settings != null) {
+            ModConfig.absEffectiveParams(settings.absMode, settings.absStrength, settings.absPressure)
+        } else Triple(1.0f, -1f, 1.0f)
 
         // 初始化 Logger：游戏进程用 externalFilesDir 写日志文件。
         // logEnabled 开关控制文件写入，logcat 始终输出。
@@ -431,6 +437,13 @@ class AlaMobileModule : XposedModule() {
                         logX(Log.INFO, TAG, "setTcParams mix=$tcMix eps=$tcEps minspd=$tcMinspd")
                     } catch (e: Throwable) {
                         logX(Log.ERROR, TAG, "setTcParams failed: ${e.message}")
+                    }
+                    // ABS 档位下发：同 TC 模式（init 兜底为不覆写/不缩放，这里补用户档位）。
+                    try {
+                        NativeBridge.setAbsParams(absMix, absBOverride, absTbScale)
+                        logX(Log.INFO, TAG, "setAbsParams mix=$absMix bOverride=$absBOverride tbScale=$absTbScale")
+                    } catch (e: Throwable) {
+                        logX(Log.ERROR, TAG, "setAbsParams failed: ${e.message}")
                     }
                     // 主菜单音乐替换：native hooks 装好后初始化播放器。
                     // 提取 APK 内置 MP3 → 轮询主菜单状态 → 在主菜单播放。

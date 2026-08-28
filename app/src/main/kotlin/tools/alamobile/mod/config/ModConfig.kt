@@ -62,6 +62,16 @@ object ModConfig {
     const val KEY_TC_MODE = "tc_mode"
     const val KEY_TC_STRENGTH = "tc_strength"
     const val KEY_TC_TIMING = "tc_timing"
+    // ABS 档位调节（ABS_LEVEL_DESIGN v2）：模式 + 干预强度 + 制动压力。
+    // 干预强度 = pulse 释放深度 b(0x3E0) 绝对覆写——游戏默认配平（bias=60）下
+    // b=0，pulse 帧完全泄压，方波 [F_base·Ω, 0] 平均 0.5（"全段几乎不锁死"
+    // 过度保护的根源）；抬 b 抬方波平均 (1+b)/2。制动压力 = T_b(0x88) 等比
+    // 缩放（F1 官方游戏同名 setup 项 80-100%），独立于 ABS 模式生效——修
+    // "关 ABS 秒锁死"（制动基数远超抓地极限）。存字符串枚举 + 浮点，
+    // 实机标定只改预设值不动用户存档。
+    const val KEY_ABS_MODE = "abs_mode"
+    const val KEY_ABS_STRENGTH = "abs_strength"
+    const val KEY_ABS_PRESSURE = "abs_pressure"
 
     // 主菜单音乐替换开关：替换为 Hans Zimmer - F1
     const val KEY_ENABLE_MUSIC_REPLACE = "enable_music_replace"
@@ -311,6 +321,55 @@ object ModConfig {
     }
 
     /**
+     * ABS 调节模式。
+     * - DEFAULT: 游戏默认（不覆写 b，usesABS 保持原生）
+     * - CUSTOM: 展开干预强度调节卡片
+     *
+     * 迁移：旧配置无 `abs_mode` 键时，从旧 `enable_abs` 布尔派生
+     *（false → CUSTOM+OFF；true → DEFAULT），见 [migrateAbs]。
+     */
+    enum class AbsMode(val value: String) {
+        DEFAULT("default"),
+        CUSTOM("custom");
+
+        companion object {
+            fun from(value: String?): AbsMode {
+                return entries.find { it.value == value } ?: DEFAULT
+            }
+        }
+    }
+
+    /**
+     * ABS 干预强度档：pulse 相位释放深度 b (0x3E0) 的绝对覆写值。
+     *
+     * 游戏 SetBrakeBiasValues 计算：前轮 b = clamp01((bias−60)/10)×0.3、后轮
+     * 对称——bias=60（中点）时前后轮 b 全为 0，pulse 帧 T×0 **完全泄压**，
+     * 方波 [F_base·Ω, 0] 平均 0.5×F_base·Ω（"全段几乎不锁死"过度保护的
+     * 根源，ABS_LEVEL_DESIGN v2 §2.2）。抬 b 直接抬方波平均 (1+b)/2；
+     * b≥0.3 后 β=clamp01(b/0.3) 饱和、Ω 摩擦圆耦合关死——释放深度成为
+     * 零副作用杠杆。游戏原生 UI 上限只能到 0.3（bias=70 单侧钳位），
+     * 档位 WEAK 越界到 0.5（贴极限工作区）是模块存在的意义之一。
+     *
+     * [bOverride] < 0 表示不覆写字段（"最高（默认）"/OFF——恢复捕获基线）；
+     * ≥0 时每帧绝对值写（勿用现值×系数，防复利衰减，TC v1.2 教训）。
+     * OFF 档的"关闭"语义经 enableAbs 派生布尔走既有 usesABS=false 通道，
+     * 不占用 bOverride。
+     */
+    enum class AbsStrength(val value: String, val bOverride: Float) {
+        OFF("off", -1f),
+        WEAK("weak", 0.80f),
+        MEDIUM("medium", 0.60f),
+        STRONG("strong", 0.50f),
+        STOCK("stock", -1f);
+
+        companion object {
+            fun from(value: String?): AbsStrength {
+                return entries.find { it.value == value } ?: STOCK
+            }
+        }
+    }
+
+    /**
      * Monotone cubic interpolation (Fritsch–Carlson) through the control
      * points plus the fixed endpoints (0,0) and (1,1).
      *
@@ -377,6 +436,11 @@ object ModConfig {
         val TC_MODE = TcMode.DEFAULT
         val TC_STRENGTH = TcStrength.STOCK
         val TC_TIMING = TcTiming.DEFAULT
+        val ABS_MODE = AbsMode.DEFAULT
+        val ABS_STRENGTH = AbsStrength.STOCK
+        // 100% = 不缩放 T_b。0-100% 无级（0% 用于观察生效：高速段 F_base→0，
+        // 制动几乎消失）。字段写入生效已由 ABSdiag 实证（tb=3375=4500×0.75）。
+        const val ABS_PRESSURE = 1.0f
         // 主菜单音乐替换默认开启
         const val ENABLE_MUSIC_REPLACE = true
         // V10 引擎声浪默认关闭
@@ -462,6 +526,7 @@ object ModConfig {
 
             val json = JSONObject(file.readText())
             val (tcMode, tcStrength, tcTiming) = migrateTc(json)
+            val (absMode, absStrength, absPressure) = migrateAbs(json)
             Settings(
                 pedalMode = migratePedalMode(json),
                 // 自动 DRS 功能未实现，强制读成 false，忽略任何旧配置里的 true，
@@ -480,13 +545,13 @@ object ModConfig {
                     Defaults.ENABLE_UNLOCK
                 ),
                 enableTc = tcMode == TcMode.DEFAULT || tcStrength != TcStrength.OFF,
-                enableAbs = json.optBoolean(
-                    KEY_ENABLE_ABS,
-                    Defaults.ENABLE_ABS
-                ),
+                enableAbs = absMode == AbsMode.DEFAULT || absStrength != AbsStrength.OFF,
                 tcMode = tcMode,
                 tcStrength = tcStrength,
                 tcTiming = tcTiming,
+                absMode = absMode,
+                absStrength = absStrength,
+                absPressure = absPressure,
                 enableMusicReplace = json.optBoolean(
                     KEY_ENABLE_MUSIC_REPLACE,
                     Defaults.ENABLE_MUSIC_REPLACE
@@ -571,6 +636,10 @@ object ModConfig {
             put(KEY_TC_MODE, settings.tcMode.value)
             put(KEY_TC_STRENGTH, settings.tcStrength.value)
             put(KEY_TC_TIMING, settings.tcTiming.value)
+            // ABS 档位：同 TC 模式。enableAbs 上行照写（派生值）。
+            put(KEY_ABS_MODE, settings.absMode.value)
+            put(KEY_ABS_STRENGTH, settings.absStrength.value)
+            put(KEY_ABS_PRESSURE, settings.absPressure.toDouble())
             put(KEY_ENABLE_MUSIC_REPLACE, settings.enableMusicReplace)
             put(KEY_ENABLE_V10_SOUND, settings.enableV10Sound)
             put(KEY_HIDE_GAME_PEDALS, settings.hideGamePedals)
@@ -835,6 +904,7 @@ object ModConfig {
         return try {
             val j = JSONObject(json)
             val (tcMode, tcStrength, tcTiming) = migrateTc(j)
+            val (absMode, absStrength, absPressure) = migrateAbs(j)
             Settings(
                 pedalMode = migratePedalMode(j),
                 enableAutoDrs = false,
@@ -842,10 +912,13 @@ object ModConfig {
                 enableManualShift = j.optBoolean(KEY_ENABLE_MANUAL_SHIFT, Defaults.ENABLE_MANUAL_SHIFT),
                 enableUnlock = j.optBoolean(KEY_ENABLE_UNLOCK, Defaults.ENABLE_UNLOCK),
                 enableTc = tcMode == TcMode.DEFAULT || tcStrength != TcStrength.OFF,
-                enableAbs = j.optBoolean(KEY_ENABLE_ABS, Defaults.ENABLE_ABS),
+                enableAbs = absMode == AbsMode.DEFAULT || absStrength != AbsStrength.OFF,
                 tcMode = tcMode,
                 tcStrength = tcStrength,
                 tcTiming = tcTiming,
+                absMode = absMode,
+                absStrength = absStrength,
+                absPressure = absPressure,
                 enableMusicReplace = j.optBoolean(KEY_ENABLE_MUSIC_REPLACE, Defaults.ENABLE_MUSIC_REPLACE),
                 enableV10Sound = j.optBoolean(KEY_ENABLE_V10_SOUND, Defaults.ENABLE_V10_SOUND),
                 hideGamePedals = j.optBoolean(KEY_HIDE_GAME_PEDALS, Defaults.HIDE_GAME_PEDALS),
@@ -920,6 +993,26 @@ object ModConfig {
     }
 
     /**
+     * ABS 档位生效值派生：模式说了算（与 [tcEffectiveParams] 同构）。
+     * DEFAULT 恒为原厂透传（bOverride=-1 不覆写，与缓存 strength 无关——
+     * 否则"调回游戏默认"无法恢复原生行为）；CUSTOM 时按所选档生效。
+     * 返回 (mix, bOverride, tbScale) 三元组：
+     * - mix：b 覆写总闸（CUSTOM+OFF → 0；native 端 mix≤0 忽略 b 覆写，
+     *   "关闭 ABS"语义经 enableAbs 派生布尔走既有 usesABS=false 通道）
+     * - bOverride：pulse 释放深度绝对值（<0 = 不覆写，恢复捕获基线）
+     * - tbScale：T_b 等比缩放（1.0 = 不缩放；与 ABS 模式正交——"关 ABS
+     *   秒锁死"修复在 ABS 关闭/默认档下也持续生效，native 独立通道处理）
+     */
+    fun absEffectiveParams(
+        mode: AbsMode,
+        strength: AbsStrength,
+        pressure: Float
+    ): Triple<Float, Float, Float> {
+        return if (mode == AbsMode.DEFAULT) Triple(1f, -1f, pressure)
+        else Triple(if (strength == AbsStrength.OFF) 0f else 1f, strength.bOverride, pressure)
+    }
+
+    /**
      * TC 档位读取 + 一代迁移（与 brake_invert → pedal_invert 的单向迁移模式一致）：
      * 新键 `tc_mode` 存在时直接用三键；否则从旧 `enable_tc` 布尔派生——
      * true（默认）→ 游戏默认；false → 自定义+关闭（旧"TC 开关关闭"语义）。
@@ -939,6 +1032,35 @@ object ModConfig {
             Triple(TcMode.DEFAULT, Defaults.TC_STRENGTH, Defaults.TC_TIMING)
         } else {
             Triple(TcMode.CUSTOM, TcStrength.OFF, Defaults.TC_TIMING)
+        }
+    }
+
+    /**
+     * ABS 档位读取 + 一代迁移（与 [migrateTc] 同构）：
+     * 新键 `abs_mode` 存在时直接用三键；否则从旧 `enable_abs` 布尔派生——
+     * true（默认）→ 游戏默认；false → 自定义+关闭 ABS（旧"ABS 开关关闭"
+     * 语义原样保留，红线：老用户"ABS 关闭"不得悄悄变"游戏默认"）。
+     * `enable_abs` 本身不再直接读取（由 [AbsMode]/[AbsStrength] 派生），
+     * write 时照写派生值供旧版本回滚兼容。
+     * 制动压力独立读取（无 legacy 键，无旧配置时落 1.0 = 不缩放），
+     * clamp [0.75, 1.0] 防御异常值。
+     */
+    private fun migrateAbs(json: JSONObject): Triple<AbsMode, AbsStrength, Float> {
+        val pressure = json.optDouble(KEY_ABS_PRESSURE, Defaults.ABS_PRESSURE.toDouble())
+            .toFloat()
+            .coerceIn(0f, 1f)
+        val explicitMode = json.optString(KEY_ABS_MODE, "")
+        if (explicitMode.isNotEmpty()) {
+            return Triple(
+                AbsMode.from(explicitMode),
+                AbsStrength.from(json.optString(KEY_ABS_STRENGTH, Defaults.ABS_STRENGTH.value)),
+                pressure
+            )
+        }
+        return if (json.optBoolean(KEY_ENABLE_ABS, Defaults.ENABLE_ABS)) {
+            Triple(AbsMode.DEFAULT, Defaults.ABS_STRENGTH, pressure)
+        } else {
+            Triple(AbsMode.CUSTOM, AbsStrength.OFF, pressure)
         }
     }
 
@@ -1016,6 +1138,9 @@ object ModConfig {
             tcMode = Defaults.TC_MODE,
             tcStrength = Defaults.TC_STRENGTH,
             tcTiming = Defaults.TC_TIMING,
+            absMode = Defaults.ABS_MODE,
+            absStrength = Defaults.ABS_STRENGTH,
+            absPressure = Defaults.ABS_PRESSURE,
             enableMusicReplace = Defaults.ENABLE_MUSIC_REPLACE,
             enableV10Sound = Defaults.ENABLE_V10_SOUND,
             hideGamePedals = Defaults.HIDE_GAME_PEDALS,
@@ -1055,6 +1180,12 @@ object ModConfig {
         val tcMode: TcMode = Defaults.TC_MODE,
         val tcStrength: TcStrength = Defaults.TC_STRENGTH,
         val tcTiming: TcTiming = Defaults.TC_TIMING,
+        // ABS 档位。enableAbs 为派生值（DEFAULT 恒 true；CUSTOM 时 strength≠OFF），
+        // 三字段带默认值——PedalOverlayView 的命名参数部分构造无需改动。
+        val absMode: AbsMode = Defaults.ABS_MODE,
+        val absStrength: AbsStrength = Defaults.ABS_STRENGTH,
+        // 制动压力 T_b 等比缩放（1.0 = 不缩放），独立于 absMode/absStrength 生效。
+        val absPressure: Float = Defaults.ABS_PRESSURE,
         val enableMusicReplace: Boolean = Defaults.ENABLE_MUSIC_REPLACE,
         val enableV10Sound: Boolean = Defaults.ENABLE_V10_SOUND,
         val hideGamePedals: Boolean = Defaults.HIDE_GAME_PEDALS,

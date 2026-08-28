@@ -24,6 +24,25 @@ static int g_tc_taking_over = 0;
 // 必须写回捕获的基线，不能写 ctor 默认。-1 = 尚未捕获（兜底用实测常量）。
 static float g_tc_base_slip = -1.0f;
 static float g_tc_base_minspd = -1.0f;
+// ABS 档位接管状态：>0 表示当前正在覆写对应字段（用于切回"游戏默认"时的
+// 一次性基线恢复）。b（干预强度）与 T_b（制动压力）是两条独立通道——
+// 制动压力独立于 ABS 模式生效，故分开跟踪。
+static int g_abs_b_taking_over = 0;
+static int g_abs_tb_taking_over = 0;
+// 游戏真实 ABS 参数基线（ABS_LEVEL_DESIGN v2）：首次覆写前捕获的
+// b(0x3E0) / T_b(0x88) per-wheel 值。游戏经 SetBrakeBiasValues 装车时写入
+// 真实值（T_b=multiplier×bias、b=clamp01((bias−60)/10)×0.3），事件驱动不
+// 每帧重写——所以恢复必须写回捕获基线。-1 = 尚未捕获。
+// restart/换车时 wheels 数组指针变化 → 重置重捕（T_b 是 per-car 值，
+// 不同车 multiplier 可能不同，旧基线不可跨车复用）。
+static float g_abs_base_b[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
+static float g_abs_base_tb[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
+static void *g_abs_last_wheels = NULL;
+// usesABS(0x3CE) 残留恢复：关闭路径写过 false 后，游戏**永远不会自己写回**
+//（原生唯一写者 Awake 装车写一次）——切回开启时必须由模块恢复基线，否则
+// 任何档位（含总开关回默认）都永远停在关闭状态（实机实测 2026-08-28）。
+static int g_abs_uses_taking_over = 0;
+static int g_abs_base_uses[4] = {-1, -1, -1, -1};  // -1=未捕获，0/1=基线
 
 static volatile float g_throttle_value = 0.0f;
 static volatile float g_brake_value = 0.0f;
@@ -122,6 +141,11 @@ static inline int is_player_controller(void *instance) {
 static inline int is_target_player_car(void *instance) {
     return instance != NULL && instance == (void *) g_player_controller;
 }
+
+// ABS 档位覆写与诊断——定义在 proxy_handle_abs 之后，此处前向声明
+//（proxy_fixed_update 白名单分支先于定义调用）。
+static void abs_apply_gear(void *this);
+static void abs_diag_log(void *this);
 
 // 把当前模块 desired 输入值写到 controller 实例字段。
 // 只在对应 active 时写字段——不踩时绝不写，避免覆盖游戏自带输入
@@ -304,6 +328,16 @@ static void proxy_fixed_update(void *this) {
             g_player_drivetrain = drivetrain;
         }
 
+        // ★ ABS 档位每帧覆写（干预强度 b + 制动压力 T_b 缩放 + usesABS 残留
+        // 恢复）。**必须在关闭块之前执行**：基线捕获要求字段尚未被模块碰过
+        //（关闭路径先跑会把 usesABS 写 false，污染基线）。白名单同上。
+        // 覆写与 RoadForce 的读取时序：FixedUpdate 先于物理步进，本帧写入
+        // 本帧生效（与 TC 字段覆写同模式）。
+        if (is_target_player_car(this)) {
+            abs_apply_gear(this);
+            abs_diag_log(this);
+        }
+
         // ★ ABS 被编译器内联到 carController 里，HandleABS 方法从不被调用，
         // 所以 hook HandleABS 入口没用。但内联的 ABS 逻辑读 absEnable(0xC4)
         // 门控——在这里（FixedUpdate 入口，carController 之前）设 absEnable=0，
@@ -317,6 +351,10 @@ static void proxy_fixed_update(void *this) {
             // absEnable=false 不足以阻止内联的 ABS 逻辑——内联代码同时检查
             // 车辆级 absEnable 和轮子级 usesABS 做双重门控。
             // wheels 数组在偏移 0x28 (IRDSWheel[])，IL2CPP 数组数据从 0x20 开始。
+            // ⚠️ 置位 taking_over：关闭路径写 false 后游戏不会自己写回
+            //（原生唯一写者 Awake 装车写一次），切回开启时由 abs_apply_gear
+            // 恢复基线——否则任何档位（含总开关回默认）都永远停在关闭状态
+            //（实机实测 2026-08-28）。
             void *wheels_arr = *(void **)((uintptr_t)this + 0x28);
             if (wheels_arr != NULL) {
                 for (int i = 0; i < 4; i++) {
@@ -325,6 +363,7 @@ static void proxy_fixed_update(void *this) {
                         write_bool_field(wheel, 0x3CE, false);
                     }
                 }
+                g_abs_uses_taking_over = 1;
             }
         }
 
@@ -554,6 +593,133 @@ static float proxy_traction_filter(void *this, float accel) {
     return accel;
 }
 
+// ABS 诊断插桩（proxy_fixed_update 白名单分支内限频调用，每 25 次 ≈ 0.5s
+// 一条）：读回 0 号轮运行时 b/T_b/pulseBrakes/tempBrakeF/brakePressure 与
+// bias、车速——标定档位数值（b/T_b/bias 运行时真值）+ 观测方波行为。
+// 标定完成后可整段移除。
+static void abs_diag_log(void *this) {
+    static int diag_counter = 0;
+    if (++diag_counter < 25) {
+        return;
+    }
+    diag_counter = 0;
+
+    void *wheels_arr = *(void **)((uintptr_t)this + 0x28);
+    if (wheels_arr == NULL) return;
+    void *wheel0 = *(void **)((uintptr_t)wheels_arr + 0x20);
+    if (wheel0 == NULL) return;
+    LOGI("ABSdiag: spd=%.1f mix=%.1f bCfg=%.2f tbCfg=%.2f "
+         "b=%.3f tb=%.1f pulse=%d tf=%.1f bp=%.3f",
+         *(float *)((uintptr_t)this + 0x84),
+         g_config.abs_mix,
+         g_config.abs_b_override,
+         g_config.abs_tb_scale,
+         *(float *)((uintptr_t)wheel0 + 0x3E0),   // rawBrakeBiasValue（pulse 释放深度 b）
+         *(float *)((uintptr_t)wheel0 + 0x88),    // brakeFrictionTorque（T_b 基数）
+         (int)*(unsigned char *)((uintptr_t)wheel0 + 0x408),  // pulseBrakes（介入标志）
+         *(float *)((uintptr_t)wheel0 + 0x3EC),   // tempBrakeF
+         *(float *)((uintptr_t)wheel0 + 0x418));  // brakePressure（踏板输入副本）
+}
+
+// ABS 档位每帧覆写（proxy_fixed_update 白名单分支调用，玩家车 50Hz）。
+// 两条独立通道：
+// - b 覆写（干预强度）：abs_mix>0 且 abs_b_override>=0 时，写每轮
+//   b(0x3E0)=档位值（绝对值，勿缩放写防复利衰减，TC v1.2 教训）。
+//   抬 b 直接抬 pulse 方波平均 (1+b)/2——修"全段几乎不锁死"过度保护。
+// - T_b 缩放（制动压力）：abs_tb_scale ∈ (0,1) 时，写每轮
+//   T_b(0x88)=捕获基线×tb_scale（等比缩放非截断：踏板输入链 0-1 完全
+//   正交，全链一致缩放）。**独立于 abs_mix/enable_abs 生效**——ABS 关闭/
+//   默认档下也修"关 ABS 秒锁死"（制动基数远超抓地极限）。
+// 切回恢复：want_* 从真变假（切"游戏默认"/100%）→ 一次性回写捕获基线，
+// 字段交还游戏（SetBrakeBiasValues 事件驱动，正常圈驾不重写；UI 配平重算
+// 时被基线×scale 每帧兜底压回）。
+// ⚠️ 全程 is_target_player_car 白名单内（RoadForce 全车必经，误写 AI 车
+// 重演"关 TC 瘫全场"事故）；换车（wheels 指针变化）时重置基线重捕。
+static void abs_apply_gear(void *this) {
+    void *wheels_arr = *(void **)((uintptr_t)this + 0x28);
+    if (wheels_arr == NULL) return;
+
+    // restart/换车检测：wheels 数组指针变化 → 旧基线作废，重置重捕。
+    if (wheels_arr != g_abs_last_wheels) {
+        if (g_abs_last_wheels != NULL) {
+            LOGI("ABSdiag: wheels changed, resetting baseline");
+        }
+        g_abs_last_wheels = wheels_arr;
+        for (int i = 0; i < 4; i++) {
+            g_abs_base_b[i] = -1.0f;
+            g_abs_base_tb[i] = -1.0f;
+            g_abs_base_uses[i] = -1;
+        }
+        g_abs_b_taking_over = 0;
+        g_abs_tb_taking_over = 0;
+        g_abs_uses_taking_over = 0;
+    }
+
+    int want_b = (g_config.abs_mix > 0.0f && g_config.abs_b_override >= 0.0f);
+    int want_tb = (g_config.abs_tb_scale >= 0.0f && g_config.abs_tb_scale < 1.0f);
+    int want_abs_off = !g_config.enable_abs;
+
+    for (int i = 0; i < 4; i++) {
+        void *wheel = *(void **)((uintptr_t)wheels_arr + 0x20 + i * 8);
+        if (wheel == NULL) continue;
+        // 基线捕获先于一切覆写：此刻字段尚未被模块碰过，值即游戏装车真值
+        //（b/T_b/usesABS 三项同轮同帧独立捕获；usesABS 若关闭路径先跑会被
+        // 写 false 污染——本函数必须排在关闭块之前）。
+        if (g_abs_base_b[i] < 0.0f) {
+            g_abs_base_b[i] = *(float *)((uintptr_t)wheel + 0x3E0);
+            g_abs_base_tb[i] = *(float *)((uintptr_t)wheel + 0x88);
+            g_abs_base_uses[i] = *(unsigned char *)((uintptr_t)wheel + 0x3CE) ? 1 : 0;
+            LOGI("ABSdiag: baseline[%d] captured b=%.3f tb=%.1f uses=%d",
+                 i, g_abs_base_b[i], g_abs_base_tb[i], g_abs_base_uses[i]);
+        }
+        if (want_b) {
+            *(volatile float *)((uintptr_t)wheel + 0x3E0) = g_config.abs_b_override;
+        }
+        if (want_tb) {
+            float base_tb = g_abs_base_tb[i];
+            if (base_tb > 0.0f) {
+                *(volatile float *)((uintptr_t)wheel + 0x88) = base_tb * g_config.abs_tb_scale;
+            }
+        }
+    }
+    if (want_b) g_abs_b_taking_over = 1;
+    if (want_tb) g_abs_tb_taking_over = 1;
+
+    // usesABS 残留恢复（一次性）：关闭路径写过 false 后，游戏永远不会自己
+    // 写回（原生唯一写者 Awake 装车写一次）——enable_abs 回 true 时这里
+    // 恢复捕获基线（通常 true）。不恢复的话切到任何档位（含总开关回默认）
+    // 都会永远停在关闭状态（实机实测 2026-08-28）。
+    if (!want_abs_off && g_abs_uses_taking_over) {
+        for (int i = 0; i < 4; i++) {
+            void *wheel = *(void **)((uintptr_t)wheels_arr + 0x20 + i * 8);
+            if (wheel == NULL || g_abs_base_uses[i] < 0) continue;
+            write_bool_field(wheel, 0x3CE, g_abs_base_uses[i] != 0);
+        }
+        LOGI("ABSdiag: usesABS baseline restored (%d)", g_abs_base_uses[0]);
+        g_abs_uses_taking_over = 0;
+    }
+
+    // 切回恢复（一次性）：b 通道混入默认 / T_b 通道回 100%。
+    if (!want_b && g_abs_b_taking_over) {
+        for (int i = 0; i < 4; i++) {
+            void *wheel = *(void **)((uintptr_t)wheels_arr + 0x20 + i * 8);
+            if (wheel == NULL || g_abs_base_b[i] < 0.0f) continue;
+            *(volatile float *)((uintptr_t)wheel + 0x3E0) = g_abs_base_b[i];
+        }
+        LOGI("ABSdiag: b baseline restored");
+        g_abs_b_taking_over = 0;
+    }
+    if (!want_tb && g_abs_tb_taking_over) {
+        for (int i = 0; i < 4; i++) {
+            void *wheel = *(void **)((uintptr_t)wheels_arr + 0x20 + i * 8);
+            if (wheel == NULL || g_abs_base_tb[i] < 0.0f) continue;
+            *(volatile float *)((uintptr_t)wheel + 0x88) = g_abs_base_tb[i];
+        }
+        LOGI("ABSdiag: tb baseline restored");
+        g_abs_tb_taking_over = 0;
+    }
+}
+
 // IRDSCarControllInput::HandleABS() — ABS 入口。
 // 签名: void HandleABS(void *this)
 // 当模块 ABS 开关关闭时，直接返回（不调 orig），跳过游戏自带 ABS。
@@ -635,6 +801,14 @@ bool pedal_install_hooks(const pedal_hook_config_t *config) {
     g_config.tc_mix = 1.0f;
     g_config.tc_eps = 0.0f;
     g_config.tc_minspd = 0.0f;
+
+    // ABS 档位兜底：同 TC 教训。abs_b_override 零初始化为 0.0（语义是
+    // "覆写为 0"=游戏原厂泄压，而非"不覆写"）；abs_tb_scale 置 0.0（语义
+    // 歧义）——显式兜底为不覆写/不缩放，真实档位随后经
+    // pedal_set_abs_params 从 Java 下发。
+    g_config.abs_mix = 1.0f;
+    g_config.abs_b_override = -1.0f;
+    g_config.abs_tb_scale = 1.0f;
 
     if (!g_config.enable_control_replacement) {
         LOGI("Pedal control replacement disabled");
@@ -955,6 +1129,36 @@ void pedal_set_tc_params(float mix, float eps, float minspd) {
     }
     LOGI("pedal_set_tc_params: mix=%.2f eps=%.3f minspd=%.2f",
          g_config.tc_mix, g_config.tc_eps, g_config.tc_minspd);
+}
+
+// ABS 档位 setter。低频（仅配置变更/启动时），LOGI 允许；覆写路径内严禁日志。
+void pedal_set_abs_params(float mix, float b_override, float tb_scale) {
+    if (mix < 0.0f) mix = 0.0f;
+    if (mix > 1.0f) mix = 1.0f;
+    g_config.abs_mix = mix;
+    if (b_override < 0.0f) {
+        // "游戏默认"（最高档）/关闭档：不覆写 b；残留由 abs_apply_gear 的
+        // once-restore 基线回写清理。
+        g_config.abs_b_override = -1.0f;
+    } else {
+        // 防御性 clamp：上限 0.9（不到 1.0——恒保留泄压相位兜底，不允许
+        // "完全锁死自由"，那是关闭档的领域；行业同款：ACC ABS 1 / iRacing
+        // Position 1 也不放任持续锁死）。
+        if (b_override > 0.9f) b_override = 0.9f;
+        g_config.abs_b_override = b_override;
+    }
+    if (tb_scale < 0.0f) {
+        // 负值无效 → 不缩放。0 是合法值（T_b 清零，观察用极端）；
+        // ≥1.0 = 100% 不缩放。残留由 once-restore 基线回写清理。
+        g_config.abs_tb_scale = 1.0f;
+    } else if (tb_scale > 1.0f) {
+        g_config.abs_tb_scale = 1.0f;
+    } else {
+        // 0-1.0 全段接受（0% = T_b 清零，高速段 F_base→0，观察生效用）。
+        g_config.abs_tb_scale = tb_scale;
+    }
+    LOGI("pedal_set_abs_params: mix=%.2f bOverride=%.3f tbScale=%.2f",
+         g_config.abs_mix, g_config.abs_b_override, g_config.abs_tb_scale);
 }
 
 void pedal_set_throttle_value(float value) {

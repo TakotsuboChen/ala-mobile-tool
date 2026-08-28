@@ -51,7 +51,9 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
                 tcMode = s.tcMode,
                 tcStrength = s.tcStrength,
                 tcTiming = s.tcTiming,
-                enableAbs = s.enableAbs,
+                absMode = s.absMode,
+                absStrength = s.absStrength,
+                absPressure = s.absPressure,
                 enableMusicReplace = s.enableMusicReplace,
                 enableV10Sound = s.enableV10Sound,
                 hideGamePedals = s.hideGamePedals,
@@ -84,7 +86,9 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
             tcMode = s.tcMode,
             tcStrength = s.tcStrength,
             tcTiming = s.tcTiming,
-            enableAbs = s.enableAbs,
+            absMode = s.absMode,
+            absStrength = s.absStrength,
+            absPressure = s.absPressure,
             enableMusicReplace = s.enableMusicReplace,
             enableV10Sound = s.enableV10Sound,
             hideGamePedals = s.hideGamePedals,
@@ -129,7 +133,11 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
     fun setTcMode(v: ModConfig.TcMode) { _uiState.value = _uiState.value.copy(tcMode = v); scheduleSave() }
     fun setTcStrength(v: ModConfig.TcStrength) { _uiState.value = _uiState.value.copy(tcStrength = v); scheduleSave() }
     fun setTcTiming(v: ModConfig.TcTiming) { _uiState.value = _uiState.value.copy(tcTiming = v); scheduleSave() }
-    fun setEnableAbs(v: Boolean) { _uiState.value = _uiState.value.copy(enableAbs = v); scheduleSave() }
+    // ABS 档位三 setter。enableAbs 不再直接暴露——它是派生值
+    //（DEFAULT 恒 true；CUSTOM 时 strength≠OFF），在 toSettings 里派生。
+    fun setAbsMode(v: ModConfig.AbsMode) { _uiState.value = _uiState.value.copy(absMode = v); scheduleSave() }
+    fun setAbsStrength(v: ModConfig.AbsStrength) { _uiState.value = _uiState.value.copy(absStrength = v); scheduleSave() }
+    fun setAbsPressure(v: Float) { _uiState.value = _uiState.value.copy(absPressure = v); scheduleSave() }
     fun setEnableMusicReplace(v: Boolean) { _uiState.value = _uiState.value.copy(enableMusicReplace = v); scheduleSave() }
     fun setEnableV10Sound(v: Boolean) { _uiState.value = _uiState.value.copy(enableV10Sound = v); scheduleSave() }
     fun setHideGamePedals(v: Boolean) { _uiState.value = _uiState.value.copy(hideGamePedals = v); scheduleSave() }
@@ -176,7 +184,10 @@ data class ConfigUiState(
     val tcMode: ModConfig.TcMode,
     val tcStrength: ModConfig.TcStrength,
     val tcTiming: ModConfig.TcTiming,
-    val enableAbs: Boolean,
+    val absMode: ModConfig.AbsMode,
+    val absStrength: ModConfig.AbsStrength,
+    // 制动压力 T_b 等比缩放（1.0 = 不缩放），独立于 ABS 模式生效。
+    val absPressure: Float,
     val enableMusicReplace: Boolean,
     val enableV10Sound: Boolean,
     val hideGamePedals: Boolean,
@@ -204,10 +215,14 @@ data class ConfigUiState(
         // enableTc 派生：游戏默认恒开；自定义时强度=关闭才关（旧"TC 开关关闭"
         // 语义）。native 侧 mix<=0 分支与 enableTc=false 双保险，行为一致。
         enableTc = tcMode == ModConfig.TcMode.DEFAULT || tcStrength != ModConfig.TcStrength.OFF,
-        enableAbs = enableAbs,
+        // enableAbs 派生：与 enableTc 同构。旧"ABS 开关关闭"语义 = 自定义+关闭档。
+        enableAbs = absMode == ModConfig.AbsMode.DEFAULT || absStrength != ModConfig.AbsStrength.OFF,
         tcMode = tcMode,
         tcStrength = tcStrength,
         tcTiming = tcTiming,
+        absMode = absMode,
+        absStrength = absStrength,
+        absPressure = absPressure,
         enableMusicReplace = enableMusicReplace,
         enableV10Sound = enableV10Sound,
         hideGamePedals = hideGamePedals,

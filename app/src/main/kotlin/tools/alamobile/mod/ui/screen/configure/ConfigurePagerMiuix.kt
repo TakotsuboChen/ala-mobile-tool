@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.ui.unit.LayoutDirection
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -68,13 +70,16 @@ import tools.alamobile.mod.ui.util.BlurredBar
 import tools.alamobile.mod.ui.util.rememberBlurBackdrop
 import tools.alamobile.mod.ui.viewmodel.ConfigUiState
 import tools.alamobile.mod.ui.viewmodel.ConfigViewModel
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -105,6 +110,8 @@ fun ConfigurePagerMiuix(
     val backdrop = rememberBlurBackdrop(enableBlur)
     val blurActive = backdrop != null
     val barColor = if (blurActive) Color.Transparent else colorScheme.surface
+    // ABS 自定义切换警示弹窗：每次从默认切到自定义时弹（不是只弹首次）。
+    var showAbsWarnDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -273,9 +280,27 @@ fun ConfigurePagerMiuix(
                                     )
                                 }
                             }
-                            SwitchPreference(
+                            // ABS 调节：游戏默认 ABS 方波泄压（b=0）过度保护——
+                            // 全段几乎不锁死；且制动基数病态地强（关 ABS 100% 重刹
+                            // 秒锁死）。游戏默认 = 纯透传；自定义展开干预强度滑条。
+                            // "最大制动压力"是 ABS 下方独立项：制动基数修复与 ABS
+                            // 模式正交（默认/关闭档下也生效）。分隔线成组逻辑同 TC 区，
+                            // 上分隔线与 TC 区下分隔线条件互斥（TC 自定义时其内层
+                            // Column 末尾已有下线，两条背靠背会叠成一条粗线）。
+                            AnimatedVisibility(
+                                visible = uiState.absMode == ModConfig.AbsMode.CUSTOM &&
+                                    uiState.tcMode != ModConfig.TcMode.CUSTOM,
+                                enter = fadeIn(),
+                                exit = fadeOut()
+                            ) {
+                                top.yukonga.miuix.kmp.basic.HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 16.dp)
+                                )
+                            }
+                            OverlayDropdownPreference(
                                 title = "防抱死制动系统",
-                                summary = "启用游戏原生 ABS",
+                                summary = "调整游戏原生 ABS",
+                                items = ModConfig.AbsMode.entries.map { absModeName(it) },
                                 startAction = {
                                     Icon(
                                         tools.alamobile.mod.ui.AbsIcon,
@@ -284,8 +309,69 @@ fun ConfigurePagerMiuix(
                                         tint = colorScheme.onBackground
                                     )
                                 },
-                                checked = uiState.enableAbs,
-                                onCheckedChange = actions::setEnableAbs
+                                selectedIndex = ModConfig.AbsMode.entries.indexOf(uiState.absMode),
+                                onSelectedIndexChange = { index ->
+                                    val newMode = ModConfig.AbsMode.entries[index]
+                                    // 每次从默认切到自定义：弹警示——减弱干预后重刹
+                                    // 易锁死，提醒配合下调最大制动压力。
+                                    if (uiState.absMode == ModConfig.AbsMode.DEFAULT &&
+                                        newMode == ModConfig.AbsMode.CUSTOM
+                                    ) {
+                                        showAbsWarnDialog = true
+                                    }
+                                    actions.setAbsMode(newMode)
+                                },
+                            )
+                            AnimatedVisibility(
+                                visible = uiState.absMode == ModConfig.AbsMode.CUSTOM,
+                                enter = expandVertically() + fadeIn(),
+                                exit = shrinkVertically() + fadeOut()
+                            ) {
+                                Column {
+                                    // 干预强度 = pulse 释放深度 b(0x3E0) 覆写：
+                                    // 游戏默认配平下 b=0，pulse 帧完全泄压，方波
+                                    // [F_base·Ω, 0] 平均 0.5；抬 b 抬方波平均 (1+b)/2。
+                                    SliderPreference(
+                                        title = "干预强度",
+                                        summary = "修改干预方波平均",
+                                        value = ModConfig.AbsStrength.entries.indexOf(uiState.absStrength).toFloat(),
+                                        onValueChange = { v ->
+                                            actions.setAbsStrength(
+                                                ModConfig.AbsStrength.entries[
+                                                    v.roundToInt().coerceIn(0, ModConfig.AbsStrength.entries.lastIndex)
+                                                ]
+                                            )
+                                        },
+                                        valueRange = 0f..(ModConfig.AbsStrength.entries.lastIndex).toFloat(),
+                                        displayFormat = { v ->
+                                            absStrengthName(
+                                                ModConfig.AbsStrength.entries[
+                                                    v.roundToInt().coerceIn(0, ModConfig.AbsStrength.entries.lastIndex)
+                                                ]
+                                            )
+                                        },
+                                        icon = Icons.Rounded.Tune
+                                    )
+                                    // ABS 区域下分隔线：放 Column 末尾跟随收回
+                                    // 动画，下边缘自动贴住最后可见项（同 TC 区）。
+                                    top.yukonga.miuix.kmp.basic.HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 16.dp)
+                                    )
+                                }
+                            }
+                            // 最大制动压力：T_b(0x88) 等比缩放（非截断——踏板响应
+                            // 曲线与纵轴完全不受影响，全链一致缩放）。0-100% 无级
+                            //（0% 为观察极端：高速段 F_base→0，制动几乎消失）。
+                            SliderPreference(
+                                title = "最大制动压力",
+                                summary = "调整游戏制动摩擦扭矩上限",
+                                value = uiState.absPressure,
+                                onValueChange = { v ->
+                                    actions.setAbsPressure((v * 100).roundToInt() / 100f)
+                                },
+                                valueRange = 0f..1.0f,
+                                displayFormat = { v -> "${(v * 100).roundToInt()}%" },
+                                icon = tools.alamobile.mod.ui.BrakeCurveIcon
                             )
                         }
 
@@ -573,6 +659,37 @@ fun ConfigurePagerMiuix(
             }
         }
     }
+
+    // ABS 自定义切换警示（每次从默认切到自定义时弹出）。标题居中（OverlayDialog
+    // 自带）、正文左对齐、单按钮"我已了解"。文案说明制动基数与锁死风险的
+    // 因果关系——减弱干预档 + 原厂病态强制动基数 = 重刹严重锁死。
+    if (showAbsWarnDialog) {
+        OverlayDialog(
+            show = true,
+            title = "⚠建议调整最大制动压力",
+            onDismissRequest = { showAbsWarnDialog = false },
+            onDismissFinished = { },
+            content = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    top.yukonga.miuix.kmp.basic.Text(
+                        text = "由于 Ala Mobile 的制动摩擦扭矩上限显著超出最大垂直载荷下的抓地力极限，" +
+                            "若调低 ABS 档位，重刹可能将会出现严重锁死情况，" +
+                            "强烈建议您适当下调最大制动压力",
+                        fontSize = MiuixTheme.textStyles.body2.fontSize,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    TextButton(
+                        text = "我已了解",
+                        onClick = { showAbsWarnDialog = false },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.textButtonColorsPrimary()
+                    )
+                }
+            }
+        )
+    }
 }
 
 /**
@@ -607,13 +724,17 @@ private fun SliderPreference(
                 tint = colorScheme.onBackground
             )
             Column(modifier = Modifier.weight(1f)) {
+                // 标题/描述样式对齐 miuix BasicComponent 标准（headline1 17sp +
+                // Medium / body2 14sp）——与 SwitchPreference/OverlayDropdownPreference
+                // 等 miuix preference 组件完全一致，不靠字号字重区分层级。
                 top.yukonga.miuix.kmp.basic.Text(
                     text = "$title：${displayFormat(value)}",
-                    fontSize = androidx.compose.ui.unit.TextUnit(15f, androidx.compose.ui.unit.TextUnitType.Sp)
+                    fontSize = MiuixTheme.textStyles.headline1.fontSize,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
                 )
                 top.yukonga.miuix.kmp.basic.Text(
                     text = summary,
-                    fontSize = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp),
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary
                 )
             }
@@ -650,6 +771,19 @@ private fun tcTimingName(timing: ModConfig.TcTiming): String = when (timing) {
     ModConfig.TcTiming.EARLIER -> "较早"
     ModConfig.TcTiming.VERY_EARLY -> "非常早"
     ModConfig.TcTiming.REALTIME -> "实时"
+}
+
+private fun absModeName(mode: ModConfig.AbsMode): String = when (mode) {
+    ModConfig.AbsMode.DEFAULT -> "默认"
+    ModConfig.AbsMode.CUSTOM -> "自定义"
+}
+
+private fun absStrengthName(strength: ModConfig.AbsStrength): String = when (strength) {
+    ModConfig.AbsStrength.OFF -> "关闭 ABS"
+    ModConfig.AbsStrength.WEAK -> "低"
+    ModConfig.AbsStrength.MEDIUM -> "中等"
+    ModConfig.AbsStrength.STRONG -> "高"
+    ModConfig.AbsStrength.STOCK -> "最高（默认）"
 }
 
 /**
@@ -699,7 +833,7 @@ private fun CurveEditor(
     ) {
         top.yukonga.miuix.kmp.basic.Text(
             text = "单击添加/删除控制点，长按拖拽调整曲线形状",
-            fontSize = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp),
+            fontSize = MiuixTheme.textStyles.body2.fontSize,
             color = textColor
         )
         // 图表容器：ChartCanvas 占一个正方形（含留白），外面用 Box 包住并在
