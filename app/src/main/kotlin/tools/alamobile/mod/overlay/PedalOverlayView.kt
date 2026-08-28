@@ -4,7 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Path
+import android.graphics.RectF
 import android.os.Build
 import android.os.SystemClock
 import android.util.Log
@@ -91,20 +91,33 @@ class PedalOverlayView(
         @Volatile private var arbitratedBrake = 0f
     }
 
+    // 层内绘制全部用不透明色；控件透明度由 layerPaint 在合成时统一
+    // 应用（见 onDraw 注释——半透明必须以整层 alpha 承担，逐像素
+    // 半透明会让"边框遮盖填充溢出"失效）。
     private val throttlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(alphaOf(settings.overlayAlpha), 0, 255, 0)
+        color = Color.rgb(0, 255, 0)
     }
     private val brakePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(alphaOf(settings.overlayAlpha), 255, 0, 0)
+        color = Color.rgb(255, 0, 0)
     }
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(alphaOf(settings.overlayAlpha), 255, 255, 255)
+        color = Color.WHITE
         style = Paint.Style.STROKE
         strokeWidth = settings.overlayBorderWidth * resources.displayMetrics.density
     }
+    // 边框环（drawDoubleRoundRect FILL 模式，API 29+）。
+    private val borderFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.FILL
+    }
+    // 整层合成透明度（overlayAlpha → paint alpha）。
+    private val layerPaint = Paint().apply {
+        alpha = alphaOf(settings.overlayAlpha)
+    }
 
-    // 圆角裁剪路径（preallocate 避免每帧分配）。
-    private val clipPath = Path()
+    // 边框环的内外边界（preallocate 避免每帧分配，DRRect 用）。
+    private val outerRect = RectF()
+    private val innerRect = RectF()
 
     // 输入是"透明度"比例（0=不透明，1=完全透明），返回 paint alpha 值。
     private fun alphaOf(transparency: Float): Int = ((1f - transparency.coerceIn(0f, 1f)) * 255f).toInt()
@@ -140,34 +153,40 @@ class PedalOverlayView(
         val corner = cornerRadiusPx()
         val hasBorder = settings.overlayBorderWidth > 0f
         val sw = if (hasBorder) borderPaint.strokeWidth else 0f
-        // 填充内缩量 = 边框宽度 - 1.5px 抗锯齿溢出。填充比边框内边缘多溢出
-        // 1.5px 到边框下面，覆盖 clipPath 硬裁剪与 drawRoundRect STROKE 在圆角
-        // 处的抗锯齿过渡差异——消除"不均匀缝隙"。1.5px 在视觉上不可见。
-        val fillInset = (sw - 1.5f).coerceAtLeast(0f)
+        // 半透明实现：层内全部用不透明色绘制，控件透明度由 layer alpha
+        // 在合成时统一承担。层内恢复不透明时代的遮盖特权——填充比边框
+        // 内缘多溢出 1.5px 伸进边框区（fillInset = sw - 1.5f，注意方向：
+        // 内缩量变小 = 伸进边框，写反成 sw + 1.5 会在边框内缘与填充之间
+        // 留下 1.5px 透明带，形成均匀大缝——实测踩过）。溢出垫住边框内
+        // 边缘渐变带（缝隙处露颜色而非背景），不透明边框实体又完全盖住
+        // 溢出（无重合）。任何渲染路径（STROKE/DRRect/drawRoundRect）的
+        // 圆弧 coverage 亚像素偏差都只造成颜色过渡，不产生透背景的缝隙。
+        // 历史教训（逐像素半透明下全部失败）：
+        // ① clipPath + 1.5px 溢出——半透明边框盖不住溢出，同像素叠加
+        //   重合可见；
+        // ② Path.op 精确内缩——drawPath 圆弧 AA 与 STROKE 不同源，缝；
+        // ③ DRRect 环 + 精确内缩——环与填充是两次独立绘制，渐变
+        //   coverage 互补 ≠ over 合成 alpha 互补（c + (1-c)² < 1），
+        //   圆角仍有亚像素透明缝（实机截图证实）。
+        val fillInset = if (hasBorder) (sw - 1.5f).coerceAtLeast(0f) else 0f
+        val fc = (corner - fillInset).coerceAtLeast(0f)
 
-        // 裁剪：有圆角或有边框时都需要裁剪填充区域。
-        val needClip = corner > 0f || hasBorder
-        if (needClip) {
+        val sc = canvas.saveLayer(0f, 0f, w, h, layerPaint)
+
+        // 行程带裁剪后画完整控件圆角矩形（溢出藏在边框下）——手指摸到
+        // 哪，填充到哪，视觉跟手。mapped 值只送 native，不影响视觉。
+        fun drawBand(top: Float, bottom: Float, paint: Paint) {
             canvas.save()
-            clipPath.reset()
-            if (corner > 0f) {
-                val fc = (corner - fillInset).coerceAtLeast(0f)
-                clipPath.addRoundRect(fillInset, fillInset, w - fillInset, h - fillInset, fc, fc, Path.Direction.CW)
-            } else {
-                clipPath.addRect(fillInset, fillInset, w - fillInset, h - fillInset, Path.Direction.CW)
-            }
-            canvas.clipPath(clipPath)
+            canvas.clipRect(0f, top, w, bottom)
+            canvas.drawRoundRect(fillInset, fillInset, w - fillInset, h - fillInset, fc, fc, paint)
+            canvas.restore()
         }
 
-        // 用 raw 值绘制填充——手指摸到哪，填充到哪，视觉跟手。
-        // mapped 值只送 native，不影响视觉。
         when (role) {
             PedalRole.SINGLE -> {
                 val centerY = h * settings.pedalTransition
-                val throttleHeight = centerY * rawThrottle
-                val brakeHeight = (h - centerY) * rawBrake
-                canvas.drawRect(0f, centerY - throttleHeight, w, centerY, throttlePaint)
-                canvas.drawRect(0f, centerY, w, centerY + brakeHeight, brakePaint)
+                drawBand(centerY - centerY * rawThrottle, centerY, throttlePaint)
+                drawBand(centerY, centerY + (h - centerY) * rawBrake, brakePaint)
             }
             PedalRole.THROTTLE -> {
                 // 默认（pedalInvert 不含 throttle）：raw=1-t（手指顶部=满油门）。
@@ -177,11 +196,9 @@ class PedalOverlayView(
                 // 绿色锚在顶部，随 raw 增大从顶部向下生长——手指往底部拉
                 // 绿色从顶往下涨到手指位置，"从上往下拉"。
                 if (settings.pedalInvert.invertThrottle) {
-                    val fillH = h * rawThrottle
-                    canvas.drawRect(0f, 0f, w, fillH, throttlePaint)
+                    drawBand(0f, h * rawThrottle, throttlePaint)
                 } else {
-                    val fillH = h * rawThrottle
-                    canvas.drawRect(0f, h - fillH, w, h, throttlePaint)
+                    drawBand(h - h * rawThrottle, h, throttlePaint)
                 }
             }
             PedalRole.BRAKE -> {
@@ -193,30 +210,34 @@ class PedalOverlayView(
                 // 红色从顶往下涨到手指位置，"从上往下拉"。
                 // 两种方向 raw 都送 native mapped，游戏内输入同步反转。
                 if (settings.pedalInvert.invertBrake) {
-                    val bottom = h * rawBrake
-                    canvas.drawRect(0f, 0f, w, bottom, brakePaint)
+                    drawBand(0f, h * rawBrake, brakePaint)
                 } else {
-                    val top = h * (1f - rawBrake)
-                    canvas.drawRect(0f, top, w, h, brakePaint)
+                    drawBand(h * (1f - rawBrake), h, brakePaint)
                 }
             }
         }
 
-        // 边框在 restore 之后画：stroke 沿圆角路径描边，若在 clip 内画，
-        // 外半圈会被裁掉，边框看起来只有一半粗细。
-        if (needClip) canvas.restore()
-
-        // drawRoundRect 系统原生渲染弧线（不经过 Path.op flatten），
-        // 圆角与直线连接处天然平滑。
+        // 边框最后画在填充之上（层内不透明，环实体区完全遮盖填充溢出）。
+        // API 29+ 用 drawDoubleRoundRect 环带（内边缘 = sw，与溢出填充的
+        // 渐变带重叠、被垫实）；API 26-28 无此 API，回退 STROKE。
         if (hasBorder) {
-            val inset = borderPaint.strokeWidth / 2f
-            if (corner > 0f) {
-                val bc = (corner - inset).coerceAtLeast(0f)
-                canvas.drawRoundRect(inset, inset, w - inset, h - inset, bc, bc, borderPaint)
+            if (Build.VERSION.SDK_INT >= 29) {
+                val bc = (corner - sw).coerceAtLeast(0f)
+                outerRect.set(0f, 0f, w, h)
+                innerRect.set(sw, sw, w - sw, h - sw)
+                canvas.drawDoubleRoundRect(outerRect, corner, corner, innerRect, bc, bc, borderFillPaint)
             } else {
-                canvas.drawRect(inset, inset, w - inset, h - inset, borderPaint)
+                val inset = sw / 2f
+                val bc = (corner - inset).coerceAtLeast(0f)
+                if (corner > 0f) {
+                    canvas.drawRoundRect(inset, inset, w - inset, h - inset, bc, bc, borderPaint)
+                } else {
+                    canvas.drawRect(inset, inset, w - inset, h - inset, borderPaint)
+                }
             }
         }
+
+        canvas.restoreToCount(sc)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
