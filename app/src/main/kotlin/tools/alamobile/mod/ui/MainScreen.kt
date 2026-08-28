@@ -49,9 +49,14 @@ import tools.alamobile.mod.ui.theme.LocalEnableFloatingBottomBar
 import tools.alamobile.mod.ui.theme.LocalEnableFloatingBottomBarBlur
 import tools.alamobile.mod.ui.theme.LocalEnableNavigationBadge
 import tools.alamobile.mod.ui.util.BlurredBar
+import tools.alamobile.mod.ui.util.GestureDirectionLockState
+import tools.alamobile.mod.ui.util.LocalGestureDirectionLock
+import tools.alamobile.mod.ui.util.blockScrollAxis
+import tools.alamobile.mod.ui.util.gestureDirectionLockObserver
 import tools.alamobile.mod.ui.util.rememberBlurBackdrop
 import tools.alamobile.mod.ui.util.rememberContentReady
 import tools.alamobile.mod.ui.viewmodel.MainPagerConfig
+import androidx.compose.foundation.gestures.Orientation
 import top.yukonga.miuix.kmp.basic.NavigationBar
 import top.yukonga.miuix.kmp.basic.NavigationBarItem
 import top.yukonga.miuix.kmp.basic.Scaffold
@@ -104,12 +109,24 @@ fun MainScreen(
 
     val useNavigationRail = useNavigationRail(enableFloatingBottomBar)
 
+    // 页面级手势方向锁：横滑切页 vs 页内竖滚在一次触摸内互斥（见
+    // GestureDirectionLock.kt 的 AwaitGesturePickup 机制说明）。
+    val directionLock = remember { GestureDirectionLockState() }
+
     CompositionLocalProvider(
-        LocalMainPagerState provides mainPagerState
+        LocalMainPagerState provides mainPagerState,
+        LocalGestureDirectionLock provides directionLock,
     ) {
         val contentReady = rememberContentReady()
         val pagerContent = @Composable { bottomInnerPadding: Dp ->
-            Box(modifier = if (blurBackdrop != null) Modifier.layerBackdrop(blurBackdrop) else Modifier) {
+            Box(
+                modifier = Modifier
+                    .gestureDirectionLockObserver(directionLock)
+                    // 方向锁为竖向（正在竖滚页面）时吃掉 pager 的横向增量，
+                    // AwaitGesturePickup 复活接管也翻不了页。
+                    .blockScrollAxis(directionLock, Orientation.Horizontal)
+                    .then(if (blurBackdrop != null) Modifier.layerBackdrop(blurBackdrop) else Modifier)
+            ) {
                 HorizontalPager(
                     modifier = Modifier
                         .then(if (enableFloatingBottomBar && enableFloatingBottomBarBlur) Modifier.layerBackdrop(backdrop) else Modifier),
