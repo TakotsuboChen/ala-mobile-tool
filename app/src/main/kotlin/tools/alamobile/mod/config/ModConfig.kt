@@ -515,8 +515,8 @@ object ModConfig {
         val TC_TIMING = TcTiming.LATE
         val ABS_MODE = AbsMode.DEFAULT
         val ABS_STRENGTH = AbsStrength.MAX
-        // 100% = 不缩放 T_b。0-100% 无级（0% 用于观察生效：高速段 F_base→0，
-        // 制动几乎消失）。字段写入生效已由 ABSdiag 实证（tb=3375=4500×0.75）。
+        // 100% = 不缩放 T_b。50-100% 无级（读取路径 coerceIn(0.5f, 1f) 钳位下限，
+        // 0% 观察值已收敛掉，防止误存导致制动几乎消失）。字段写入生效已由 ABSdiag 实证（tb=3375=4500×0.75）。
         const val ABS_PRESSURE = 1.0f
         // 主菜单音乐替换默认开启
         const val ENABLE_MUSIC_REPLACE = true

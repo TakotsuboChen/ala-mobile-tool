@@ -3,7 +3,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/LSPosed%20API-102-green" alt="LSPosed API">
-  <img src="https://img.shields.io/badge/version-1.0.1-green" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.2-green" alt="Version">
   <img src="https://img.shields.io/badge/target-Ala%20Mobile-red" alt="Target">
 </p>
 
@@ -162,7 +162,7 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 
 #### 原生 TC/ABS 控制
 - 牵引力控制（TC）：默认 / 自定义（削减强度 + 介入时机档位，自定义时机经 (ε, minSPD) 成对覆写生效）；关闭 TC 档直接返回原始 accel
-- 防抱死制动系统（ABS）：默认 / 自定义（干预强度档位，覆写 pulse 释放深度 b，抬升"干预方波平均"缓解游戏 ABS 全段过度保护）；关闭 ABS 档经 per-wheel `usesABS=false` 双重门控，重刹轮子直接锁死
+- 防抱死制动系统（ABS）：默认 / 自定义（干预强度档位：关闭 ABS/低/中/高/最高（默认），修改干预制动偏置——覆写 pulse 释放深度，缓解游戏 ABS 全段过度保护）；关闭 ABS 档经 per-wheel `usesABS=false` 双重门控，重刹轮子直接锁死
 - 最大制动压力：50–100% 无级，等比缩放制动摩擦扭矩上限（与 ABS 模式正交，关 ABS 下也生效，缓解"关 ABS 秒锁死"的制动基数病态）；踏板响应曲线不受影响
 
 #### 支持开发
@@ -215,7 +215,10 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 | 分类 | 功能项 | 说明 |
 |---|---|---|
 | 游戏原生特性控制 | 解锁付费内容 | 强制解锁 DLC 和 IAP（默认关闭） |
+| | 隐藏油门和刹车按键 | 隐藏游戏原生油门/刹车按钮（保留离合），配合模块踏板使用（默认关闭） |
 | | 牵引力控制（TC） | 默认 / 自定义：削减强度（关闭 TC~最高）+ 介入时机（较晚（默认）~实时） |
+| | 防抱死制动系统（ABS） | 默认 / 自定义：干预强度（关闭 ABS / 低 / 中 / 高 / 最高（默认）） |
+| | 最大制动压力 | 50-100% 无级，等比缩放制动扭矩上限（与 ABS 模式正交，关 ABS 下也生效） |
 | Overlay 控件 | 线性踏板 | 拓扑选择：关闭 / 单踏板 / 双踏板 |
 | | 死区（单踏板） | 0-20%，踏板过渡区域附近的无效范围 |
 | | 过渡点（单踏板） | 20-80%，油门与刹车区域的分界线 |
@@ -259,7 +262,7 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 - 自动 DRS 仅完成 `drsToggle()` 拦截，赛道数据自动判断尚未实现
 - 手动换挡因 `DoGearShifting` Hook 导致起步失败，**已暂时禁用**，待重新实现
 - ~~ABS 原生 Hook（`HandleABS`）被编译器内联~~ → 已解决：carController hook + per-wheel `usesABS=false` 双重门控
-- **弯道「顿挫」通常来自游戏内置的刹车辅助**，与模块无关，请在游戏设置中关闭辅助功能
+- **弯道「顿挫」通常来自游戏内置的刹车辅助**，与模块无关，请在游戏设置中关闭辅助功能；使用模块 ABS 自定义档时，也可通过干预强度档位与最大制动压力旋钮缓解
 - 共存版（重打包改包名）需配合双 ClassLoader 守卫，当前版本已修复
 
 ---
@@ -324,7 +327,7 @@ tools/run-il2cpp-dumper.sh
 
 - [ ] 自动 DRS：赛道 telemetry 解析 + 自动开关
 - [ ] 手动换挡：重新实现 `DoGearShifting` Hook
-- [x] 原生 ABS 开关：carController hook + per-wheel usesABS=false 双重门控
+- [x] 原生 ABS 控制：开关 + 干预强度档位 + 最大制动压力（carController hook + per-wheel usesABS 双重门控）
 - [ ] 工具按钮位置持久化开关
 - [ ] 多语言支持
 
@@ -350,6 +353,9 @@ tools/run-il2cpp-dumper.sh
 
 <details>
 <summary>展开查看</summary>
+
+**v1.0.2**（2026-08-29，正式版，versionCode 102300）
+> 制动控制大版本。新增 ABS 防抱死制动系统调节（干预强度五档：关闭 ABS/低/中/高/最高，修改干预制动偏置，缓解游戏 ABS 全段过度保护）与最大制动压力旋钮（50-100% 等比缩放制动扭矩上限，关 ABS 下也生效，缓解"关 ABS 秒锁死"）；TC 档位升级为削减强度五档 + 介入时机四档（(ε, minSPD) 成对覆写含起步低速门，修复只调阈值时起步段无感）；新增隐藏游戏原生油门/刹车按键开关；踏板响应曲线切线算法升级为曲率能量最小化凸优化（单点弯形状误差 −40%）；配置页新增页面级手势方向锁（横滑切页与竖滚互斥）。修复踏板/换挡控件半透明边框缝隙、多指触摸干扰踏板数值、关闭 TC 误伤 AI 车、日志洪水刷爆日志文件；新增踏板触摸诊断日志，导出仅保留最近 24h 条目。
 
 **v1.0.1**（2026-08-26，正式版，versionCode 101300）
 > 踏板操控与激活检测增强。新增踏板优先级枚举（6 策略仲裁 + 油门过渡点，替代旧单一刹车优先）、踏板方向反转枚举（油门/刹车可独立反转）、Overlay 视觉属性（透明度/边框粗细/边框圆角三个可配置滑块，作用于踏板与换挡控件）；LSPosed 激活检测稳定性大修（去轮询改事件驱动 + ConnectionState 三态 + service 身份检查，根治超时误弹免 Root 弹窗）；激活状态会话级持久化（冷启动检测一次固定到下次冷启动，清除标记下次冷启动重新检测）。
