@@ -186,7 +186,7 @@ data class ConfigUiState(
     val tcTiming: ModConfig.TcTiming,
     val absMode: ModConfig.AbsMode,
     val absStrength: ModConfig.AbsStrength,
-    // 制动压力 T_b 等比缩放（1.0 = 不缩放），独立于 ABS 模式生效。
+    // 制动压力（v6：踏板行程重映射标尺，1.0 = 原生），与 ABS 设置无关。
     val absPressure: Float,
     val enableMusicReplace: Boolean,
     val enableV10Sound: Boolean,

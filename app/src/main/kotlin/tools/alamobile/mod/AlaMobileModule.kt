@@ -279,10 +279,11 @@ class AlaMobileModule : XposedModule() {
         val (tcMix, tcEps, tcMinspd) = if (settings != null) {
             ModConfig.tcEffectiveParams(settings.tcMode, settings.tcStrength, settings.tcTiming)
         } else Triple(1.0f, 0f, 0f)
-        // ABS 档位（干预强度 b 覆写 + 制动压力 T_b 等比缩放）。**经 absEffectiveParams
-        // 按 mode 派生**：mode=default 恒为原厂透传（bOverride=-1 不覆写）。
+        // ABS 档位（干预强度 b 覆写 + 制动压力输入端缩放 brakeScale，v5）。
+        // **经 absEffectiveParams 按 mode 派生**：mode=default 恒为原厂透传
+        //（bOverride=-1 不覆写）；brakeScale 与模式无关、全局生效。
         // settings==null（NPatch 早期）时同语义（游戏默认 + 不缩放）。
-        val (absMix, absBOverride, absTbScale) = if (settings != null) {
+        val (absMix, absBOverride, brakeScale) = if (settings != null) {
             ModConfig.absEffectiveParams(settings.absMode, settings.absStrength, settings.absPressure)
         } else Triple(1.0f, -1f, 1.0f)
 
@@ -440,8 +441,8 @@ class AlaMobileModule : XposedModule() {
                     }
                     // ABS 档位下发：同 TC 模式（init 兜底为不覆写/不缩放，这里补用户档位）。
                     try {
-                        NativeBridge.setAbsParams(absMix, absBOverride, absTbScale)
-                        logX(Log.INFO, TAG, "setAbsParams mix=$absMix bOverride=$absBOverride tbScale=$absTbScale")
+                        NativeBridge.setAbsParams(absMix, absBOverride, brakeScale)
+                        logX(Log.INFO, TAG, "setAbsParams mix=$absMix bOverride=$absBOverride brakeScale=$brakeScale")
                     } catch (e: Throwable) {
                         logX(Log.ERROR, TAG, "setAbsParams failed: ${e.message}")
                     }

@@ -1073,12 +1073,13 @@ object ModConfig {
      * ABS 档位生效值派生：模式说了算（与 [tcEffectiveParams] 同构）。
      * DEFAULT 恒为原厂透传（bOverride=-1 不覆写，与缓存 strength 无关——
      * 否则"调回游戏默认"无法恢复原生行为）；CUSTOM 时按所选档生效。
-     * 返回 (mix, bOverride, tbScale) 三元组：
+     * 返回 (mix, bOverride, brakeScale) 三元组：
      * - mix：b 覆写总闸（CUSTOM+OFF → 0；native 端 mix≤0 忽略 b 覆写，
      *   "关闭 ABS"语义经 enableAbs 派生布尔走既有 usesABS=false 通道）
      * - bOverride：pulse 释放深度绝对值（<0 = 不覆写，恢复捕获基线）
-     * - tbScale：T_b 等比缩放（1.0 = 不缩放；与 ABS 模式正交——"关 ABS
-     *   秒锁死"修复在 ABS 关闭/默认档下也持续生效，native 独立通道处理）
+     * - brakeScale：刹车输入请求等比缩放（v5，1.0 = 原生；与 ABS 模式/
+     *   档位完全无关，任意状态下全局生效——tempBrakeF/F_base 内部曲线
+     *   不触碰，输出压力全程 ×brakeScale）
      */
     fun absEffectiveParams(
         mode: AbsMode,
@@ -1261,7 +1262,8 @@ object ModConfig {
         // 三字段带默认值——PedalOverlayView 的命名参数部分构造无需改动。
         val absMode: AbsMode = Defaults.ABS_MODE,
         val absStrength: AbsStrength = Defaults.ABS_STRENGTH,
-        // 制动压力 T_b 等比缩放（1.0 = 不缩放），独立于 absMode/absStrength 生效。
+        // 制动压力（v6：踏板行程重映射标尺，1.0 = 原生），与 absMode/absStrength
+        // 完全无关；native 端 0xF0 饱和重映射实现，见 pedal_hook.c。
         val absPressure: Float = Defaults.ABS_PRESSURE,
         val enableMusicReplace: Boolean = Defaults.ENABLE_MUSIC_REPLACE,
         val enableV10Sound: Boolean = Defaults.ENABLE_V10_SOUND,

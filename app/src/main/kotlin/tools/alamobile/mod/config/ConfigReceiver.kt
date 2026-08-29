@@ -125,20 +125,21 @@ class ConfigReceiver : BroadcastReceiver() {
                 Log.i(TAG, "ConfigReceiver: setTcParams mix=$tcMix eps=$tcEps minspd=$tcMinspd")
             }
 
-            // 实时同步 ABS 档位（干预强度 b 覆写 + 制动压力 T_b 等比缩放）——
+            // 实时同步 ABS 档位（干预强度 b 覆写 + 制动压力输入端缩放）——
             // 与 TC 档位同构：**必须经 absEffectiveParams 按 abs_mode 派生**，
             // mode=default 恒为原厂透传（bOverride=-1），否则"调回游戏默认"
             // 恢复不了原生行为。旧广播 JSON（无新键）落到默认，与旧行为一致。
-            // 制动压力独立于模式（absPressure <1.0 时即使默认档/关闭档也生效）。
+            // v5：abs_pressure（brakeScale）与 ABS 模式/档位完全无关，
+            // 任意状态下全局生效（输入请求等比缩放，native 不碰 tempBrakeF 链）。
             val absMode = ModConfig.AbsMode.from(incoming.optString("abs_mode", "default"))
-            val (absMix, absBOverride, absTbScale) = ModConfig.absEffectiveParams(
+            val (absMix, absBOverride, brakeScale) = ModConfig.absEffectiveParams(
                 absMode,
                 ModConfig.AbsStrength.from(incoming.optString("abs_strength", "stock")),
                 incoming.optDouble("abs_pressure", 1.0).toFloat().coerceIn(0.5f, 1f)
             )
             if (tools.alamobile.mod.NativeBridge.isAvailable) {
-                tools.alamobile.mod.NativeBridge.setAbsParams(absMix, absBOverride, absTbScale)
-                Log.i(TAG, "ConfigReceiver: setAbsParams mix=$absMix bOverride=$absBOverride tbScale=$absTbScale")
+                tools.alamobile.mod.NativeBridge.setAbsParams(absMix, absBOverride, brakeScale)
+                Log.i(TAG, "ConfigReceiver: setAbsParams mix=$absMix bOverride=$absBOverride brakeScale=$brakeScale")
             }
 
             // 实时同步音乐替换开关——用户从配置页切到游戏时即时生效。

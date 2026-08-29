@@ -40,8 +40,8 @@ typedef struct {
     float tc_eps;
     float tc_minspd;
 
-    // ABS 档位（v1——干预强度 b 覆写 + 制动压力 T_b 等比缩放，
-    // ABS_LEVEL_DESIGN v2）：
+    // ABS 档位（v1 干预强度 b 覆写；v5 制动压力改为输入端缩放，
+    // ABS_LEVEL_DESIGN v5）：
     // - abs_mix：b 覆写总闸。≤0 时忽略 b 覆写（"关闭 ABS"语义走
     //   enable_abs 布尔 → 既有 usesABS=false 四层关闭通道）。
     // - abs_b_override：pulse 释放深度 b(0x3E0) 绝对覆写值（轮级，per-wheel
@@ -49,17 +49,18 @@ typedef struct {
     //   pulse 帧 T×0 完全泄压，方波 [F_base·Ω, 0] 平均 0.5——"全段几乎不
     //   锁死"过度保护的根源。抬 b 抬方波平均 (1+b)/2；b≥0.3 后 β 饱和、
     //   Ω 摩擦圆耦合关死（零副作用杠杆）。<0 = 不覆写（恢复捕获基线）。
-    // - abs_tb_scale：制动压力 T_b(0x88) 等比缩放 ∈ [0,1.0]。1.0 = 不
-    //   缩放；<1 时**独立于 abs_mix/enable_abs 生效**（关 ABS/默认档下也
-    //   修"关 ABS 秒锁死"——制动基数远超抓地极限的病态）。等比缩放非截断：
-    //   踏板响应曲线（输入端 0-1）完全正交，全链（F_base 天花板/方波/关
-    //   ABS 基数）一致缩放。覆写 = 基线×tbScale 绝对值写（勿现值×系数防
-    //   复利衰减，TC v1.2 教训）；切回 1.0 一次性基线恢复。
+    // - brake_scale（v6，原 abs_tb_scale）：刹车行程标尺等比缩放 ∈ [0,1]。
+    //   语义：踏板行程 0-100% 重映射到 0-s·T_b 牛米，**任何车速下允许的
+    //   压力上限封顶在原生 F_base(v)**——输出 = min(s·T_b·p, F_base(v))。
+    //   与 ABS 档位/开关完全无关。作用点 = abs_remap_brake_request 每帧
+    //   覆写 wheel.brake(0xF0)（proxy_fixed_update orig 后，CC 广播之后、
+    //   物理步进 RoadForce 读取之前）。tempBrakeF/T_b/p₀ 字段全程不碰。
+    //   1.0 = 原生透传。
     // install 时兜底 1.0/-1.0/1.0（g_config={0} 会把 float 置 0，语义必须是
     // "不覆写/不缩放"而非 0 值，必须显式兜底）。
     float abs_mix;
     float abs_b_override;
-    float abs_tb_scale;
+    float brake_scale;
 
     // Method offsets in libil2cpp.so to hook.
     uintptr_t set_throttle_offset;
