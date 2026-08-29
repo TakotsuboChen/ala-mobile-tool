@@ -42,6 +42,33 @@ static void *g_abs_last_wheels = NULL;
 static int g_abs_uses_taking_over = 0;
 static int g_abs_base_uses[4] = {-1, -1, -1, -1};  // -1=未捕获，0/1=基线
 
+// ── TC/ABS 介入指示灯信号（Java 主线程 JNI 轮询读，volatile 保证可见性）──
+// ABS 介入信号 = **游戏原生执行点的直击**：inline 拦截 RoadForce 内
+// "tempBrakeF 释放/管理写入"指令（base+0x1A7B7DC，str s0,[x19,#0x3EC]——
+// 反汇编实证：只有滑移超阈帧才流经此处；未超阈 b.le 直接绕过；0x1A7B768
+// 的另一写入点是每帧必经的普通路径，不含介入语义）。命中即 = 游戏此刻
+// 正在对某轮施加 ABS 滑移管理（含 pulse 泄压与 kP 管理两相位）——这是
+// 游戏自己的执行流在发声，非字段条件复算。玩家车过滤：x19(wheel) 与
+// g_player_controller 的 4 轮指针比对（AI 车 RoadForce 同样命中，必须滤）。
+// TC：无内建方波（连续 smoothstep 削减律），电平 = 削减(f<accel) &&
+// g_frame_phase（25Hz 帧时钟）。
+static volatile int g_tc_active = 0;
+static volatile int g_abs_active = 0;
+// 25Hz 帧相位 + 帧号：玩家白名单必经点（proxy_fixed_update，不受 TC/ABS
+// 开关影响）每物理帧 seq++ 且 phase = seq&1。
+static volatile int g_frame_phase = 0;
+static volatile long long g_frame_seq = 0;
+// ABS 介入 = "最近帧内拦截器命中过"：命中时记 g_abs_hit_seq = 当前帧号，
+// 查询时 (g_frame_seq - g_abs_hit_seq) <= 容差 即介入。**不做清零**——
+// RoadForce 与 CC.FixedUpdate 是独立 MonoBehaviour 物理回调，Unity 不保证
+// 先后（实机实证 2026-08-30：帧头清零会把同帧稍早的命中抹掉，灯恒灭）。
+static volatile long long g_abs_hit_seq = -1000;
+// RoadForce 指令拦截器已安装（0 = 未装/失败，1 = 已装）。
+static volatile int g_abs_rf_intercept_installed = 0;
+// 诊断：拦截器命中计数 + 玩家车过滤命中计数（物理线程写，诊断日志读）。
+static volatile long long g_abs_rf_hits_total = 0;
+static volatile long long g_abs_rf_hits_player = 0;
+
 static volatile float g_throttle_value = 0.0f;
 static volatile float g_brake_value = 0.0f;
 
@@ -336,6 +363,11 @@ static void proxy_fixed_update(void *this) {
             g_player_drivetrain = drivetrain;
         }
 
+        // 指示灯帧号推进：每物理帧 seq++（相位 = seq&1）。ABS 信号不再
+        // 清零——命中帧号与当前帧号比对（见 g_abs_hit_seq 注释）。
+        g_frame_seq++;
+        g_frame_phase ^= 1;
+
         // ★ ABS 档位每帧覆写（干预强度 b + 制动压力 T_b 缩放 + usesABS 残留
         // 恢复）。**必须在关闭块之前执行**：基线捕获要求字段尚未被模块碰过
         //（关闭路径先跑会把 usesABS 写 false，污染基线）。白名单同上。
@@ -550,8 +582,10 @@ static float proxy_traction_filter(void *this, float accel) {
     typedef float (*orig_t)(void *, float);
     if (is_target_player_car(this)) {
         // 强度=关闭（tc_mix<=0，含旧 enable_tc=false 路径）：直接返回原始
-        // accel，不调 orig（跳过 TC 削减）。
+        // accel，不调 orig（跳过 TC 削减）。清指示灯信号——此路径不走到
+        // 下面的写点，残留 1 会让灯在 TC 关闭后仍然闪烁。
         if (!g_config.enable_tc || g_config.tc_mix <= 0.0f) {
+            g_tc_active = 0;
             return accel;
         }
         // TC 时机档（仅在用户选了非默认时机时覆写）：成对写 TCLSlip (0x34)
@@ -600,6 +634,13 @@ static float proxy_traction_filter(void *this, float accel) {
             }
         }
         tc_diag_log(this, f, accel, slip_pre, minspd_pre);
+
+        // 介入指示灯信号：电平 = 削减判定(f<accel) && 25Hz 相位（只读！
+        // 相位时钟单一翻转点在 proxy_fixed_update 帧头——此处若再翻会
+        // 双重翻转抵消，本写点读到的相位恒 0，TC 灯死，实机实证）。
+        // 混合档插值 f=accel+(f−accel)·mix 只在 f<accel 时再往下拉，不影响
+        // 0→1 判定。
+        g_tc_active = (f < accel && g_frame_phase) ? 1 : 0;
         return f;
     }
     // 非玩家车（AI）：透传，绝不拦截——白名单比对见 is_target_player_car 注释，
@@ -639,6 +680,17 @@ static void abs_diag_log(void *this) {
          (int)*(unsigned char *)((uintptr_t)wheel0 + 0x408),  // pulseBrakes（介入标志）
          *(float *)((uintptr_t)wheel0 + 0x3EC),   // tempBrakeF
          *(float *)((uintptr_t)wheel0 + 0x418));  // brakePressure（踏板输入副本）
+    // 拦截器诊断：total=全部命中（含 AI 车），player=玩家车过滤后命中。
+    // 每 0.5s 增量——若 total 不涨 = 拦截器没命中（地址错/未装）；total 涨
+    // 而 player 不涨 = 玩家车过滤失败（wheels 指针链错）。
+    static long long diag_total_last = 0, diag_player_last = 0;
+    long long dt = g_abs_rf_hits_total - diag_total_last;
+    long long dp = g_abs_rf_hits_player - diag_player_last;
+    diag_total_last = g_abs_rf_hits_total;
+    diag_player_last = g_abs_rf_hits_player;
+    long long age = g_frame_seq - g_abs_hit_seq;
+    LOGI("ABSdiag: rfHits total=%lld player=%lld hitAge=%lld lvl=%d phase=%d",
+         dt, dp, age, (age >= 0 && age <= 2) ? 1 : 0, g_frame_phase);
     if (wheel2 != NULL) {
         LOGI("ABSdiag: w0 tb=%.1f p0f=%.1f p0r=%.1f | w2 tb=%.1f p0f=%.1f p0r=%.1f 0xF0=%.3f",
              *(float *)((uintptr_t)wheel0 + 0x88),
@@ -726,6 +778,56 @@ static void abs_apply_gear(void *this) {
         }
         LOGI("ABSdiag: b baseline restored");
         g_abs_b_taking_over = 0;
+    }
+}
+
+// ── ABS 介入原生信号：RoadForce tempBrakeF 释放/管理写入指令拦截器 ──
+// 拦截地址 base+0x1A7B7DC（str s0, [x19, #0x3EC]）。反汇编实证
+//（build/abs_scan/roadforce.asm + TECHNICAL_ANALYSIS §2.3）：该指令只在
+// 滑移超阈帧执行（未超阈走 0x1A7B770 b.le 绕过），是游戏 ABS 真实介入的
+// 执行点——命中即游戏此刻正在对该轮施加滑移管理。x19 = IRDSWheel。
+// 高频路径（全车每物理帧滑移超阈时命中）：只做 4 次指针比对 + 一次写。
+static void abs_rf_intercept_pre(shadowhook_cpu_context_t *ctx, void *data) {
+    (void) data;
+    g_abs_rf_hits_total++;
+    void *wheel = (void *) ctx->regs[19];  // x19 = IRDSWheel
+    void *ctrl = (void *) g_player_controller;
+    if (ctrl == NULL || wheel == NULL) return;
+    // 玩家车过滤：wheel 必须属于 g_player_controller 的 wheels[0..3]。
+    void *wheels_arr = *(void **) ((uintptr_t) ctrl + 0x28);
+    if (wheels_arr == NULL) return;
+    for (int i = 0; i < 4; i++) {
+        if (*(void **) ((uintptr_t) wheels_arr + 0x20 + i * 8) == wheel) {
+            g_abs_rf_hits_player++;
+            // 物理效果过滤：滑移超阈帧油门打滑时也会流经此处（ABS 调制段
+            // 执行条件不含"正在刹车"——实机实证起步红绿齐闪）。释放泄压
+            // 只有乘上该轮制动压力(0xF0)才产生实际制动扭矩；0xF0≈0 时
+            // 本次执行无制动效果，不算介入。
+            if (*(volatile float *) ((uintptr_t) wheel + 0xF0) > 0.01f) {
+                g_abs_hit_seq = g_frame_seq;
+                g_abs_active = 1;
+            }
+            return;
+        }
+    }
+}
+
+// 安装 RoadForce 指令拦截器。offset 固定 0x1A7B7DC（8.0.4 专用，与
+// TractionFilter 等同受 VersionGate 门控）。失败仅记日志——指示灯失效
+// 不影响任何 gameplay 功能。
+static void abs_rf_intercept_install(uintptr_t base) {
+    uintptr_t target = base + 0x1A7B7DC;
+    void *stub = shadowhook_intercept_instr_addr(
+            (void *) target, abs_rf_intercept_pre, NULL,
+            SHADOWHOOK_INTERCEPT_DEFAULT);
+    if (stub == NULL) {
+        int err = shadowhook_get_errno();
+        LOGE("shadowhook_intercept_instr_addr(RoadForce 0x1A7B7DC) failed: %d (%s)",
+             err, shadowhook_to_errmsg(err));
+        g_abs_rf_intercept_installed = 0;
+    } else {
+        LOGI("Intercepted RoadForce ABS write at 0x%" PRIxPTR, target);
+        g_abs_rf_intercept_installed = 1;
     }
 }
 
@@ -896,6 +998,9 @@ bool pedal_install_hooks(const pedal_hook_config_t *config) {
         return false;
     }
     LOGI("libil2cpp.so base address: 0x%" PRIxPTR, base);
+
+    // ABS 介入指示灯：RoadForce 指令级拦截器（游戏原生介入执行点）。
+    abs_rf_intercept_install(base);
 
     if (g_config.set_throttle_offset != 0) {
         uintptr_t target = base + g_config.set_throttle_offset;
@@ -1281,4 +1386,19 @@ void pedal_set_brake_value(float value) {
     } else if (was_active) {
         clear_brake_field(controller);
     }
+}
+
+// ── TC/ABS 介入指示灯信号查询（Java 主线程 JNI 轮询，~60Hz）──
+// TC：写点已合成 g_frame_phase，直读。
+// ABS：g_abs_active 是"本帧是否介入"的电平——持续介入时逐帧置 1（帧头
+// 清零后拦截器又置位），直读会常亮；此处与 g_frame_phase（25Hz，TC 侧
+// 每物理帧翻转）合成闪烁——介入期间按 25Hz 方波闪，与 pulse 泄压节奏
+// 同源。读侧只读 volatile 标量，无锁。
+void pedal_query_tc_abs_indicator(int *tc_active, int *abs_active) {
+    *tc_active = g_tc_active;
+    // ABS：最近 2 帧内拦截器命中过即介入（容差 2 帧覆盖 RoadForce 与
+    // FixedUpdate 的任意先后），叠加 25Hz 相位闪烁。
+    long long age = g_frame_seq - g_abs_hit_seq;
+    int engaged = (age >= 0 && age <= 2) ? 1 : 0;
+    *abs_active = (engaged && g_frame_phase) ? 1 : 0;
 }

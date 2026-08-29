@@ -139,6 +139,11 @@ void pedal_set_tc_params(float mix, float eps, float minspd);
 // 此方法同步。与 set_tc_params 同为低频 setter，不需重装 hook。
 void pedal_set_abs_params(float mix, float b_override, float tb_scale);
 
+// TC/ABS 介入指示灯信号查询（Java 主线程 JNI 轮询 ~60Hz，无锁读 volatile）。
+// 返回两灯当前电平（0/1，native 侧已合成 25Hz 闪烁相位：ABS = 介入 &&
+// pulseBrakes 方波，TC = 削减 && 帧相位时钟），见 TcAbsIndicatorView。
+void pedal_query_tc_abs_indicator(int *tc_active, int *abs_active);
+
 #ifdef __cplusplus
 }
 #endif

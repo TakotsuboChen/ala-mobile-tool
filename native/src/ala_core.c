@@ -375,3 +375,19 @@ Java_tools_alamobile_mod_NativeBridge_setHidePedalsEnabled(JNIEnv *env, jclass c
     (void) clazz;
     hide_pedals_set_enabled((bool) enabled);
 }
+
+// 查询 TC/ABS 介入指示灯信号（TcAbsIndicatorView 主线程 Handler 轮询，~60Hz）。
+// outTc/outAbs = jint[1]，native 侧已合成 25Hz 闪烁相位，Java 直读电平。
+// SetIntArrayRegion 直写缓冲，无对象分配，轮询路径零 GC 压力。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_queryTcAbsIndicator(JNIEnv *env, jclass clazz,
+                                                          jintArray outTc, jintArray outAbs) {
+    (void) clazz;
+    int tc_active = 0, abs_active = 0;
+    pedal_query_tc_abs_indicator(&tc_active, &abs_active);
+
+    jint tc_buf = tc_active;
+    jint abs_buf = abs_active;
+    (*env)->SetIntArrayRegion(env, outTc, 0, 1, &tc_buf);
+    (*env)->SetIntArrayRegion(env, outAbs, 0, 1, &abs_buf);
+}

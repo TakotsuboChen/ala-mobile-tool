@@ -338,6 +338,15 @@ object NativeBridge {
     external fun forceUnlockNow(): Boolean
 
     /**
+     * 查询 TC/ABS 介入指示灯信号（TcAbsIndicatorView 主线程 Handler 轮询，~60Hz）。
+     * outTc/outAbs 各为 int[1]：介入电平（0/1，native 侧已合成 25Hz 闪烁
+     * 相位——ABS=介入&&pulseBrakes 方波，TC=削减&&帧相位时钟）。
+     * native 写侧在物理线程 hook 路径，读侧 volatile 无锁。
+     */
+    @JvmStatic
+    external fun queryTcAbsIndicator(outTc: IntArray, outAbs: IntArray)
+
+    /**
      * 初始化"隐藏游戏原生油门/刹车按钮"功能。
      * 启动 native 后台轮询线程，每 2 秒遍历 IRDSUIMobileControls 布局 GameObject
      * 子物体，按名字匹配 "Throttle"/"Brake" 并 SetActive(false)，跳过 "Clutch"。

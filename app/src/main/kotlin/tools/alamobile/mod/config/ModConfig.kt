@@ -84,6 +84,9 @@ object ModConfig {
     // 按名字匹配 "Throttle"/"Brake" 并 SetActive(false)。
     const val KEY_HIDE_GAME_PEDALS = "hide_game_pedals"
 
+    // TC/ABS 介入指示灯（Overlay 控件区，纯视觉无副作用，默认开启）。
+    const val KEY_ENABLE_TC_ABS_INDICATOR = "enable_tc_abs_indicator"
+
     // Pedal mapping
     const val KEY_PEDAL_MODE = "pedal_mode"
     const val KEY_PEDAL_DEADZONE = "pedal_deadzone"
@@ -525,6 +528,8 @@ object ModConfig {
         const val ENABLE_V10_SOUND = false
         // 隐藏游戏原生油门和刹车按钮默认关闭
         const val HIDE_GAME_PEDALS = false
+        // TC/ABS 介入指示灯默认开启（纯视觉，参照"位置记忆默认启用"先例）。
+        const val ENABLE_TC_ABS_INDICATOR = true
         val PEDAL_MODE = PedalMode.SINGLE
         const val PEDAL_DEADZONE = 0.05f
         const val PEDAL_TRANSITION = 0.5f
@@ -642,6 +647,10 @@ object ModConfig {
                     KEY_HIDE_GAME_PEDALS,
                     Defaults.HIDE_GAME_PEDALS
                 ),
+                enableTcAbsIndicator = json.optBoolean(
+                    KEY_ENABLE_TC_ABS_INDICATOR,
+                    Defaults.ENABLE_TC_ABS_INDICATOR
+                ),
                 pedalDeadzone = json.optDouble(
                     KEY_PEDAL_DEADZONE,
                     Defaults.PEDAL_DEADZONE.toDouble()
@@ -721,6 +730,7 @@ object ModConfig {
             put(KEY_ENABLE_MUSIC_REPLACE, settings.enableMusicReplace)
             put(KEY_ENABLE_V10_SOUND, settings.enableV10Sound)
             put(KEY_HIDE_GAME_PEDALS, settings.hideGamePedals)
+            put(KEY_ENABLE_TC_ABS_INDICATOR, settings.enableTcAbsIndicator)
             put(KEY_PEDAL_DEADZONE, settings.pedalDeadzone.toDouble())
             put(KEY_PEDAL_TRANSITION, settings.pedalTransition.toDouble())
             put(KEY_BRAKE_TRANSITION, settings.brakeTransition.toDouble())
@@ -1000,6 +1010,7 @@ object ModConfig {
                 enableMusicReplace = j.optBoolean(KEY_ENABLE_MUSIC_REPLACE, Defaults.ENABLE_MUSIC_REPLACE),
                 enableV10Sound = j.optBoolean(KEY_ENABLE_V10_SOUND, Defaults.ENABLE_V10_SOUND),
                 hideGamePedals = j.optBoolean(KEY_HIDE_GAME_PEDALS, Defaults.HIDE_GAME_PEDALS),
+                enableTcAbsIndicator = j.optBoolean(KEY_ENABLE_TC_ABS_INDICATOR, Defaults.ENABLE_TC_ABS_INDICATOR),
                 pedalDeadzone = j.optDouble(KEY_PEDAL_DEADZONE, Defaults.PEDAL_DEADZONE.toDouble()).toFloat(),
                 pedalTransition = j.optDouble(KEY_PEDAL_TRANSITION, Defaults.PEDAL_TRANSITION.toDouble()).toFloat(),
                 brakeTransition = j.optDouble(KEY_BRAKE_TRANSITION, Defaults.BRAKE_TRANSITION.toDouble()).toFloat(),
@@ -1223,6 +1234,7 @@ object ModConfig {
             enableMusicReplace = Defaults.ENABLE_MUSIC_REPLACE,
             enableV10Sound = Defaults.ENABLE_V10_SOUND,
             hideGamePedals = Defaults.HIDE_GAME_PEDALS,
+            enableTcAbsIndicator = Defaults.ENABLE_TC_ABS_INDICATOR,
             pedalDeadzone = Defaults.PEDAL_DEADZONE,
             pedalTransition = Defaults.PEDAL_TRANSITION,
             brakeTransition = Defaults.BRAKE_TRANSITION,
@@ -1294,6 +1306,8 @@ object ModConfig {
         // 合并进 settings）。未拖过时本地无此 key，落回 Defaults——
         // 行为与旧版"每次打开游戏回到默认位置"一致。
         val toolButtonPosition: OverlayPosition = Defaults.TOOL_BUTTON_POSITION,
+        // TC/ABS 介入指示灯开关（默认开启，纯视觉）。
+        val enableTcAbsIndicator: Boolean = Defaults.ENABLE_TC_ABS_INDICATOR,
         val logEnabled: Boolean = Defaults.LOG_ENABLED
     )
 }

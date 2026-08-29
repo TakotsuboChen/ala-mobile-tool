@@ -170,6 +170,10 @@ class ConfigReceiver : BroadcastReceiver() {
             }
             Log.i(TAG, "ConfigReceiver: logEnabled=$logEnabled")
 
+            // TC/ABS 介入指示灯开关——无需 native 同步（开关只控制 Java 层
+            // TcAbsIndicatorView 的创建），OverlayManager.notifyConfigChanged
+            // 重建时读最新 JSON 创建/移除 view。
+
             // 游戏进程把自己的日志文件内容推到模块进程，
             // 供 ConfigActivity 的"导出并分享日志"读取（跨进程文件不可直接读）。
             pushGameLogs(context)

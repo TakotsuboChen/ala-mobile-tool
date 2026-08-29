@@ -546,6 +546,22 @@ fun ConfigurePagerMiuix(
                                 displayFormat = { String.format("%.0f%%", it * 100) },
                                 icon = Icons.Rounded.RoundedCorner
                             )
+                            // TC/ABS 介入指示灯——Overlay 控件区最后一项。
+                            // 开关只控制 Java 层 view 创建，广播重建即生效。
+                            SwitchPreference(
+                                title = "TC/ABS 介入指示灯",
+                                summary = "在牵引力控制和防抱死制动系统干预时显示闪烁的指示灯",
+                                startAction = {
+                                    Icon(
+                                        Icons.Rounded.Bolt,
+                                        modifier = Modifier.padding(end = 6.dp),
+                                        contentDescription = null,
+                                        tint = colorScheme.onBackground
+                                    )
+                                },
+                                checked = uiState.enableTcAbsIndicator,
+                                onCheckedChange = actions::setEnableTcAbsIndicator
+                            )
                         }
 
                         // ── Section 3: 响应曲线 ──

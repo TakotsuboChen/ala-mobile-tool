@@ -10,6 +10,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import kotlin.math.max
+import kotlin.math.roundToInt
 import tools.alamobile.mod.NativeBridge
 import tools.alamobile.mod.config.ModConfig
 
@@ -55,6 +56,7 @@ class OverlayManager(context: Context) {
     private var brakeView: PedalOverlayView? = null
     private var gearView: GearShiftView? = null
     private var toggleButton: ToolButtonView? = null
+    private var indicatorView: TcAbsIndicatorView? = null
     private var pedalEditView: OverlayEditView? = null
     private var brakeEditView: OverlayEditView? = null
     private var gearEditView: OverlayEditView? = null
@@ -105,6 +107,7 @@ class OverlayManager(context: Context) {
         pedalView?.visibility = newVisibility
         brakeView?.visibility = newVisibility
         gearView?.visibility = newVisibility
+        indicatorView?.visibility = newVisibility
         // 重建后 editView 是新实例，若在编辑模式要重新设 VISIBLE。
         if (editMode) updateEditModeVisibility()
     }
@@ -212,6 +215,7 @@ class OverlayManager(context: Context) {
         pedalView?.visibility = newVisibility
         brakeView?.visibility = newVisibility
         gearView?.visibility = newVisibility
+        indicatorView?.visibility = newVisibility
         if (!overlaysVisible) {
             editMode = false
             updateEditModeVisibility()
@@ -228,6 +232,7 @@ class OverlayManager(context: Context) {
         pedalView?.visibility = View.VISIBLE
         brakeView?.visibility = View.VISIBLE
         gearView?.visibility = View.VISIBLE
+        indicatorView?.visibility = View.VISIBLE
         editMode = !editMode
         updateEditModeVisibility()
     }
@@ -256,6 +261,30 @@ class OverlayManager(context: Context) {
         val pedalPosition = settings.pedalPosition
         val brakePosition = settings.brakePosition
         val singlePosition = settings.singlePedalPosition
+
+        // TC/ABS 介入指示灯：开关开启时创建，GONE 等待 toggle 展开。
+        // 位置固定（直边中点贴屏幕上边缘中点），无拖拽/编辑层/持久化。
+        // 尺寸：宽 = 屏宽 1/3，高 = 屏高 1/30（当前设备方向，addGamingOverlays
+        // 在旋转/重建时重入，displayMetrics 即当前方向）。
+        if (settings.enableTcAbsIndicator) {
+            indicatorView = TcAbsIndicatorView(
+                appContext,
+                (screenWidth / 3f).roundToInt(),
+                (screenHeight / 30f).roundToInt()
+            ).apply {
+                tag = "tc_abs_indicator"
+                visibility = View.GONE
+            }
+            val indicatorParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            }
+            root?.addView(indicatorView, indicatorParams)
+        } else {
+            indicatorView = null
+        }
 
         // 手动换挡关时不创建换挡控件；gearView 保持 null。
         // DUAL 模式下也不创建——刹车和换挡默认坐标相同（左下角），
@@ -461,12 +490,14 @@ class OverlayManager(context: Context) {
         parent.findViewWithTag<View>("pedal_overlay")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("brake_overlay")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("gear_shift_overlay")?.let { parent.removeView(it) }
+        parent.findViewWithTag<View>("tc_abs_indicator")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("pedal_overlay_edit")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("brake_overlay_edit")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("gear_shift_overlay_edit")?.let { parent.removeView(it) }
         pedalView = null
         brakeView = null
         gearView = null
+        indicatorView = null
         pedalEditView = null
         brakeEditView = null
         gearEditView = null
@@ -478,6 +509,7 @@ class OverlayManager(context: Context) {
         parent.findViewWithTag<View>("pedal_overlay")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("brake_overlay")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("gear_shift_overlay")?.let { parent.removeView(it) }
+        parent.findViewWithTag<View>("tc_abs_indicator")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("pedal_overlay_edit")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("brake_overlay_edit")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("gear_shift_overlay_edit")?.let { parent.removeView(it) }
@@ -485,6 +517,7 @@ class OverlayManager(context: Context) {
         brakeView = null
         gearView = null
         toggleButton = null
+        indicatorView = null
         pedalEditView = null
         brakeEditView = null
         gearEditView = null
