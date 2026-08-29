@@ -168,7 +168,7 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - `native/src/unlock_hook.c` — billing/unlock IL2CPP hook logic.
 - `native/src/music_hook.c` — main menu music mute + heartbeat signal.
 - `native/src/intro_hook.c` — intro V10 engine sound: mute introSound + one-shot signal.
-- `native/src/hide_pedals_hook.c` / `native/src/hide_pedals_hook.h` — hide game-native throttle/brake buttons via IRDSUIMobileControls + il2cpp_runtime_invoke(SetActive).
+- `native/src/hide_pedals_hook.c` / `native/src/hide_pedals_hook.h` — hide game-native throttle/brake buttons via IRDSUIMobileControls + il2cpp_runtime_invoke(SetActive); on disable, restores hidden buttons via a stash + re-traverse pointer match (never dereferences stashed pointers).
 - `native/src/native_log.h` / `native/src/native_log.c` — shared native file logging (logcat + file, logEnabled-gated).
 - `app/src/main/kotlin/tools/alamobile/mod/util/Logger.kt` — unified Java logger (logcat + file, logEnabled-gated).
 - `app/src/main/kotlin/tools/alamobile/mod/util/LogExporter.kt` — merge module+game logs, FileProvider → ShareSheet.
