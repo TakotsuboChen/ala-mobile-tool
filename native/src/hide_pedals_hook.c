@@ -72,6 +72,20 @@ static bool g_first_traverse = true;
 static int g_hidden_count = 0;
 static int g_tick_count = 0;
 
+// ── 恢复账本 ──
+// SetActive(false) 是单向阀:游戏不会自己恢复被动隐藏的 GameObject,
+// 用户把开关拨回关时必须由模块 SetActive(true) 才能还原。这里登记
+// "被我 SetActive(false) 过"的 GameObject 指针(stash),恢复时重新
+// 遍历布局树、指针 ∈ stash 才点亮——遍历能拿到名字的对象必然存活,
+// stash 里可能已随场景卸载的死指针永远不被解引用。恢复动作只由
+// hide_pedals_tick(Unity 脚本线程)执行,不在 set_enabled(广播
+// receiver 线程)直接调 il2cpp。
+#define MAX_STASHED 16           // 每个布局至多 Throttle+Brake,远小于此
+#define RESTORE_MAX_PASSES 40    // 连续 40 pass(~20s)无进展则放弃
+static void *g_stashed[MAX_STASHED];
+static int   g_stashed_count = 0;
+static int   g_restore_passes = 0;
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Module base + ELF symbol lookup
 // ═══════════════════════════════════════════════════════════════════════════
@@ -175,6 +189,29 @@ static void resolve_il2cpp_runtime_api(void) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// stash 登记/摘除（均只在 tick 线程调用，无并发）
+// ═══════════════════════════════════════════════════════════════════════════
+static void stash_add(void *go) {
+    for (int i = 0; i < g_stashed_count; i++)
+        if (g_stashed[i] == go) return;  // tick 每 0.5s 重复命中同一按钮，去重
+    if (g_stashed_count >= MAX_STASHED) {
+        LOGW("hide_pedals: stash full (%d), this GO won't restore on disable", MAX_STASHED);
+        return;
+    }
+    g_stashed[g_stashed_count++] = go;
+}
+
+static bool stash_take(void *go) {
+    for (int i = 0; i < g_stashed_count; i++) {
+        if (g_stashed[i] == go) {
+            g_stashed[i] = g_stashed[--g_stashed_count];
+            return true;
+        }
+    }
+    return false;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // get_real_gameobject: 通过 il2cpp_runtime_invoke 调用 get_gameObject
 //（直接调 RVA 返回的是 RectTransform 而非 GameObject）
 // ═══════════════════════════════════════════════════════════════════════════
@@ -217,13 +254,31 @@ static void hide_if_active(void *go, const char *name) {
     g_il2cpp_runtime_invoke(g_set_active_methodinfo, go, params, &exc);
     g_hidden_count++;
     if (exc != NULL) LOGW("hide_pedals: SetActive('%s') exc=%p", name, exc);
-    else LOGI("hide_pedals: '%s' hidden OK", name);
+    else {
+        stash_add(go);  // 登记进恢复账本，开关拨回关时负责还原
+        LOGI("hide_pedals: '%s' hidden OK", name);
+    }
+}
+
+// restore 模式：遍历到名字匹配的对象，仅当它确实"被我隐藏过"（指针在
+// stash 里）才 SetActive(true)——防止把游戏本来就 inactive 的同名物体
+// 误点亮。匹配成功即移出账本，同一物体至多打一次日志；匹配失败（游戏
+// 自己重开过/场景重建后新指针）不动，该死指针随恢复放弃被清账。
+static void restore_if_stashed(void *go, const char *name) {
+    if (g_set_active_methodinfo == NULL) return;  // 从未隐藏过则无账可还
+    if (!stash_take(go)) return;
+    bool true_val = true;
+    void *params[] = { &true_val };
+    void *exc = NULL;
+    g_il2cpp_runtime_invoke(g_set_active_methodinfo, go, params, &exc);
+    if (exc != NULL) LOGW("hide_pedals: SetActive(true,'%s') exc=%p", name, exc);
+    else LOGI("hide_pedals: '%s' restored OK", name);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Recursive traversal: find "Throttle"/"Brake" and SetActive(false)
+// Recursive traversal: find "Throttle"/"Brake"，并按模式隐藏或还原。
 // ═══════════════════════════════════════════════════════════════════════════
-static void hide_buttons_recursive(void *transform, int depth) {
+static void hide_buttons_recursive(void *transform, int depth, bool restore_mode) {
     if (transform == NULL || depth > MAX_RECURSION_DEPTH) return;
 
     int child_count = g_transform_get_child_count(transform, NULL);
@@ -236,13 +291,14 @@ static void hide_buttons_recursive(void *transform, int depth) {
         if (child_go != NULL) {
             void *name_str = g_object_get_name(child_go, NULL);
             if (name_str != NULL) {
-                if (il2cpp_string_equals_ascii(name_str, "Throttle") ||
-                    il2cpp_string_equals_ascii(name_str, "Brake")) {
+                bool is_throttle = il2cpp_string_equals_ascii(name_str, "Throttle");
+                if (is_throttle || il2cpp_string_equals_ascii(name_str, "Brake")) {
+                    const char *name = is_throttle ? "Throttle" : "Brake";
                     // 通过 il2cpp_runtime_invoke 获取真正的 GameObject
                     void *real_go = get_real_gameobject(child_transform);
                     if (real_go != NULL) {
-                        hide_if_active(real_go,
-                            il2cpp_string_equals_ascii(name_str, "Throttle") ? "Throttle" : "Brake");
+                        if (restore_mode) restore_if_stashed(real_go, name);
+                        else              hide_if_active(real_go, name);
                     }
                     // 不管 active 还是 inactive，都跳过递归子树（按钮子物体不需要遍历）
                     hidden = true;
@@ -251,15 +307,15 @@ static void hide_buttons_recursive(void *transform, int depth) {
         }
 
         if (!hidden) {
-            hide_buttons_recursive(child_transform, depth + 1);
+            hide_buttons_recursive(child_transform, depth + 1, restore_mode);
         }
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Main hide logic
+// Main traverse logic（restore_mode=true 时为还原遍历）
 // ═══════════════════════════════════════════════════════════════════════════
-static void hide_pedals_do_hide(void) {
+static void hide_pedals_do_hide(bool restore_mode) {
     if (!resolve_unity_methods()) return;
     resolve_il2cpp_runtime_api();
     if (g_il2cpp_runtime_invoke == NULL) return;
@@ -286,10 +342,34 @@ static void hide_pedals_do_hide(void) {
         void *transform = g_go_get_transform(layout_obj, NULL);
         if (transform == NULL) continue;
 
-        hide_buttons_recursive(transform, 0);
+        hide_buttons_recursive(transform, 0, restore_mode);
     }
 
     g_first_traverse = false;
+}
+
+// 恢复单 pass：一次全树遍历，stash 能匹配的全部 SetActive(true)。
+// 部分按钮此刻可能未加载（计时尚在加载场景），连续 RESTORE_MAX_PASSES
+// 次无进展则清账放弃——多半是源已随场景卸载的死指针（从不解引用，无害）；
+// 新场景重建的原生踏板本来就是 active，无需恢复。
+static void restore_pass(void) {
+    int before = g_stashed_count;
+    hide_pedals_do_hide(true);
+    if (g_stashed_count == 0) {
+        g_restore_passes = 0;
+        return;
+    }
+    if (g_stashed_count == before) {
+        g_restore_passes++;
+        if (g_restore_passes >= RESTORE_MAX_PASSES) {
+            LOGW("hide_pedals: restore abandoned (%d passes, %d left)",
+                 g_restore_passes, g_stashed_count);
+            g_stashed_count = 0;
+            g_restore_passes = 0;
+        }
+    } else {
+        g_restore_passes = 0;  // 有进展，重置放弃计数
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -301,15 +381,29 @@ void hide_pedals_init(bool enabled) {
 }
 
 void hide_pedals_tick(void) {
-    if (!g_enabled) return;
-    if (g_tick_count++ % TICK_INTERVAL != 0) return;
-    hide_pedals_do_hide();
+    // 帧计数器在函数顶部推进：enabled 与 disabled 两种状态共用同一节拍，
+    // 否则关闭开关后恢复遍历永远没有机会运行（bug：只藏不还）。
+    bool tick_now = (g_tick_count++ % TICK_INTERVAL) == 0;
+
+    if (g_enabled) {
+        if (!tick_now) return;
+        hide_pedals_do_hide(false);
+        g_restore_passes = 0;  // 重新开启隐藏，放弃计数同步归零
+        return;
+    }
+
+    if (g_stashed_count == 0) return;  // 没有未还原的隐藏，无需遍历
+    if (!tick_now) return;
+    restore_pass();
 }
 
 void hide_pedals_set_enabled(bool enabled) {
     if (g_enabled != enabled) {
         g_first_traverse = true;
+        LOGI("hide_pedals_set_enabled: %d", enabled);
+        // 置 false 后已隐藏的按钮由 tick 恢复（≤0.5s，见 stash/restore_pass）。
+        // 不在此直接 SetActive(true)：本函数运行在广播 receiver 线程，
+        // il2cpp 调用必须走 Unity 脚本线程的 tick 语境。
     }
     g_enabled = enabled;
-    LOGI("hide_pedals_set_enabled: %d", enabled);
 }
