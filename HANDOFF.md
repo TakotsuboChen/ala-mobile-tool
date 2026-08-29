@@ -1,71 +1,80 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-08-28T23:52:19+0800 · Git HEAD: `d516717`
+生成时间: 2026-08-29T20:53:58+0800 · Git HEAD: `845d970`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: `main` @ `d516717` (2026-08-28)
-- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `d516717`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA；不一致以 git 实际输出为准
+- 锚点: `main` @ `845d970` (2026-08-29)
+- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `845d970`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA；不一致以 git 实际输出为准
 - 待重探的 [?]: 见下方标记
-- 先读: `CLAUDE.md` + `PedalOverlayView.kt` 的 `onDraw` KDoc（边框缝隙方案的单一事实源，含 ①②③ 历史教训）+ `TC_LEVEL_DESIGN.md` §10 v1.5 + `ABS_LEVEL_DESIGN.md` §4 + `.handoffs/20260828235219-handoff.md` §4（死路总账）
+- 先读: `CLAUDE.md` + `PedalOverlayView.kt` 的 `updateValuesFromPointer` 双源校验注释块（本会话新增，含完整设计动机）+ `PedalOverlayView.kt` 的 `onDraw` KDoc（边框缝隙方案单一事实源）+ `TC_LEVEL_DESIGN.md` §10 v1.5 + `ABS_LEVEL_DESIGN.md` §4 + `.handoffs/20260828235219-handoff.md` §4（死路总账）
 
 ## 1. 当前目标
-ABS 干预强度档位第三轮标定**已落地定版**：低/中/高 = 0.80/0.60/0.40（高档 0.50→0.40 拉开档距），commit `d516717`，构建+lint 通过，等用户装机实测手感回传。头号任务（多指触摸 bug）不变：插桩链路已通，仍等复现用户装新 APK 复现回传。
+多指触摸 bug（"另一手指按下→踏板瞬间跳满"）已完成定位链条：复现日志分析→数值模型→四路 subagent 深度研究→根因模型（MIUI 输入管线 per-window 加工污染 raw 通道），防御修复（双源交叉校验+源切换）已实装（`845d970`）并经 Takotsubo 自测正常。**当前等待复现用户装新 APK 回传日志**，以裁决污染层（rawX 二分）并证实症状消除。
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **ABS 档位定版 0.80/0.60/0.40**：`ModConfig.kt` AbsStrength 枚举（LOW=0.80/MEDIUM=0.60/HIGH=0.40，OFF/MAX=-1 不变）+ KDoc + `ABS_LEVEL_DESIGN.md` §4/§6.4 同步（commit `d516717`，+6/-6）。枚举 value 字符串未动（"weak/medium/strong"），旧配置无迁移风险。
-- [?] **档位数值实机手感未回传**——数值是用户口头规格（第三轮），装机验证状态未知；标定史教训"有效手感区间远窄于理论窗口"，等用户反馈。
-- [V] **构建+lint**：`./gradlew :app:assembleRelease :app:lint` → BUILD SUCCESSFUL、`EXIT=0`（0 errors，44 warnings + 3 hints，基线量级）。
-- [V] 工作区：干净，`main` 与 `origin/main` 同步（`d516717` 档位定版；持久文档无改动，本次跳过 docs 切片）。
+- [V] **修复已实装**：commit `845d970`（`PedalOverlayView.kt` +72/-1）。双源校验：raw 通道（`rawYAt`，mRawTransform 管道）vs transform 通道（`getY+getLocationOnScreen`）；分叉 >100px（`MISMATCH_SWITCH_PX`）判污染帧切 y 源继续输出（踏板仍跟手），>20px 记 `RAW_MISMATCH` 全通道日志（rawY/yT/rawX/xT/idx/ptc/loc/screenH+计数，节流 500ms）。新增 `rawXAt` API29 等价式 helper。
+- [V] **构建+lint**：`./gradlew :app:assembleRelease :app:lint` → BUILD SUCCESSFUL，**0 errors**（44 warnings + 3 hints，基线量级）。注意 `assembleRelease` 不跑 lint，推送前必须 `:app:lint`。
+- [V] **Takotsubo 自机实测**：adb install 成功（先 force-stop），用户确认"测试正常，没有因此引入新问题"。
+- [V] **复现日志结论**（`/mnt/d/Downloads/ala_tool_log_20260829_122108.txt`，红米 MIUI15 复现用户）：三候选裁决——事件重排 ✗（idx 恒 0/无 NOT_FOUND/无 POINTER_DOWN）、pairip relayout ✗（DOWN 布局三次一致）、**坐标污染 ✓**：`rawY_wrong = rawY_true + (y2 − screenH)`，两段偏移常数 -1080/-1075 且随第二指微动同步变化。污染帧全为 MOVE。
+- [V] **双场景模型验证**：单踏板+点空白→间歇跳满（日志实证）；双踏板→**两个行程同时漂满 100%**（用户实测，公式的定量预测吻合——事件级 rawTransform 注入会作用于窗口副本内全部指针）。
+- [V] **四路 subagent 研究**（子报告见会话记录，核心结论）：①pairip 出局——8.0.4 是 lite 形态（无 libpairipcore），共存版 `checkLicense` 已 patch 成空方法=死代码，静态 grep 输入 API 零命中；②AOSP 机制穷举排除（split/offsetLocation/transform/globalScaleFactor/resample/palm rejection 均无法产生该形状）；③GameTurbo 参数直达 TP IC 固件（MiCode 源码 `aim_sensitivity`/`tap_stability`/`edge_filter`，网格计算有 `y_resolution−x` 运算——形状同构）；④公开社区零同构案例。
+- [V] **GameTurbo 设置 A/B 无效**（复现用户试遍游戏相关设置）→ 设置面不是根因路径；且"无其他小米用户反馈"→ MIUI 通用 bug 假设弱化，环境特异性方向（复现用户设备配置/长按全局手势，BRAK 段第二指长按 2.9s）。
+- [V] 演示前提已成立：复现会话（08-29 pid=6154）有 `pedal[` 插桩、零 proxy 洪水——模块更新/NPatch 注入成功。
+- [?] ABS 档位 0.80/0.60/0.40 已随 v1.0.2 发布（memory 确认），实机手感未回传。
+- 工作区: 干净，`main` 与 origin 同步。
 
 ### 测试/build 输出（本次交接 run 的真实输出，含退出码）
 ```
-./gradlew :app:assembleRelease :app:lint → BUILD SUCCESSFUL in 2m 1s，EXIT=0（0 errors）
-git push → 0285107..d516717 main（成功）
+./gradlew :app:assembleRelease :app:lint → BUILD SUCCESSFUL in 1m 9s，Lint 0 errors 44w 3h
+git push → 0df9739..845d970 main（成功）
+adb install -r → Success（设备 381QYFCN22B9A，先 force-stop）
 ```
 
 ## 3. 决策与理由
-- **高档 0.50→0.40、低/中保持 0.80/0.60** [V]——0.80/0.60 与上轮用户实机标定一致（未反馈不满），仅高档拉开与中档的可感差距（档距 0.10→0.20），回应标定史"0.15 级档距不构成可感差异"教训。方波平均：低 0.90/中 0.80/高 0.70×F_base。
-- **中途传达误差轮如实记录**：用户口头 0.90/0.75/0.60（我误执行并写入文档"定版"）→ 随即更正 0.8/0.6/0.4。教训见 §4。0.90 轮顺带验证了 native clamp 边界安全性：`b_override > 0.9f` 严格不等式，0.90 恰不触发截断（`pedal_hook.c:1147`）。
-- **继承（边框缝隙）**：层内不透明 + 整层 alpha 承担半透明已是实机验证终态；曲率最小化是插值语义数学最优，重启曲线走预设档+强度滑块。
-- **继承（ABS v2 架构）**：双旋钮正交（b 调泄压深度仅 ABS 段生效；T_b 调基数关 ABS 也生效）；enableAbs 派生化；usesABS 残留恢复通道。
+- **双源校验+源切换，而非值过滤/冻结旧值** [V]——校验的是通路一致性，与运动模式正交：直接按满/快速拉动两源同步变化天然放行（用户质疑后确认的设计核心）；冻结旧值在持续污染下会让踏板卡死，源切换则持续跟手。否决：跳变过滤当主防线（会与真实快速操作打边界仗）。
+- **三档 20/100px 阈值** [V]——污染偏移 1080px 级与切换阈值差一个数量级；小分叉（窗口动画瞬态）只记日志不切源（保守：切源是状态变化）。
+- **v1 放弃 decorView 层探针** [?]——OnTouchListener 挂 content 只在"无 child 消费"时触发（ViewGroup 分发结构），MOVE 有 touch target 时收不到；真实现需 hook Activity.dispatchTouchEvent，成本推迟到有需要时。
+- **移除 isResampled** [V]——编译期 Unresolved（flagged API 未进 API surface），诊断价值次要。
+- **坐标源语义澄清** [V]——旧注释"不能用 getY 因 pairip relayout"已被日志证伪（DOWN 布局三次一致），yOnScreen 兼任 relayout 防御+污染 fallback 双角色，KDoc 已订正。
+- 复现用户设备=红米 MIUI15（BillingHook classloader 路径实证）；Takotsubo 自机=Flyme——两人设备勿混（已落 memory `multi-touch-reporter-device`）。pairip 结论落 memory `pairip-lite-form-dead-code`。
+- 继承：边框缝隙层内不透明终态、ABS v2 双旋钮架构、TC_LEVEL_DESIGN v1.5。
 
 ## 4. 失败的尝试 — 不要再试
 > 全部前向搬运，永不丢弃。完整历史见 `.handoffs/` 目录。
 
-### 本会话新增（ABS 档位标定）
-- [V] **把未实机的口头数值写成"定版"**（用户报 0.90/0.75/0.60 即照做并标记定版）→ 用户随即更正为 0.80/0.60/0.40。教训：口头数值未装机回传前标"待实机"，不标"定版"；标定类改动以用户最终确认为准，中间轮次在标定史里标"未实机"。
-- [X] 继承：**档位值 0.90 贴 native clamp 上限**——本身可行（严格不等式不截断）但已随更正回退；若未来低档 ≥0.9 会被静默截断到 0.9，档位差异化消失，勿再押上限值。
-- 继承（边框缝隙，全部 [V] 实机截图证实）：逐像素半透明下所有"精确互补"方案（Path.op/DRRect 环/溢出方向写反三轮）全缝，**over 链数学上无解，必须层内不透明**；验证脚本与实现同人同构盲区（regex 断言先拿真实样例行匹配）。
-- 继承（触摸诊断链路，全部 [V]）：用 commit 时间推 APK 构建内容（判 APK 内容用运行时指纹）；"导出零数据=模块旧"单因推断（先对比发送量与缓存实收量）；以最坏情况揣测用户操作；adb 调试时 force-stop 用户正在使用的设备（动设备前确认用户不在操作）。
-- 继承（曲线研究，全部 [V]）：画笔模式技术成功但被用户否决（"只认控制点"）；"换算法任意形状"三次撞墙（信息论边界）；Python 镜像两截获 bug；"数学误差降低≈可感知"被实测推翻。
-- 继承（档位调优，全部 [V]）：enum 重命名顺手改存档 value 字符串 → 旧配置静默 fallback；把过期注释当需求事实源。
-- 继承（手势/测量，全部 [V] 证伪，勿重试）：滑块 v1/v2（帧数 1/6）/"设备性能"归因/GestureAxisBlocker 整向量消费/`pointerSlop()` API 无/perfetto shorthand tags/测量期间手触/miuix 查源码先联网。
-- 继承（更早，[?] 除标注外）：押 p0 主旋钮被推翻；usesABS 恢复漏置位；档位差异化不足；0x3D4 读法未解；bang-bang 方向反直觉；只写 TCLSlip=eps 挡死起步；每帧写 ctor 默认≠真值；llvm-objdump 传文件偏移；assembleRelease 不跑 lint；TractionControlDynamicAssist 仅玩家车；IRDSPlayerControls.tractionControl 死字段；math 公式内中文/裸竖线/operatorname；AI 车 is_player_controller 过滤不可靠；触摸 bug id 跟踪/findPointerIndex 修不了；proxy_shift_up 打日志洪水（已修）。
-- [V] 继承：只写 absEnable 不够（唯一门控 per-wheel usesABS）；后台 pthread 调 Unity API 崩溃；dlopen 不可用改 ELF 符号查找；adb install -r 前必须 force-stop；awaitLsposedSettled 不可靠；kkgithub 404 用 gh-proxy；CHUNK_SIZE=256K 防 TransactionTooLargeException（但分片仍会丢，见 §5）。
+### 本会话新增
+- [V] **断言"show taps 圆点不跟随"** → 用户实测纠正+官方文档证实圆点实时跟随 MOVE（"follows you as you move"）。教训：对系统组件行为作断言前先查证，别让错误断言污染推理链。
+- [V] **GameTurbo 设置层 A/B 作为验证路径** → 复现用户试遍全部游戏相关设置无效。设置面被排除或深于设置面（组件冻结/pm disable 未做）。
+- [V] **MotionEvent.isResampled** → 编译 Unresolved reference（flagged API 剔除 android.jar surface）。不要再引入；诊断用其他通道。
+- [V] **`getRawX(pointerIndex)`/`getRawY(pointerIndex)` 直调** → API 29+，minSdk 26 lint 报错。统一走 `rawXAt`/`rawYAt` 等价式 helper。
+- [?] **OnTouchListener 探 decorView 层事件** → ViewGroup listener 只在无 child 消费时触发（框架推理，未实测）。要窗口级对照需 hook Activity.dispatchTouchEvent。
+- 继承死路全部有效（按上一份标注搬运）：
+- [V] 边框缝隙：逐像素半透明下所有"精确互补"方案全缝，over 链数学上无解，必须层内不透明。
+- [V] 档位值 0.90 贴 native clamp 上限（若低档 ≥0.9 被静默截断差异化消失）；把未实机口头数值标"定版"。
+- [V] 押 p0 主旋钮被推翻；usesABS 恢复漏置位；只写 absEnable 不够（唯一门控 per-wheel usesABS）；只写 TCLSlip=eps 挡死起步；每帧写 ctor 默认≠真值。
+- [V] 画笔模式技术成功被用户否决（"只认控制点"）；"换算法任意形状"撞信息论边界；数学误差降低≠可感知。
+- [V] 触摸诊断：用 commit 时间推 APK 内容（用运行时指纹）；"导出零数据=模块旧"单因推断；adb force-stop 用户在用设备。
+- [V] 手势/测量：滑块 v1/v2 帧数 1/6、"设备性能"归因、GestureAxisBlocker 整向量消费、perfetto shorthand、测量期间手触、miuix 查源码先联网。
+- [V] proxy_shift_up 打日志洪水（已修）；LL2CPP 调用不能 dlopen/直接调 RVA；后台 pthread 调 Unity API 崩溃。
 
 ## 5. 已知坑
-- ⚠️ **日志推送分片丢失（待修，用户裁决搁置）** [?]——LogReceiver 分片拼装无完整性校验：发 476632 缓存 216619（丢尾）、发 311568 缓存 0 增量（全丢）。修复方向：分片序号+总数对齐才落盘、缺片重发，或模块进程直读游戏 externalFilesDir 为主路径。
-- ⚠️ **flyme 冻结后台游戏进程，REQUEST_LOGS 延迟送达** [?]——广播延迟 2min 送达，导出拿旧快照。加固方向：游戏 onPause 时主动推送。
-- ⚠️ **多指触摸 bug 未解（头号任务）** [?]——插桩链路已打通（`pedal[` 日志 + 24h 导出），等复现用户装新 APK 复现回传。三候选根因：(a) 意外事件重排 (b) 坐标混入他指 (c) pairip relayout；附加链：reset→游戏接管抽搐。注意：复现用户设备可能一直跑旧模块，2b5997c 修复从未被真正验证。
-- ⚠️ **配置页"任何时候满帧"未达成** [?]（继承）——冷启动 18-19% janky，主因候选 baseline profile 缺失；动手前重跑 A/B 基线。
-- ⚠️ 曲线编辑器拖点高频路径含 QP 求解 [?]（继承）——LRU 缓存 + 早停，未见性能问题。
-- ⚠️ pager settle 回抓 / 滑块 v3 快弹簧回落 [?]（继承）——用户未抱怨，暂不动。
-- ⚠️ 0x414 疑似死参数 / 0x3D4 读法未解 / TC 开关位每帧重算（已绕过）/ 游戏内 ABS 设置对物理无效 / 计时赛 IRDSUIMobileControls 晚 ~2s / LSPosed 下 Remote Preferences 受限 / BillingHook NPatch 永远失败 / flyme 后台白名单 / 广播 JSON 不含 position / offsets_sheet 0x1A62E10 勘误未订正 [?]（继承）；GitHub 公式/Mermaid 渲染坑（先读持久记忆）；IL2CPP ARM64 扫描三坑。
+- ⚠️ **多指污染待回传裁决** [V]（已从"未解"推进到"修复待验证"）——新 APK 已给复现用户。回传日志判定：`RAW_MISMATCH` 出现+症状消失 → 污染实时被拦，rawX 是否同步分叉裁决层级；零 mismatch+症状消失 → 外部条件已解除。双踏板"漂满"是间歇还是持续未确认，影响跳变兜底必要性。
+- ⚠️ **日志推送分片丢失** [?]（继承，用户裁决搁置）——LogReceiver 分片拼装无完整性校验；修复：序号对齐或直读 externalFilesDir。
+- ⚠️ **flyme 冻结后台致 REQUEST_LOGS 延迟** [?]（继承，仅 Takotsubo 自机）——加固方向：游戏 onPause 主动推送。
+- ⚠️ **配置页"任何时候满帧"未达成** [?]（继承）——冷启动 18-19% janky，baseline profile 缺失候选；动手前重跑 A/B 基线。
+- ⚠️ 曲线编辑器 QP 求解高频路径 / pager settle 回抓 / 滑块 v3 快弹簧 [?]（继承，未恶化不动）。
+- ⚠️ 0x414 死参数 / 0x3D4 读法 / 游戏内 ABS 设置对物理无效 / 计时赛 IRDSUIMobileControls 晚 2s / offsets_sheet 0x1A62E10 勘误未订正 [?]（继承）；GitHub 公式/Mermaid 渲染坑、IL2CPP ARM64 扫描三坑（先读持久记忆）。
 
 ## 6. 下一步（有序）
-1. **等复现用户回传新日志**（头号，等待中）——指引：装 22:14 构建 APK（含插桩+24h 过滤）→ 开 NPatch 管理器 → force-stop 游戏 → 复现"一手踏板+一手点空白" → 前台导出。成功标志：日志无 `proxy_shift_up called` 且有 `pedal[` 行。
-2. **日志到手后裁决三候选根因**——(a) 跳变瞬间 action 序列；(b) MOVE 值链是否混入他指；(c) DOWN 布局对比是否漂移。若 reset→游戏接管抽搐成立 → 评估 native 踏板开启期间每帧强制写。
-3. **等用户回传 ABS 新档位（0.80/0.60/0.40）实机手感**——三档差异化与高档 0.70×F_base 是否到位；不满则按标定史档距教训（0.10–0.30 级）继续迭代。
-4. （用户裁决搁置，重启时做）**日志推送分片丢失修复**——完整性校验或直读主路径。
-5. （可选加固）**onPause 主动推送**——防 flyme 冻结导致导出旧快照。
-6. 冷启动满帧结构性修复（长期）——baseline profile + 配置页拆分，动手前重跑 A/B 基线。
-7. ABS 二期（低优先级）；AI 车白名单长期观察。
+1. **等复现用户回传新日志**（核心等待）——装 `845d970` 构建 APK → 开 NPatch 管理器 → force-stop 游戏 → 复现双场景（单踏板+点空白 / 双踏板双满）→ 前台导出。
+2. 日志到手裁决：有 `RAW_MISMATCH` 且 `rawX` 同步分叉 → PointerCoords 本体被改（评估跳变过滤兜底 v2）；`rawX` 干净 → mRawTransform 层注入（归因 MIUI 输入管线 per-window 加工，考虑整理材料报小米/社区）；零 `RAW_MISMATCH` → 复现条件已随环境变化消失（对照其设备设置变化）。
+3. **追 ABS 档位 0.80/0.60/0.40 实机手感**（继承，两轮未答）。
+4. （可选）hook `Activity.dispatchTouchEvent` 做 decorView 层二分插桩——仅当 RAW_MISMATCH 不足以裁决时。
+5. （搁置，用户裁决重启时做）分片丢失修复；（可选）onPause 主动推送；冷启动 baseline profile。
 
 ## 7. 留给用户的开放问题
-- 复现用户装新 APK 后：proxy 洪水是否消失（NPatch 唤醒/模块更新成功的标志）？若仍出现 → NPatch 注入机制需要单独排查。
-- 分片丢失修复的优先级：等下一轮日志回传若再次零数据就升级优先级。
-- 冷启动验收标准：首分钟不卡（baseline profile）还是完全追平 KernelSU 满帧（拆配置页结构）？
-- TC 新档位 + 制动压力 50% 下限的实机手感（继承，两轮未答）。
-- ABS 高档 0.40 手感是否与中档拉开可感差距（本轮改动核心验证点）。
-- 曲线话题若重启：预设档+强度滑块方案是否采用（见上上会话 handoff §3）。
+- 复现用户 HyperOS 具体版本？是否开长按类全局功能（长按识别/AI 圈选）？是否装触控辅助 APP？——环境特异性方向的未答问题。
+- 双踏板漂满是间歇还是持续？（决定 v2 跳变兜底是否需要）
+- "无其他小米用户反馈"在多大样本上成立？（影响"环境特异"vs"沉默多数"的先验）
+- 继承：分片丢失修复优先级、冷启动验收标准（首分钟不卡 vs 完全追平）、ABS 高档 0.40 手感是否可感。
