@@ -65,6 +65,16 @@ class PedalOverlayView(
     companion object {
         private const val TAG = "AlaMobileTool"
 
+        // 双源坐标交叉校验阈值：raw 通道（getRawY，mRawTransform 管道）与
+        // transform 通道（getY + getLocationOnScreen）正常恒等——两套原点间
+        // 的标准换算。MIUI 15 实测（2026-08 复现日志）第二指按下时窗口副本
+        // rawY 被间歇注入 +(另一指 y − 屏高) 偏移（1080px 级），mTransform
+        // 通道不受影响。分叉超 SWITCH 阈值判污染帧 → 切换到 transform 通道
+        // 继续输出（源切换而非冻结旧值，踏板仍精确跟手）；超 LOG 阈值先记录。
+        // SWITCH 阈值远小于实测污染偏移、远大于窗口动画等瞬态分叉，不会误切。
+        private const val MISMATCH_LOG_PX = 20f
+        private const val MISMATCH_SWITCH_PX = 100f
+
         // 双踏板模式跨 view 仲裁：油门和刹车是两个独立 view，各自 onTouchEvent
         // 独立调 NativeBridge.setThrottle/setBrake。两指同时按下时，native 层
         // throttle/brake 字段虽不互覆盖，但游戏逻辑不允许两者同时非零（否则
@@ -145,6 +155,9 @@ class PedalOverlayView(
     // 揭示"手指没动值在变"的竞态。
     private var diagLastT = -1f
     private var diagLastLogMs = 0L
+    // 双源分叉观测：累计污染帧数（进日志统计总量）与上次日志时间（节流）。
+    private var mismatchCount = 0L
+    private var mismatchLastLogMs = 0L
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
@@ -316,6 +329,11 @@ class PedalOverlayView(
     // 用 findPointerIndex(activePointerId) 而非 getRawY(0)：多指按下/抬起时
     // pointer index 会重新排列，index 0 可能不是控制踏板的手指，导致踏板值
     // 跳到其他手指的位置（如另一指点空白处时踏板飘到 100% 油门）。
+    //
+    // 2026-08 复现日志更新：布局漂移（pairip relayout）经 DOWN 三次布局对比
+    // 证伪（三次完全一致），而 raw 通道本身被污染（第二指按下时窗口副本
+    // rawY 被间歇注入偏移）。因此坐标源改为下方的双源交叉校验——yOnScreen
+    // 既兼容 relayout 防御（实时布局跟随实际位置），又承担污染 fallback。
     private fun updateValuesFromPointer(event: MotionEvent) {
         if (activePointerId == MotionEvent.INVALID_POINTER_ID) return
         val pointerIndex = event.findPointerIndex(activePointerId)
@@ -329,9 +347,56 @@ class PedalOverlayView(
         val screenHeight = resources.displayMetrics.heightPixels
         val viewTop = position.topPx(screenHeight)
         val viewHeight = position.heightPx(context, screenHeight).toFloat()
-        val relativeY = event.rawYAt(pointerIndex) - viewTop
+
+        // 双源坐标交叉校验（校验的是两套坐标通路的一致性，与运动方向、大小、
+        // 速度完全正交——直接按满/快速拉动两源同步变化，天然放行，零误杀）。
+        // rawY 走 mRawTransform 管道；yOnScreen 走 mTransform + 实时布局 top。
+        // 分叉超 SWITCH 阈值 → 判污染帧，改用 yOnScreen 继续输出（官方文档：
+        // getY 正确处理这些场景；源切换后踏板仍精确跟手）。仅超 LOG 阈值 →
+        // 只记日志沿用 rawY（现状行为，保守不动值）。
+        val rawY = event.rawYAt(pointerIndex)
+        val loc = IntArray(2)
+        getLocationOnScreen(loc)
+        val yOnScreen = event.getY(pointerIndex) + loc[1]
+        val rawX = event.rawXAt(pointerIndex)
+        val xOnScreen = event.getX(pointerIndex) + loc[0]
+        val relativeY = when (val absDiff = abs(rawY - yOnScreen)) {
+            in 0f..MISMATCH_LOG_PX -> rawY - viewTop
+            else -> {
+                val switched = absDiff > MISMATCH_SWITCH_PX
+                logMismatch(event, pointerIndex, rawY, rawX, xOnScreen, yOnScreen, loc, switched)
+                val y = if (switched) yOnScreen else rawY
+                y - viewTop
+            }
+        }
         updateValues(relativeY, viewHeight)
         diagMaybeLogMove(event, pointerIndex, relativeY, viewHeight)
+    }
+
+    // RAW_MISMATCH 诊断日志：全通道一次打齐，供下一轮日志裁决污染层级——
+    //   rawX 与 xT 同步分叉 → PointerCoords 本体被改（mTransform 也脏）；
+    //   仅 y 分叉 → mRawTransform（compat-raw transform 管道）被注入。
+    // 节流 500ms；mismatchCount 累计进日志便于统计污染总量。
+    private fun logMismatch(
+        event: MotionEvent,
+        pointerIndex: Int,
+        rawY: Float,
+        rawX: Float,
+        xOnScreen: Float,
+        yOnScreen: Float,
+        loc: IntArray,
+        switched: Boolean
+    ) {
+        mismatchCount++
+        val now = SystemClock.uptimeMillis()
+        if (now - mismatchLastLogMs < 500L) return
+        mismatchLastLogMs = now
+        Logger.i(
+            "pedal[$role] RAW_MISMATCH n=$mismatchCount switch=$switched " +
+                "rawY=$rawY yT=$yOnScreen rawX=$rawX xT=$xOnScreen " +
+                "idx=$pointerIndex ptc=${event.pointerCount} loc=(${loc[0]},${loc[1]}) " +
+                "screenH=${resources.displayMetrics.heightPixels}"
+        )
     }
 
     // MOVE 高频（60Hz+）节流：t 变化超 2% 或距上条 ≥500ms 才打。
@@ -586,3 +651,9 @@ class PedalOverlayView(
 private fun MotionEvent.rawYAt(pointerIndex: Int): Float =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) getRawY(pointerIndex)
     else getRawY() - getY() + getY(pointerIndex)
+
+// X 轴同款换算（getRawX(pointerIndex) 同为 API 29+）。分叉诊断只对 y 写值，
+// rawX 仅进 RAW_MISMATCH 日志，等价式精度足够。
+private fun MotionEvent.rawXAt(pointerIndex: Int): Float =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) getRawX(pointerIndex)
+    else getRawX() - getX() + getX(pointerIndex)
