@@ -29,13 +29,15 @@ import kotlin.math.max
  *    - **单击**（不超 touchSlop 且 < 500ms）：切换 overlay 展开/折叠。
  *    - **长按**（500ms 内未超 touchSlop）：进入其他 overlay 的编辑模式
  *      （让用户拖拽/缩放油门/刹车/换挡），和原 Button 长按语义一致。
- *    - **拖动**（超 touchSlop 立刻转 MOVE）：移动按钮自身位置（只更新
- *      layoutParams，不写 JSON——按需求"每次打开游戏重置到默认位置"）。
+ *    - **拖动**（超 touchSlop 立刻转 MOVE）：移动按钮自身位置，拖动结束经
+ *      onPositionChanged 上抛 OverlayManager → saveOverlayPosition 落盘
+ *      （KEY_TOOL_POSITION，默认启用记忆位置）。
  *    MOVE 与长按互斥：MOVE 取消长按 runnable；长按 runnable 触发时设
  *    `longPressHandled` 拦截后续 MOVE 升级。
  *
- * 3. **不持久化**：构造函数传入的 defaultPosition 在 [resetToDefault] 时
- *    用，回调只上抛到 OverlayManager，OverlayManager 不写 JSON。
+ * 3. **位置持久化**：构造函数传入的 defaultPosition 是记忆位置（未拖过时
+ *    = Defaults.TOOL_BUTTON_POSITION），[applySavedPosition] 应用它；
+ *    拖动结束回调上抛 OverlayManager 写本地 externalFilesDir JSON。
  */
 class ToolButtonView(
     context: Context,
@@ -46,7 +48,7 @@ class ToolButtonView(
      * XML 兼容构造器（满足 lint ViewConstructor 警告）。
      * 当前没在 layout XML 里用（OverlayManager 都是 new 出来的），但 Android
      * inflate 路径会反射调 (Context, AttributeSet) 构造器——缺了运行时崩溃。
-     * 转发到主构造器并给个兜底 defaultPosition。运行时 resetToDefault 仍会
+     * 转发到主构造器并给个兜底 defaultPosition。运行时 applySavedPosition 仍会
      * 把位置拉回这个兜底值（不影响主流程，因为主流程都是程序化构造）。
      */
     @Suppress("unused")
@@ -63,8 +65,8 @@ class ToolButtonView(
 
     /**
      * 拖动结束触发（left, top, width, height in pixels）。
-     * 注意：当前需求下回调只更新 View layoutParams，**不写 JSON**——每次
-     * 打开游戏 resetToDefault() 把位置拉回 defaultPosition。
+     * OverlayManager 接到 saveOverlayPosition(KEY_TOOL_POSITION) 落盘——
+     * 下次 showOverlays 时经 settings.toolButtonPosition 回放。
      */
     var onPositionChanged: ((left: Int, top: Int, width: Int, height: Int) -> Unit)? = null
 
@@ -279,8 +281,13 @@ class ToolButtonView(
                 if (mode == Mode.MOVE) {
                     val dx = (event.rawX - startTouchX).toInt()
                     val dy = (event.rawY - startTouchY).toInt()
-                    val newLeft = max(0, startLeft + dx)
-                    val newTop = max(0, startTop + dy)
+                    // 双向钳制：下界 0 防负 margin，上界保证按钮至少留一半在屏内——
+                    // 位置现在会持久化（记忆位置），无上界时按钮可被拖到屏外且
+                    // 永久丢在屏外（旧版每次启动重置会自愈，记忆化后不会）。
+                    val maxLeft = max(0, screenWidthPx - sizePx / 2)
+                    val maxTop = max(0, screenHeightPx - sizePx / 2)
+                    val newLeft = (startLeft + dx).coerceIn(0, maxLeft)
+                    val newTop = (startTop + dy).coerceIn(0, maxTop)
                     applyLayout(newLeft, newTop, false)
                 }
                 lastX = event.x
@@ -355,14 +362,18 @@ class ToolButtonView(
     }
 
     /**
-     * 重置到默认位置。由 OverlayManager 在 [addGamingOverlays] 入口处调用，
-     * 满足"每次打开游戏工具按钮归零"的需求。
+     * 应用记忆位置（未拖过时 = 默认位置）。由 OverlayManager 在
+     * [showOverlays] 调用——位置来自本地 externalFilesDir 的持久化值
+     * （KEY_TOOL_POSITION），随 settings.toolButtonPosition 传入。
      */
-    fun resetToDefault() {
+    fun applySavedPosition() {
         val screenWidth = context.resources.displayMetrics.widthPixels
         val screenHeight = context.resources.displayMetrics.heightPixels
-        val left = defaultPosition.leftPx(screenWidth)
-        val top = defaultPosition.topPx(screenHeight)
+        // 回放也要钳制：防旧记录/跨设备比例越界（如从平板备份到小屏手机）。
+        val maxLeft = max(0, screenWidth - sizePx / 2)
+        val maxTop = max(0, screenHeight - sizePx / 2)
+        val left = defaultPosition.leftPx(screenWidth).coerceIn(0, maxLeft)
+        val top = defaultPosition.topPx(screenHeight).coerceIn(0, maxTop)
         applyLayout(left, top, fireCallback = false)
     }
 

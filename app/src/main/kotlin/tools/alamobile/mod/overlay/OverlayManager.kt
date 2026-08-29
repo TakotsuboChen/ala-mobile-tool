@@ -124,11 +124,12 @@ class OverlayManager(context: Context) {
         addToggleButton()
         addGamingOverlays()
 
-        // 每次进入游戏把工具按钮位置拉回默认（左上 8dp+40dp）——满足
-        // "每次打开游戏重置"需求。注意这条**只在 showOverlays 调**——
-        // 后续 toggleOverlays / rebuildFromConfigChange 不再 reset，因为
-        // 那是用户主动操作过程中，不应把按钮弹回默认。
-        toggleButton?.resetToDefault()
+        // 应用工具按钮记忆位置（settings.toolButtonPosition 来自本地
+        // externalFilesDir 的 KEY_TOOL_POSITION；未拖过时 = 默认位置）。
+        // 注意这条**只在 showOverlays 调**——后续 toggleOverlays /
+        // rebuildFromConfigChange 不再应用，因为那是用户主动操作过程中，
+        // 拖动后的位置已在 view layoutParams 上，不应被回放值覆盖。
+        toggleButton?.applySavedPosition()
     }
 
     /**
@@ -162,23 +163,23 @@ class OverlayManager(context: Context) {
         // 96×96dp 圆角矩形 + 居中 App 图标的浮动工具按钮。
         // - 单击：切换 overlay 展开/折叠（onClick → toggleOverlays）
         // - 长按 500ms：进入其他 overlay 的编辑模式（onLongPress → toggleEditMode）
-        // - 拖动：移动按钮自身（onPositionChanged → 当前 no-op，未来开持久化再接 saveOverlayPosition）
-        // 每次 addGamingOverlays 入口会 resetToDefault()——满足"每次打开游戏重置
-        // 到默认位置"需求，不写 JSON。
+        // - 拖动：移动按钮自身，拖动结束持久化到本地 externalFilesDir
+        //   （KEY_TOOL_POSITION，saveOverlayPosition 与踏板/换挡同机制）。
+        //   默认启用记忆位置——未拖过时本地无该 key，settings 解析落回
+        //   Defaults.TOOL_BUTTON_POSITION，行为同旧版默认位置。
         val btn = ToolButtonView(
             appContext,
-            // 传 defaultPosition 作为长按重置的兜底（ToolButtonView 长按不重置自身，
-            // 但 resetToDefault() 会用）。Settings.toolButtonPosition 字段保留是为
-            // 以后加"记忆位置"开关时零架构改动——当前 resetToDefault 总用 Defaults。
+            // 传入 settings.toolButtonPosition（记忆值或默认值）作为初始位置。
+            // 长按重置自身不在此处理；applySavedPosition() 会用此值。
             settings.toolButtonPosition
         ).apply {
             tag = "ala_tool_toggle"
             onClick = { toggleOverlays() }
             onLongPress = { toggleEditMode() }
-            // 当前需求不持久化：拖动只更新 View layoutParams（ToolButtonView 内部
-            // 已做），回调保持 no-op。toggleOverlays 重建会调 addGamingOverlays
-            // 入口的 resetToDefault 拉回默认——拖动状态被丢弃。
-            onPositionChanged = { _, _, _, _ -> /* no-op: 每次重置 */ }
+            // 拖动结束：与踏板/换挡同机制落盘（比例存，跨设备可回放）。
+            onPositionChanged = { left, top, width, height ->
+                saveOverlayPosition(ModConfig.KEY_TOOL_POSITION, left, top, width, height)
+            }
         }
         val screenHeight = appContext.resources.displayMetrics.heightPixels
         // 工具按钮大小 = 屏幕高度的 10%（动态像素，跨设备视觉比例一致）。
@@ -191,8 +192,8 @@ class OverlayManager(context: Context) {
             topMargin = (40 * density).toInt()
         }
         root?.addView(btn, params)
-        // addGamingOverlays 入口会再调一次 resetToDefault 把位置校正到 defaultPosition
-        // 比例——这里设的 leftMargin/topMargin 是兜底（首次创建时 resetToDefault
+        // showOverlays 会再调一次 applySavedPosition 把位置校正到记忆值——
+        // 这里设的 leftMargin/topMargin 是兜底（首次创建时 applySavedPosition
         // 还没执行）。
         toggleButton = btn
     }
