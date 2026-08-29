@@ -66,7 +66,7 @@ hook 安装正常（配置链完整），但 `HandleABS` 是无调用者的死�
 | 缓解低速刹不住 | 抬高 `legacyLowBrakePressureFront/Rear` (0x3E4/0x3E8) | 提升低速压力下限（技术解析 §9.2 的 32% 上限问题） |
 | 释放深度 | 写 per-wheel `rawBrakeBiasValue` (0x3E0) | 调 pulse 相位的刹车释放比例 |
 | per-wheel 选择性 ABS | 按 `isFront` (0x2C4) 选择性写 `usesABS` (0x3CE) | 如只禁前轮/后轮 ABS |
-| ABS 灯可视化 | 读 `pulseBrakes` (0x408) | 真实的 ABS 介入标志（**不要用** `absTriggered`——恒 false 死字段） |
+| ABS 灯可视化 | 拦截 RoadForce 释放/管理写入指令（base+0x1A7B7DC）+ 该轮制动压力 0xF0 过滤 | **已实装**（2026-08-30，见 §2c）——旧"读 pulseBrakes"方案已废弃（0x408 是 25Hz 相位时钟非介入标志，车动即翻） |
 
 **不建议**：滑移阈值 0.15 位于 `.rodata`（0x929A54），修改需改只读内存页，风险高。
 
@@ -80,7 +80,19 @@ ABS 档位已实装（设计全文见 `ABS_LEVEL_DESIGN.md`，机制实测见技
 - **运行时真值（ABSdiag 实测）**：前轮 `T_b=4500`（75×bias60）、后轮 `T_b=3000`（75×40）、`b=0.000`、uses 基线=1——与 SetBrakeBiasValues 计算式逐位吻合。档位定案（第三轮，2026-08-28）：高 0.40 / 中 0.60 / 低 0.80（方波平均 0.70/0.80/0.90），原厂 b=0（平均 0.50）。现行值以 `ModConfig.kt` AbsStrength 为单一事实源，标定史见 `ABS_LEVEL_DESIGN.md` §4。
 - **制动压力 v6 实机验证（2026-08-29，abs_pressure=0.90）**：关 ABS 段全速域（343→10 km/h）`bp=0.900`、`tf=4500` 恒定 → 扭矩恒 4050（线性标尺成立）；开 ABS 段 `bp` 逐位吻合 `min(1, 4050/F_base(v))`——343 km/h 处 0.900（顶格 r=1）、255 处 0.910（饱和映射签名：≠线性 0.9）、187.6 km/h 处翻到 1.000（与解析交点 `2r−r²=0.9` → 188 km/h 精确命中），<188 段输出=原生封顶曲线本身。
 - **0x3D4（currentBrakeBiasFront）读法未解**：float 读出 denormal≈0、int 读出 2049——非功能字段，abs_diag 已移除该列；bias 真值从 T_b 反推（4500/75=60）。
-- **诊断**：`abs_diag_log`（白名单内限频 25 帧）——标定完可整段移除；0x408 pulseBrakes 是真实介入标志（absTriggered 恒 false 死字段，勿用）。
+- **诊断**：`abs_diag_log`（白名单内限频 25 帧）——标定完可整段移除；⚠️ 旧记录"0x408 pulseBrakes 是真实介入标志"**已被 2026-08-30 实装证伪**——它是每帧无条件翻转的 25Hz 相位时钟（技术解析 §2.3.5），"介入标志"只是相对恒 false 的 absTriggered 而言的观测用途；介入可视化现走 §2c 指令拦截方案。
+- **诊断日志残留注意**：abs_diag_log 的 rfHits 行（total/player/hitAge）是 TC/ABS 指示灯的诊断，标定完可一并移除。
+
+### 2c. TC/ABS 介入指示灯实装定案（2026-08-30，工程要点）
+
+UI/配置层见 README；此处只记信号链路的实机教训（四轮演化，每轮死法不同）：
+
+- **最终方案（v5）**：`shadowhook_intercept_instr_addr` 拦截 RoadForce 内 `str s0,[x19,#0x3EC]` @ base+0x1A7B7DC（释放/管理写入——反汇编实证只有滑移超阈帧流经此处，普通写入点 0x1A7B768 每帧必经不可用）。回调读 x19=IRDSWheel，与 `g_player_controller+0x28` wheels[0..3] 指针比对过滤 AI 车，**再查该轮 brake(0xF0)>0.01**（物理效果过滤：ABS 调制段执行条件不含"正在刹车"，油门打滑也命中——不滤则起步红绿齐闪，实机实证）。命中记帧号 `g_abs_hit_seq = g_frame_seq`，查询出口 `age = seq - hit_seq ≤ 2` 判介入并叠 `g_frame_phase`（25Hz）闪烁。
+- **帧号方案是必须的（v3 死法）**：RoadForce 与 CC.FixedUpdate 是独立 MonoBehaviour 物理回调，Unity 不保证同帧先后——帧头清零方案被"RoadForce 先执行、FixedUpdate 后清零"每帧抹掉信号（灯恒灭，实机实证）。生产者记帧号、消费者判年龄，零同步点容忍任意顺序。
+- **相位时钟必须单一写点（v4 死法）**：fixed_update 帧头翻一次 + traction_filter 写点再翻一次 = 每帧双重翻转抵消，写点读到相位恒 0 → TC 灯死。时钟收敛到 fixed_update 帧头唯一翻转点，其余只读。
+- **TC 信号**：TractionFilter 削减判定（orig 返回 f < accel）&& g_frame_phase。TC 是连续 smoothstep 削减律无内建方波（技术解析 §3.4），直读必常亮；不能借 pulseBrakes 做时钟（ABS 关闭时 0x408 停翻）。
+- **游戏无任何 ABS 介入信号字段**（复确认）：absTriggered(0xC8) 恒 false 死字段、HandleABS 零调用者、absEnable 僵尸——介入状态只存在于 RoadForce 控制流，指令级拦截是唯一精确信号源。0x929A54 = −0.15f（.rodata 阈值常数，file offset == VA 验证法：与 0x929E7C = −0.85f 已知常数交叉核对）。
+- **诊断**：abs_diag_log 的 `rfHits total/player/hitAge` 三列——total 涨 player 不涨 = 玩家车过滤链断；total 不涨 = 拦截器未命中；hitAge 恒大 = 帧号链路断。标定完可整段移除。
 
 ---
 

@@ -161,9 +161,10 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - `app/src/main/kotlin/tools/alamobile/mod/ConfigActivity.kt` — miuix Compose settings UI.
 - `app/src/main/kotlin/tools/alamobile/mod/NativeBridge.kt` — JNI declarations.
 - `app/src/main/kotlin/tools/alamobile/mod/overlay/PedalOverlayView.kt` — dual-zone pedal.
+- `app/src/main/kotlin/tools/alamobile/mod/overlay/TcAbsIndicatorView.kt` — TC/ABS intervention indicator (elliptical bow, RadialGradient, 16ms JNI polling; signal from native RoadForce instruction interceptor, see pedal_hook.c `abs_rf_intercept_pre`).
+- `native/src/pedal_hook.c` — throttle/brake/gear hook logic + input writer thread + ABS/TC control (carController hook + per-wheel usesABS) + TC/ABS gear-level field overwrites with baseline capture/restore + TC/ABS intervention indicator signals (RoadForce 0x1A7B7DC instruction interceptor + 25Hz frame-phase clock; single-writer phase clock, frame-seq age matching — see MODULE_ABS_NOTES.md §2c for the four-round evolution and pitfalls).
 - `app/src/main/kotlin/tools/alamobile/mod/util/VersionGate.kt` — version gating.
 - `native/src/ala_core.c` — native entry points and ShadowHook init.
-- `native/src/pedal_hook.c` — throttle/brake/gear hook logic + input writer thread + ABS/TC control (carController hook + per-wheel usesABS) + TC/ABS gear-level field overwrites with baseline capture/restore.
 - `native/src/drs_hook.c` — auto DRS / active aero hook logic.
 - `native/src/unlock_hook.c` — billing/unlock IL2CPP hook logic.
 - `native/src/music_hook.c` — main menu music mute + heartbeat signal.
