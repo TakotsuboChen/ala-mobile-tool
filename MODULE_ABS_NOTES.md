@@ -76,8 +76,9 @@ ABS 档位已实装（设计全文见 `ABS_LEVEL_DESIGN.md`，机制实测见技
 
 - **注入点**：`proxy_fixed_update` 白名单分支，**覆写块（abs_apply_gear）必须排在 usesABS=false 关闭块之前**——基线捕获要求字段未被模块碰过，关闭路径先跑会污染 usesABS 基线。
 - **usesABS 残留恢复（实机 bug 教训）**：关闭路径写 `usesABS=false` 后，游戏**永远不会自己写回**（原生唯一写者 Awake 装车写一次）——恢复方向必须模块自己实现：关闭时置 `g_abs_uses_taking_over`，enable_abs 回 true 后一次性恢复捕获基线。漏置位的表现：切到关闭后切回任何档位（含总开关回默认）都停在关闭状态。
-- **三条独立通道**：b（干预强度，绝对值覆写）、T_b（制动压力，基线×tbScale 等比写，独立于 enable_abs/abs_mix 生效）、usesABS（关闭/恢复）。每帧绝对值写防复利（TC v1.2 教训）；换车检测（wheels 数组指针变化）重置基线重捕（T_b 是 per-car 值，multiplier 属 carModifier）。
+- **通道结构（v6 修订，2026-08-29）**：b（干预强度，绝对值覆写）、usesABS（关闭/恢复）两条字段通道 + **制动压力 0xF0 重映射通道**（`abs_remap_brake_request`，proxy_fixed_update **orig 后**覆写 `wheel.brake(0xF0)`：ABS 段 `min(1, s·T_b·p_raw/F_base(v))` 饱和映射、跳过段线性 `p_raw·s`）。**T_b(0x88) 不再覆写**（v2 全局缩/v3 p₀ 同缩/v4 门控分流/v5 输入端线性缩放均被否决，演化史见 `ABS_LEVEL_DESIGN.md` §4 v6 条）——F_base 速度-上限曲线（100 km/h→2916、≥288→4500）**任何设置任何状态下逐位原生**，滑条只把行程 0-100% 重映射到 0-s·T_b、封顶在原生曲线。前后轮判定经 controller.wheelRL(0xB0)/wheelRR(0xB4) 引用比对（p₀ 取 0x3E8/0x3E4）。换车检测（wheels 数组指针变化）重置基线重捕（b 基线 per-car）。
 - **运行时真值（ABSdiag 实测）**：前轮 `T_b=4500`（75×bias60）、后轮 `T_b=3000`（75×40）、`b=0.000`、uses 基线=1——与 SetBrakeBiasValues 计算式逐位吻合。档位定案（第三轮，2026-08-28）：高 0.40 / 中 0.60 / 低 0.80（方波平均 0.70/0.80/0.90），原厂 b=0（平均 0.50）。现行值以 `ModConfig.kt` AbsStrength 为单一事实源，标定史见 `ABS_LEVEL_DESIGN.md` §4。
+- **制动压力 v6 实机验证（2026-08-29，abs_pressure=0.90）**：关 ABS 段全速域（343→10 km/h）`bp=0.900`、`tf=4500` 恒定 → 扭矩恒 4050（线性标尺成立）；开 ABS 段 `bp` 逐位吻合 `min(1, 4050/F_base(v))`——343 km/h 处 0.900（顶格 r=1）、255 处 0.910（饱和映射签名：≠线性 0.9）、187.6 km/h 处翻到 1.000（与解析交点 `2r−r²=0.9` → 188 km/h 精确命中），<188 段输出=原生封顶曲线本身。
 - **0x3D4（currentBrakeBiasFront）读法未解**：float 读出 denormal≈0、int 读出 2049——非功能字段，abs_diag 已移除该列；bias 真值从 T_b 反推（4500/75=60）。
 - **诊断**：`abs_diag_log`（白名单内限频 25 帧）——标定完可整段移除；0x408 pulseBrakes 是真实介入标志（absTriggered 恒 false 死字段，勿用）。
 
@@ -94,7 +95,9 @@ ABS 档位已实装（设计全文见 `ABS_LEVEL_DESIGN.md`，机制实测见技
 5. 实测：写 `usesABS=false` 后重刹是否锁死；
 6. `SetBrakeBiasValues`（0x1762BF4）计算式复核——`T_b`（0x88）/`b`（0x3E0）派生关系是否仍成立；
 7. `rawBrakeBiasValue`（0x3E0，b 绝对值覆写目标）访问扫描——确认无其他写者；
-8. `T_b`（0x88）与 `pulseBrakes`（0x408）偏移——最大制动压力等比缩放与介入标志依赖二者；
+8. `T_b`（0x88）/`p₀`（0x3E4/0x3E8）与 `pulseBrakes`（0x408）偏移——制动压力重映射的 F_base 分母与介入标志依赖三者；
+9. 实测：ABS 自定义档位写入生效（ABSdiag 读回 b/T_b 与档位预期一致）；
+10. 实测：制动压力重映射 v6 语义（关 ABS 满踩 = s·T_b 平线；开 ABS 满踩 >188 km/h 平台 s·T_b、<188 贴原生 F_base；交点 `2r−r²=s` 解析核对）。
 9. 实测：ABS 自定义档位写入生效（ABSdiag 读回 b/T_b 与档位预期一致）。
 
 ---
