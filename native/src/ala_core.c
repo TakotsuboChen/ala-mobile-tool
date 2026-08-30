@@ -9,6 +9,7 @@
 #include "music_hook.h"
 #include "intro_hook.h"
 #include "hide_pedals_hook.h"
+#include "lap_hook.h"
 
 #define LOG_TAG "AlaMobileTool"
 #define LOGI(...) NLOGI(__VA_ARGS__)
@@ -223,6 +224,30 @@ Java_tools_alamobile_mod_NativeBridge_initIntro(JNIEnv *env, jclass clazz,
 
     // 同步开关状态——V10 开关在早期就设好，hook 触发时能静音 introSound
     intro_set_v10_enabled((int) enable_v10);
+}
+
+// 计时赛有效圈速监听 hooks——独立安装入口（不动 init() 参数签名，与
+// initUnlock/initIntro 同模式）。log-only：捕 LLV 单例赛道名 + 圈段事件，
+// 不写任何游戏字段。比赛场景载入晚于 15s 延迟路径，无需早期安装。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_initLap(JNIEnv *env, jclass clazz,
+                                              jlong irds_level_load_variables_awake,
+                                              jlong odometer_handle_sectors_times) {
+    (void) env;
+    (void) clazz;
+
+    lap_hook_config_t lap_cfg = {
+        .llv_awake_offset = (uintptr_t) irds_level_load_variables_awake,
+        .odometer_handle_sectors_times_offset = (uintptr_t) odometer_handle_sectors_times,
+    };
+
+    LOGI("initLap: awake=0x%lx handleSectorsTimes=0x%lx",
+         (unsigned long) irds_level_load_variables_awake,
+         (unsigned long) odometer_handle_sectors_times);
+
+    if (!lap_install_hooks(&lap_cfg)) {
+        LOGE("Failed to install lap hooks");
+    }
 }
 
 JNIEXPORT void JNICALL

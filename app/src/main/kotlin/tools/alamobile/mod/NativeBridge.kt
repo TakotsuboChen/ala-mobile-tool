@@ -264,6 +264,20 @@ object NativeBridge {
         audioSourceSetVolumeReal: Long
     )
 
+    /**
+     * 计时赛有效圈速监听 hooks 安装（log-only，无 UI）。
+     * - IRDSLevelLoadVariables.Awake：捕获 LLV 单例 → 读 trackToRace 赛道名
+     *   （16 条 GP 赛道自动识别）。
+     * - odometerHandler.HandleSectorsTimes：游戏自己的圈段事件（显式
+     *   validLap + totalLapTime），维护会话最快有效圈。
+     * 全部结果写入 native 日志（logEnabled 门控文件输出）。
+     */
+    @JvmStatic
+    external fun initLap(
+        irdsLevelLoadVariablesAwake: Long,
+        odometerHandlerHandleSectorsTimes: Long
+    )
+
     @JvmStatic
     external fun setThrottle(value: Float)
 

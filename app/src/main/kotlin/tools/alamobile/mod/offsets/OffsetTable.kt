@@ -103,4 +103,13 @@ object OffsetTable {
     // 真正的 AudioSource.set_volume(float) — Unity 引擎方法（非 TweenVolume）。
     // 开场 introSound 是直接播放的 AudioSource，必须用这个而非 TweenVolume 版本。
     const val AUDIO_SOURCE_SET_VOLUME_REAL: Long = 0x325040CL
+
+    // ── 计时赛有效圈速监听（lap_hook，log-only）──
+    // IRDSLevelLoadVariables::Awake()（protected override）— LLV 单例创建入口。
+    // hook 捕获实例后读 trackToRace (0xB8, string)=赛道名（16 条 GP 赛道）。
+    const val IRDS_LEVEL_LOAD_VARIABLES_AWAKE: Long = 0x199DE28L
+    // odometerHandler (TypeDefIndex: 1774)::HandleSectorsTimes(int, float, int,
+    // bool, float) — 游戏自己的圈段事件（显式 validLap + totalLapTime 语义），
+    // ~3 次/圈，模块只读透传不打扰。
+    const val ODOMETER_HANDLER_HANDLE_SECTORS_TIMES: Long = 0x1A0A1C4L
 }

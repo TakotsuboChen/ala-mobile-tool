@@ -483,6 +483,18 @@ class AlaMobileModule : XposedModule() {
                     } catch (e: Throwable) {
                         logX(Log.ERROR, TAG, "initHidePedals failed: ${e.message}")
                     }
+                    // 计时赛有效圈速监听（log-only）：LLV.Awake 捕赛道名 +
+                    // HandleSectorsTimes 圈段事件 → 会话最快有效圈写入日志。
+                    // 纯透传只读，无 UI 依赖，随 native 主路径一并安装。
+                    try {
+                        NativeBridge.initLap(
+                            tools.alamobile.mod.offsets.OffsetTable.IRDS_LEVEL_LOAD_VARIABLES_AWAKE,
+                            tools.alamobile.mod.offsets.OffsetTable.ODOMETER_HANDLER_HANDLE_SECTORS_TIMES
+                        )
+                        logX(Log.INFO, TAG, "lap hooks initialized (log-only lap timing)")
+                    } catch (e: Throwable) {
+                        logX(Log.ERROR, TAG, "initLap failed: ${e.message}")
+                    }
                 } else {
                     logX(Log.WARN, TAG, "NativeBridge not available, skipping 15s init and unlock")
                 }

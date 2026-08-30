@@ -26,6 +26,7 @@ add_library(
     src/music_hook.c
     src/intro_hook.c
     src/hide_pedals_hook.c
+    src/lap_hook.c
 )
 
 find_library(log-lib log)
