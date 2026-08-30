@@ -111,6 +111,12 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 - 模块进程与游戏进程日志写入统一文件，设置页一键导出并分享（FileProvider + ShareSheet），导出仅含最近 24h 条目
 - 游戏→模块日志经定向广播（`setComponent`）推送，规避包可见性与 IntentFirewall 限制
 
+#### 计时赛有效圈速（Lap Timing）
+- Hook `odometerHandler.HandleSectorsTimes`（游戏圈段事件）与 `IRDSLevelLoadVariables.Awake`，纯透传只读，不写任何游戏字段
+- 有效圈判定直接采信游戏原生 `validLap` 位（切弯/逆行判定的最终产物），会话最快有效圈在过圈瞬间写入日志（`LAPbest` / `LAPdone` / `LAPinv`），无需 UI
+- 赛道自动识别：经 `SceneManagerHelper` + `CommonUtilities.GetGPIndex` 探测场景 buildIndex（`LAPscene` 行），16 条 GP 赛道映射见 `docs/TRACK_IDENTIFICATION.md`（4 条已实机交叉验证）
+- 会话门禁：仅计时赛记录（`ChampionshipManager.isTimeAttack`），正赛 / 比赛周练习等其他会话自动静默（`LAPgate`）
+
 #### AI 车隔离
 - 通过 `IRDSPlayerControls.Update()` 捕获玩家车 controller（该组件只挂在玩家车 GameObject 上）
 - writer 线程只写 `g_player_controller`（由 `IRDSPlayerControls` 设置），不受 AI 车干扰

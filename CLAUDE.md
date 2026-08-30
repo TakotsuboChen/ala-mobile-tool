@@ -162,7 +162,7 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - `app/src/main/kotlin/tools/alamobile/mod/NativeBridge.kt` — JNI declarations.
 - `app/src/main/kotlin/tools/alamobile/mod/overlay/PedalOverlayView.kt` — dual-zone pedal.
 - `app/src/main/kotlin/tools/alamobile/mod/overlay/TcAbsIndicatorView.kt` — TC/ABS intervention indicator (elliptical bow, RadialGradient, 16ms JNI polling; signal from native RoadForce instruction interceptor, see pedal_hook.c `abs_rf_intercept_pre`).
-- `native/src/pedal_hook.c` — throttle/brake/gear hook logic + input writer thread + ABS/TC control (carController hook + per-wheel usesABS) + TC/ABS gear-level field overwrites with baseline capture/restore + TC/ABS intervention indicator signals (RoadForce 0x1A7B7DC instruction interceptor + 25Hz frame-phase clock; single-writer phase clock, frame-seq age matching — see MODULE_ABS_NOTES.md §2c for the evolution and pitfalls; ⚠️ the interceptor callback must stay float-free — it replays `str s0` and any FP register use corrupts tempBrakeF, killing all ABS gears).
+- `native/src/pedal_hook.c` — throttle/brake/gear hook logic + input writer thread + ABS/TC control (carController hook + per-wheel usesABS) + TC/ABS gear-level field overwrites with baseline capture/restore + TC/ABS intervention indicator signals (RoadForce 0x1A7B7DC instruction interceptor + 25Hz frame-phase clock; single-writer phase clock, frame-seq age matching — see docs/MODULE_ABS_NOTES.md §2c for the evolution and pitfalls; ⚠️ the interceptor callback must stay float-free — it replays `str s0` and any FP register use corrupts tempBrakeF, killing all ABS gears).
 - `app/src/main/kotlin/tools/alamobile/mod/util/VersionGate.kt` — version gating.
 - `native/src/ala_core.c` — native entry points and ShadowHook init.
 - `native/src/drs_hook.c` — auto DRS / active aero hook logic.
@@ -178,9 +178,9 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - `app/src/main/kotlin/tools/alamobile/mod/IntroSoundPlayer.kt` — V10 engine sound player.
 - `app/src/main/resources/META-INF/xposed/module.prop` — libxposed module metadata.
 - `app/src/main/resources/META-INF/xposed/scope.list` — target package list.
-- `TECHNICAL_ANALYSIS.md` — Ala Mobile game-engine reverse-engineering analysis, organized by subsystem (paper-style, LaTeX + Mermaid). Completed: ABS, vehicle dynamics (TC/ESC/steer assist). Planned: aero/DRS, drivetrain.
-- `MODULE_ABS_NOTES.md` — engineering notes for the ABS and TC subsystems: module hook layers, tunable field paths, native-scan toolchain pitfalls, upgrade verification checklist.
-- `ABS_LEVEL_DESIGN.md` — ABS gear-level tuning design & finalized calibration (v2: intervention-strength b override + max brake pressure T_b scaling), same skeleton as TC_LEVEL_DESIGN.md.
+- `docs/TECHNICAL_ANALYSIS.md` — Ala Mobile game-engine reverse-engineering analysis, organized by subsystem (paper-style, LaTeX + Mermaid). Completed: ABS, vehicle dynamics (TC/ESC/steer assist). Planned: aero/DRS, drivetrain.
+- `docs/MODULE_ABS_NOTES.md` — engineering notes for the ABS and TC subsystems: module hook layers, tunable field paths, native-scan toolchain pitfalls, upgrade verification checklist.
+- `docs/ABS_LEVEL_DESIGN.md` — ABS gear-level tuning design & finalized calibration (v2: intervention-strength b override + max brake pressure T_b scaling), same skeleton as TC_LEVEL_DESIGN.md.
 
 ## TODO(human) Integration Points
 

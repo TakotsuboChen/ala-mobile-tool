@@ -7,7 +7,7 @@
 - 锚点: `main` @ `2183174` (2026-08-30)
 - 漂移检查: `git rev-parse HEAD~1` 是否仍 = `2183174`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA；不一致以 git 实际输出为准
 - 待重探的 [?]: 见下方标记
-- 先读: `MODULE_ABS_NOTES.md` §2c（v6 FPSIMD 污染死法——本次回归核心）+ `ABS_LEVEL_DESIGN.md` §6 验证记录 7
+- 先读: `docs/MODULE_ABS_NOTES.md` §2c（v6 FPSIMD 污染死法——本次回归核心）+ `docs/ABS_LEVEL_DESIGN.md` §6 验证记录 7
 
 ## 1. 当前目标
 ABS 档位全线失效回归已修复并实机验证通过（用户反复测过关/低/中/高/最高五档）。主线等待项不变：①多指踏板污染修复等复现用户日志回传裁决；②Bug B（重启 remote 配置旧值）无新证据。

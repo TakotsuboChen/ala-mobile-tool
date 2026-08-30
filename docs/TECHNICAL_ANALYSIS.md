@@ -7,8 +7,8 @@
 > 以及 **`libil2cpp.so` 的 ARM64 指令级反汇编**与模块原生钩子的运行时交叉验证。
 >
 > **文档范围**：本文按子系统分篇，随逆向进度陆续补充。
-> 篇章编号按成篇追加顺序分配（详见总目录），当前已完成 ABS 篇与
-> 车辆动力学（TC / ESC / 转向辅助）篇；
+> 篇章编号按成篇追加顺序分配（详见总目录），当前已完成 ABS 篇、
+> 车辆动力学（TC / ESC / 转向辅助）篇与计时赛圈速/赛道识别篇；
 > 空气动力学与 DRS、传动与多线程轮子物理等为规划中的占位篇目（见各篇导语）。
 >
 > **版本适用性**：本文全部 RVA / 字段偏移 / 常数地址均为 8.0.4 (200146) 专属；
@@ -25,10 +25,11 @@
 - **已完成**：
   - [2　ABS 防抱死制动系统](#2abs-防抱死制动系统)
   - [3　车辆动力学：TC / ESC / 转向辅助](#3车辆动力学tc--esc--转向辅助)
+  - [4　计时赛圈速与赛道识别](#4计时赛圈速与赛道识别)
 - **规划中**（顺序与编号待成篇时确定）：
   - 空气动力学与 DRS
   - 传动与多线程轮子物理
-- **附录**：[A　ABS 篇证据置信度矩阵](#附录-aabs-篇证据置信度矩阵) · [B　ABS 篇关键常数与地址表](#附录-babs-篇关键常数与地址表) · [C　TC/ESC 篇证据置信度矩阵](#附录-ctcesc-篇证据置信度矩阵) · [D　TC/ESC 篇关键常数与地址表](#附录-dtcesc-篇关键常数与地址表)
+- **附录**：[A　ABS 篇证据置信度矩阵](#附录-aabs-篇证据置信度矩阵) · [B　ABS 篇关键常数与地址表](#附录-babs-篇关键常数与地址表) · [C　TC/ESC 篇证据置信度矩阵](#附录-ctcesc-篇证据置信度矩阵) · [D　TC/ESC 篇关键常数与地址表](#附录-dtcesc-篇关键常数与地址表) · [E　圈速篇证据置信度矩阵](#附录-e圈速篇证据置信度矩阵) · [F　圈速篇关键常数与地址表](#附录-f圈速篇关键常数与地址表)
 
 ---
 
@@ -1149,3 +1150,129 @@ stateDiagram-v2
 | `IRDSWheel.SlipRatio` | 0x1A7B244（调用者 `RoadForce`+0x71C） | [V] |
 | `carController` 内 TC 调用点 | +0xBC（0x1A64688） | [V] |
 | `IRDSDrivetrain.FixedUpdate` 聚合写入点 | +0x548 / +0x638（0xCC） | [V] |
+---
+
+# 4　计时赛圈速与赛道识别
+
+> 本章解析游戏的圈速计时系统与赛道身份体系，对应模块功能
+> `lap_hook`（计时赛有效圈速记录，log-only）。工程实现细节见
+> `LAP_HOOK_NOTES.md`，16 赛道权威表见 `TRACK_IDENTIFICATION.md`。
+
+## 4.1 计时系统架构
+
+游戏圈速计时分三层：
+
+| 层 | 载体 | 职责 |
+|---|---|---|
+| 计量层 | `IRDSStatistics`（单例，`IRDS.Game`） | 会话级：`absoluteFastestLap`（全场最快圈）/ `fastestTimeAuthor`（作者车号）/ `bestLapTimesInfoByCar`（Dictionary&lt;int, float[]&gt;，每车最佳分段） |
+| 导航层 | `IRDSNavigateTWaypoints`（每车一份） | 单车级：`bestLapTimeInfo`（**当前圈**实时三分段，999.0=段未开始哨兵）/ 圈计数 / `OnLapCompleted` 事件族 |
+| HUD 层 | `odometerHandler`（玩家车专用） | 圈段事件出口 `HandleSectorsTimes`：模块的唯一切入点 |
+
+关键结构事实：`odometerHandler` 自带完整引用链（`stGUI`→IRDSManager→
+`stadistics`→IRDSStatistics；`targetSpeed`→玩家车 `IRDSCarControllInput`→
+`navigateTWp`），且持有 `champManager`（`ChampionshipManager`，会话类型标志）
+——模块的全部读链都从该类出发，无需额外实例捕获 [V]。
+
+## 4.2 `HandleSectorsTimes` 调用语义
+
+签名：`void HandleSectorsTimes(int sectorOrder, float sectorTime, int sectorQuality, bool validLap, float totalLapTime = 0)`
+
+静态判读（dump.cs）只能给出参数表；真实语义经实机三轮日志裁决（共 4 场会话、
+十余圈样本）：
+
+| 参数 | 最终语义 | 备注 |
+|---|---|---|
+| `sectorOrder` | **0-based**（0/1/2） | v1 按 1-based 判 `==3` 永不命中 [V] |
+| `sectorTime` | 本段完成耗时（事件簇首帧） | 簇内后续帧缓涨 10–20ms |
+| `sectorQuality` | 分段快慢色码（实测出现 0/2） | 与自己历史分段比较的 UI 色 [?] 精确取值表 |
+| `validLap` | **持续状态位**：切弯/逆行即降 0 并保持到本圈结束 | 游戏原生判定，模块直接采信 [V] |
+| `totalLapTime` | 仅 order==2 携带完整圈时（= S1+S2+S3）；order 0/1 恒 0 | C# 默认参数 0 的实际效果 [V] |
+
+调用时序为**圈段过线事件簇**（过段后 HUD 刷新期连发数帧，非每帧轮询、
+非单次事件）。圈完成信号 = `order==2` 事件本身；若等 order 2→0 回绕再判定，
+回绕发生在下一圈 S1 过线（整段 S1 时长之后），会漏掉最后未过绕的圈 [V]。
+
+双信号交叉验证：模块按 `order==2` 快照判定的最快有效圈与游戏
+`IRDSStatistics.absoluteFastestLap` 三次会话完全同值（Monza 1:16.669、
+MelbourneRifatta 1:22.967）[V]。注意游戏侧字段更新滞后于过圈
+（`SubmitForFastestTime` 提交时机在过圈后到下一圈 S1 之间）。
+
+## 4.3 赛道身份体系
+
+- 移动端全部 GP 在单一外壳场景 `MobileScene` 下运行；`IRDSLevelLoadVariables.
+  trackToRace` 取值恒为 `MobileScene`，**不含赛道身份** [V]（桌面端语义未验证）。
+- 真实赛道身份 = **场景 buildIndex**：`CommonUtilities.GetGPIndex(int activeScene)`
+  反汇编为单条算术 `return activeScene − *(static_obj+0x20)`，减数为 GP 场景
+  buildIndex 基址（=2，即 splashINtro+Garage 两个前置场景）[V]。
+- 16 条 GP 场景在 BuildSettings 中连续排列（buildIndex 2–17），场景名即赛道名
+  （`Monza`/`Shangai`/`Barcellona`/`a1Ring`/`MelbourneRifatta`/`Dubai`…）。
+  权威表与实机验证（4/16 条，公式全吻合）见 `TRACK_IDENTIFICATION.md` [V]。
+- 运行时探测链：`Photon.Pun.SceneManagerHelper.get_ActiveSceneName` /
+  `get_ActiveSceneBuildIndex`（PUN 兼容层，内部走 wrapper，宜经
+  `il2cpp_runtime_invoke` 调用而非直调）+ 游戏自身 `CommonUtilities.GetGPIndex`
+  [V]。
+
+## 4.4 会话类型信号
+
+圈速记录需要区分"计时赛"与其他会话（快速模式正赛、比赛周练习/排位/正赛）。
+候选信号实测矩阵：
+
+| 信号 | 计时赛 | 比赛周练习 | 快速模式正赛 | 判定力 |
+|---|---|---|---|---|
+| `odometerHandler.champManager`（引用存在性） | 非 NULL | 非 NULL | **NULL** | 结构信号 [V] |
+| `ChampionshipManager.isTimeAttack` | 1 | 0 | 不可读（引用为 NULL） | 主判据 [V] |
+| `IRDSStatistics.isRaceSession`（静态） | [?] | 0 | 1 | 旁证 [V] |
+| `IRDSStatistics.isFreePracticeSession`（静态） | [?] | 1 | 0 | 旁证 [V] |
+| `IRDSStatistics.timedSession`（静态） | [?] | 1 | 0 | **与字面义相反**（排位/练习=1），勿当"计时赛"判据 [V] |
+| `IRDSLevelLoadVariables.raceModes` | 0 | 0 | 0 | 无区分力，排除 [V] |
+| `odometerHandler.isQuali` | [?] | 1 | 0 | 语义"非正赛圈速 UI 状态"，非排位专属，弃用 [V] |
+
+终版门禁：`champManager 非 NULL → 按 isTimeAttack 硬判`；
+`champManager == NULL → 模式未知 → 挂起`。三路径实测正确 [V]。
+
+## 4.5 本篇结论
+
+1. 游戏圈速计时的权威出口是 `odometerHandler.HandleSectorsTimes`：一个调用点
+   同时提供分段计时、整圈计时与游戏原生有效圈判定，是外部读取圈速的最小接口。
+2. 有效圈判定不应复算。游戏在切弯/逆行时维护的 `validLap` 位是判定的最终产物，
+   复算赛道边界（赛车线宽度、四轮出界判定）的成本与误差远高于读 1 bit 结论。
+3. 赛道身份体系是"外壳场景 + buildIndex 数学"而非独立场景命名——任何从
+   场景名/LLV 字段直接取赛道名的路线都会得到 `MobileScene` 废值。
+4. 会话类型是结构信号（哪个管理器被实例化）而非值信号——管理器字段值
+   （raceModes/isQuali）在会话间不构成可靠区分。
+
+## 附录 E：圈速篇证据置信度矩阵
+
+| 结论 | 置信度 | 证据 |
+|---|---|---|
+| `sectorOrder` 0-based；`totalLapTime` 仅 order==2 携带完整圈时 | [V] | 三轮实机日志（4 场会话、十余圈，双信号交叉） |
+| `validLap` 为持续状态位（切弯即降 0） | [V] | 圈段行 valid 翻转时序 + `LAPinv` 一致性 |
+| 圈完成 = `order==2` 事件，回绕判定会延迟一圈 S1 | [V] | 第 5 圈"消失"事故 + 修复后四圈即时判定 |
+| `trackToRace`='MobileScene'（不含赛道身份） | [V] | 3 场会话 LAPtrack 原文 |
+| `GetGPIndex = activeScene − GP基址(2)` | [V] | 反汇编全文（14 条指令）+ 实机 buildIndex/gpIndex 对 |
+| 16 场景表（buildIndex 2–17）与场景名 | [V] | BuildSettings 权威 + metadata 字面量 + 4/16 实机 LAPscene |
+| 模块 best ≡ 游戏侧 `absoluteFastestLap` | [V] | 3 次同值（Monza/Monaco/MelbourneRifatta） |
+| 门禁三路径（ta=1 记录 / ta=0 挂起 / NULL 挂起） | [V] | 4 场会话实测 |
+| `timedSession` 在排位/练习=1 的语义 | [?] | sessBits=6 单点观测，内部规则未反汇编 |
+| `sectorQuality` 精确取值表 | [?] | 实测仅出现 0/2 |
+| 非计时赛会话中 `HandleSectorsTimes` 是否混入 AI 车事件 | [?] | 正赛样本中未见 AI 行，但样本量小；门禁挂起后不影响正确性 |
+| LLV 单例每场景加载重建 Awake | [V] | 单次快速模式加载 4 次 LAPtrack（指针循环复用） |
+
+## 附录 F：圈速篇关键常数与地址表（8.0.4, 200146）
+
+| 名称 | 值 / RVA | 出处 |
+|---|---|---|
+| `IRDSLevelLoadVariables.Awake` | 0x199DE28 | dump.cs（8.0.0→8.0.4 增量 +0xC2DC） |
+| `odometerHandler.HandleSectorsTimes` | 0x1A0A1C4 | dump.cs（增量 +0xD598） |
+| `CommonUtilities.GetGPIndex` | 0x17952F0 | dump.cs + 反汇编 |
+| `SceneManagerHelper.get_ActiveSceneName` | 0x2AED524 | dump.cs（Photon.Pun） |
+| `SceneManagerHelper.get_ActiveSceneBuildIndex` | 0x2AFB85C | dump.cs |
+| `IRDSLevelLoadVariables.trackToRace` | 0xB8 | dump.cs（实例字段） |
+| `IRDSStatistics.absoluteFastestLap` / `fastestTimeAuthor` | 0xC0 / 0xC4 | dump.cs |
+| `IRDSNavigateTWaypoints.bestLapTimeInfo` | 0x240 | dump.cs |
+| `LapTimeInfo.sectorOne/Two/Three` | 0x10 / 0x14 / 0x18 | dump.cs |
+| `odometerHandler.champManager` / `isQuali` / `timeAttackTimes` | 0x4D8 / 0x2A0 / 0x2E0 | dump.cs |
+| `ChampionshipManager.isTimeAttack` | 0x20 | dump.cs |
+| `IRDSLevelLoadVariables.raceModes` | 0x158 | dump.cs |
+| GP 场景 buildIndex 区间 | 2–17（基址 2） | BuildSettings（data.unity3d） |
+| il2cpp 导出（探测链依赖） | `il2cpp_class_from_name` 0x161E358、`il2cpp_class_get_method_from_name` 0x161E380、`il2cpp_runtime_invoke` 0x161EC74、`il2cpp_class_get_fields` 0x161E364、`il2cpp_field_static_get_value` 0x161EA3C、`il2cpp_domain_get*` 0x161E850/0x161E85C、`il2cpp_assembly_get_image` 0x161E320 | libil2cpp.so dynsym |
