@@ -787,6 +787,17 @@ static void abs_apply_gear(void *this) {
 // 滑移超阈帧执行（未超阈走 0x1A7B770 b.le 绕过），是游戏 ABS 真实介入的
 // 执行点——命中即游戏此刻正在对该轮施加滑移管理。x19 = IRDSWheel。
 // 高频路径（全车每物理帧滑移超阈时命中）：只做 4 次指针比对 + 一次写。
+//
+// ⚠️⚠️ 本回调体内【严禁任何浮点操作】（含隐式的 float 读取/比较/字面量）：
+// 被拦截指令要重放 s0（T×b 的结果，写 tempBrakeF 0x3EC）。回调一碰
+// FPSIMD 寄存器，s0 即被污染——重放把垃圾写进扭矩字段，pulse 泄压帧
+// 扭矩≈0 → 全泄压 → 方波平均恒 0.5×F_base = 原厂 b=0 行为，**ABS 档位
+// 全部失效**（实机实证 2026-08-30 两轮：SHADOWHOOK_INTERCEPT_DEFAULT 下
+// 垃圾=0xF0 归一化值；改 WITH_FPSIMD_WRITE_ONLY 后垃圾变 0.0——shadowhook
+// 的 FPSIMD 保存/恢复路径同样不可信，恢复进的是零）。防御手段不是 flags
+//（安装处已回退 DEFAULT），而是本函数零浮点：0xF0>0.01f 用 IEEE754 位型
+// 整数比较替代（正 float 位型与无符号整数同序）。
+// 验证法：反汇编本函数不得出现 vmov/vldr/fcmp 等浮点指令。
 static void abs_rf_intercept_pre(shadowhook_cpu_context_t *ctx, void *data) {
     (void) data;
     g_abs_rf_hits_total++;
@@ -803,7 +814,10 @@ static void abs_rf_intercept_pre(shadowhook_cpu_context_t *ctx, void *data) {
             // 执行条件不含"正在刹车"——实机实证起步红绿齐闪）。释放泄压
             // 只有乘上该轮制动压力(0xF0)才产生实际制动扭矩；0xF0≈0 时
             // 本次执行无制动效果，不算介入。
-            if (*(volatile float *) ((uintptr_t) wheel + 0xF0) > 0.01f) {
+            // ⚠️ IEEE754 位型整数比较（非浮点！）：0xF0 是 0..1 非负 float，
+            // 正 float 位型与无符号整数同序，> 0.01f(0x3C23D70A) 等价。
+            // 本函数体任何浮点操作都会污染被重放指令的 s0（见函数头注释）。
+            if (*(volatile uint32_t *) ((uintptr_t) wheel + 0xF0) > 0x3C23D70Au) {
                 g_abs_hit_seq = g_frame_seq;
                 g_abs_active = 1;
             }
@@ -815,6 +829,12 @@ static void abs_rf_intercept_pre(shadowhook_cpu_context_t *ctx, void *data) {
 // 安装 RoadForce 指令拦截器。offset 固定 0x1A7B7DC（8.0.4 专用，与
 // TractionFilter 等同受 VersionGate 门控）。失败仅记日志——指示灯失效
 // 不影响任何 gameplay 功能。
+// ⚠️ flags 用 DEFAULT：回调体 abs_rf_intercept_pre 已做到零浮点（0xF0
+// 过滤用 IEEE754 位型整数比较，见该函数头注释）——不需要 shadowhook 的
+// FPSIMD 保存/恢复（且实测 WITH_FPSIMD_WRITE_ONLY 恢复进的是零，会把
+// tempBrakeF 写成 0.0，同样毁掉 pulse 泄压，实机实证 2026-08-30 第二轮）。
+// 今后若在回调里加任何浮点逻辑，必须先确认不会碰 s0-v31，否则档位失效
+// 会复发（症状：pulse 泄压帧 tempBrakeF 出现 0~1.5 的扭矩量纲不可能值）。
 static void abs_rf_intercept_install(uintptr_t base) {
     uintptr_t target = base + 0x1A7B7DC;
     void *stub = shadowhook_intercept_instr_addr(
