@@ -170,6 +170,7 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - `native/src/music_hook.c` — main menu music mute + heartbeat signal.
 - `native/src/intro_hook.c` — intro V10 engine sound: mute introSound + one-shot signal.
 - `native/src/hide_pedals_hook.c` / `native/src/hide_pedals_hook.h` — hide game-native throttle/brake buttons via IRDSUIMobileControls + il2cpp_runtime_invoke(SetActive); on disable, restores hidden buttons via a stash + re-traverse pointer match (never dereferences stashed pointers).
+- `native/src/lap_hook.c` / `native/src/lap_hook.h` — time-trial valid-lap listener (log-only): hooks `odometerHandler.HandleSectorsTimes` (lap events) + `IRDSLevelLoadVariables.Awake` (session reset); valid-lap from game's own `validLap` bit; session gate via `champManager.isTimeAttack` (NULL = suspend); track ID via `LAPscene` probe (SceneManagerHelper + GetGPIndex). ⚠️ lap completion must fire on the `order==2` event, never on the 2→0 wrap (delayed a full S1). See `docs/LAP_HOOK_NOTES.md`.
 - `native/src/native_log.h` / `native/src/native_log.c` — shared native file logging (logcat + file, logEnabled-gated).
 - `app/src/main/kotlin/tools/alamobile/mod/util/Logger.kt` — unified Java logger (logcat + file, logEnabled-gated).
 - `app/src/main/kotlin/tools/alamobile/mod/util/LogExporter.kt` — merge module+game logs, FileProvider → ShareSheet.
@@ -178,9 +179,10 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - `app/src/main/kotlin/tools/alamobile/mod/IntroSoundPlayer.kt` — V10 engine sound player.
 - `app/src/main/resources/META-INF/xposed/module.prop` — libxposed module metadata.
 - `app/src/main/resources/META-INF/xposed/scope.list` — target package list.
-- `docs/TECHNICAL_ANALYSIS.md` — Ala Mobile game-engine reverse-engineering analysis, organized by subsystem (paper-style, LaTeX + Mermaid). Completed: ABS, vehicle dynamics (TC/ESC/steer assist). Planned: aero/DRS, drivetrain.
+- `docs/TECHNICAL_ANALYSIS.md` — Ala Mobile game-engine reverse-engineering analysis, organized by subsystem (paper-style, LaTeX + Mermaid). Completed: ABS, vehicle dynamics (TC/ESC/steer assist), lap timing & track ID. Planned: aero/DRS, drivetrain.
 - `docs/MODULE_ABS_NOTES.md` — engineering notes for the ABS and TC subsystems: module hook layers, tunable field paths, native-scan toolchain pitfalls, upgrade verification checklist.
 - `docs/ABS_LEVEL_DESIGN.md` — ABS gear-level tuning design & finalized calibration (v2: intervention-strength b override + max brake pressure T_b scaling), same skeleton as TC_LEVEL_DESIGN.md.
+- `docs/TRACK_IDENTIFICATION.md` / `docs/LAP_HOOK_NOTES.md` — 16 GP track table (buildIndex 2–17, scene names verbatim; `trackToRace`='MobileScene' dead sign) + lap_hook engineering notes (HandleSectorsTimes semantics, session-gate matrix, upgrade checklist).
 
 ## TODO(human) Integration Points
 
