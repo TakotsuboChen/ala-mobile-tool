@@ -140,7 +140,8 @@ fun MainScreen(
                         when (page) {
                             0 -> OverviewPager(navController, bottomInnerPadding, isCurrentPage)
                             1 -> ConfigurePager(navController, bottomInnerPadding, isCurrentPage)
-                            2 -> SettingsPager(bottomInnerPadding)
+                            2 -> tools.alamobile.mod.ui.screen.paddock.PaddockPager(bottomInnerPadding)
+                            3 -> SettingsPager(bottomInnerPadding)
                         }
                     }
                 }
@@ -203,6 +204,7 @@ private enum class BottomBarDestination(
 ) {
     Overview("概览", Icons.Rounded.Home),
     Configure("配置", Icons.Rounded.Build),
+    Paddock("围场", tools.alamobile.mod.ui.ChequeredFlagIcon),
     Settings("设置", Icons.Rounded.Settings);
 }
 
