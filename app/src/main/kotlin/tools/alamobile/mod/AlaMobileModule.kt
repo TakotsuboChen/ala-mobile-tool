@@ -495,26 +495,16 @@ class AlaMobileModule : XposedModule() {
                     } catch (e: Throwable) {
                         logX(Log.ERROR, TAG, "initLap failed: ${e.message}")
                     }
-                    // 围场上传链（S2）：1Hz 轮询 native 单槽取有效圈 → HTTPS 上报。
-                    // 服务器地址覆盖暂未接配置 UI（S3），先用内置默认；token 为空时
-                    // 有效圈自动进本地待传队列（30 天），登录后补传。
-                    // TODO(S3): serverOverride 从 ModConfig 读；登录/注册 UI 完成接入。
+                    // 围场上传链（S2+）：1Hz 轮询 native 单槽取有效圈 → HTTPS 上报。
+                    // 服务器地址覆盖从配置读（设置页可改，空 = 内置默认
+                    // paddock.takotsubo.cloud）；token 共享文件由 ConfigActivity
+                    // 登录页写入，为空时有效圈自动进本地待传队列（30 天）补传。
                     if (ctx != null) {
                         try {
-                            PaddockUploader.start(ctx, null, 200146)
-                            logX(Log.INFO, TAG, "PaddockUploader started (server=default)")
-                        } catch (e: Throwable) {
-                            logX(Log.ERROR, TAG, "PaddockUploader init failed: ${e.message}")
-                        }
-                    }
-                    // 围场上传链（S2）：1Hz 轮询 native 单槽取有效圈 → HTTPS 上报。
-                    // 服务器地址覆盖读配置（无配置用内置默认）；token 共享文件由
-                    // ConfigActivity 登录页写入。登录/注册 UI 尚未接入前 token 为空，
-                    // 有效圈自动进本地待传队列（30 天），登录后补传。
-                    if (ctx != null) {
-                        try {
-                            PaddockUploader.start(ctx, null, 200146)
-                            logX(Log.INFO, TAG, "PaddockUploader started (server default hardcoded, S2)")
+                            val cfg = ModConfig.readFromTargetProcess(ctx)
+                            val serverOverride = cfg.paddockServer.takeIf { it.isNotBlank() }
+                            PaddockUploader.start(ctx, serverOverride, 200146)
+                            logX(Log.INFO, TAG, "PaddockUploader started (server=${serverOverride ?: "default"})")
                         } catch (e: Throwable) {
                             logX(Log.ERROR, TAG, "PaddockUploader init failed: ${e.message}")
                         }

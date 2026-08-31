@@ -30,6 +30,10 @@ class PaddockViewModel(application: android.app.Application) : AndroidViewModel(
         val regPass: String = "",
         val regCodeIssued: String = "",   // 非空 = 已申请待群内校验（弹窗展示用）
         val regCodeInput: String = "",    // "我已校验" 后回填的码
+        // 忘记密码表单（S4：群里找 bot 要重置码 → 回填码+新密码）
+        val showReset: Boolean = false,
+        val resetCode: String = "",
+        val resetPass: String = "",
     )
 
     private val _uiState = MutableStateFlow(UiState(loggedIn = PaddockClient.hasToken()))
@@ -94,5 +98,34 @@ class PaddockViewModel(application: android.app.Application) : AndroidViewModel(
     fun logout() {
         PaddockClient.clearAuth()
         _uiState.update { UiState() }
+    }
+
+    // ── 忘记密码（S4）──────────────────────────────────────
+
+    fun setShowReset(v: Boolean) = _uiState.update { it.copy(showReset = v, message = "") }
+    fun setResetCode(v: String) = _uiState.update { it.copy(resetCode = v, message = "") }
+    fun setResetPass(v: String) = _uiState.update { it.copy(resetPass = v, message = "") }
+
+    fun submitReset() {
+        val s = _uiState.value
+        if (s.loading || s.resetCode.isBlank() || s.resetPass.isBlank()) {
+            _uiState.update { it.copy(message = "请填写重置码和新密码") }
+            return
+        }
+        _uiState.update { it.copy(loading = true, message = "") }
+        viewModelScope.launch {
+            val err = withContext(Dispatchers.IO) {
+                PaddockClient.resetByCode(s.resetCode, s.resetPass)
+            }
+            _uiState.update {
+                if (err == null) {
+                    // 成功：收起表单，提示用新密码登录；预填用户名不必（用户名即群内申请名）
+                    it.copy(loading = false, showReset = false, resetCode = "", resetPass = "",
+                            message = "密码已重置，请用新密码登录")
+                } else {
+                    it.copy(loading = false, message = err)
+                }
+            }
+        }
     }
 }

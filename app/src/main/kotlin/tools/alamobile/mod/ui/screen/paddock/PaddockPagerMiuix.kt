@@ -189,6 +189,50 @@ private fun LoginCard(uiState: tools.alamobile.mod.ui.viewmodel.PaddockViewModel
                 enabled = !uiState.loading,
                 modifier = Modifier.fillMaxWidth(),
             )
+            TextButton(
+                text = if (uiState.showReset) "收起重置密码" else "忘记密码？",
+                onClick = { actions.setShowReset(!uiState.showReset) },
+                enabled = !uiState.loading,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (uiState.showReset) {
+                ResetPasswordForm(uiState, actions)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResetPasswordForm(
+    uiState: tools.alamobile.mod.ui.viewmodel.PaddockViewModel.UiState,
+    actions: PaddockViewModel,
+) {
+    var resetCode by remember { mutableStateOf(TextFieldValue(uiState.resetCode)) }
+    var resetPass by remember { mutableStateOf(TextFieldValue(uiState.resetPass)) }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            top.yukonga.miuix.kmp.basic.Text(
+                "在模块交流 QQ 群发送「重置密码 你的用户名」，助理回复重置码后回填：",
+                fontSize = 13.sp,
+            )
+            TextField(
+                value = resetCode,
+                onValueChange = { resetCode = it; actions.setResetCode(it.text) },
+                label = "重置码",
+                modifier = Modifier.fillMaxWidth(),
+            )
+            TextField(
+                value = resetPass,
+                onValueChange = { resetPass = it; actions.setResetPass(it.text) },
+                label = "新密码（≥8位，数字+字母）",
+                modifier = Modifier.fillMaxWidth(),
+            )
+            TextButton(
+                text = if (uiState.loading) "提交中…" else "提交重置",
+                onClick = { actions.submitReset() },
+                enabled = !uiState.loading,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }

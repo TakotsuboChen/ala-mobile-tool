@@ -1,8 +1,11 @@
 package tools.alamobile.mod.ui.screen.settings
 
 import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.add
@@ -12,10 +15,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Article
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Update
 import androidx.compose.material.icons.rounded.Warning
@@ -29,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
@@ -49,8 +55,10 @@ import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.OverlaySpinnerPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
@@ -92,6 +100,12 @@ fun SettingsPagerMiuix(
     var updateChannel by remember {
         mutableStateOf(UpdatePreferences.getChannel(context))
     }
+
+    // 围场服务器编辑弹窗（S4）：OverlayDialog 常驻组合树由 show 驱动；
+    // 保存副作用放 onDismissFinished（退出动画完成后），与 EulaDialog 同模式。
+    var paddockServerDialogVisible by remember { mutableStateOf(false) }
+    var paddockServerInput by remember { mutableStateOf(TextFieldValue(uiState.paddockServer)) }
+    var pendingPaddockServer by remember { mutableStateOf<(() -> Unit)>({ }) }
     val channelItems = remember {
         listOf(
             DropdownItem(text = "稳定版"),
@@ -192,6 +206,24 @@ fun SettingsPagerMiuix(
                             )
                         }
 
+                        // ── 组 2.5: 围场服务器（S4）──
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            ArrowPreference(
+                                title = "围场服务器地址",
+                                summary = if (uiState.paddockServer.isBlank()) "默认（paddock.takotsubo.cloud）"
+                                          else uiState.paddockServer,
+                                startAction = {
+                                    Icon(
+                                        Icons.Rounded.Public,
+                                        modifier = Modifier.padding(end = 6.dp),
+                                        contentDescription = null,
+                                        tint = colorScheme.onBackground
+                                    )
+                                },
+                                onClick = { paddockServerDialogVisible = true }
+                            )
+                        }
+
                         // ── 组 3: 激活 / 协议 ──
                         Card(modifier = Modifier.fillMaxWidth()) {
                             ArrowPreference(
@@ -275,4 +307,58 @@ fun SettingsPagerMiuix(
             }
         )
     }
+
+    // 围场服务器编辑弹窗（S4）。常驻组合树、show 驱动；保存走 onDismissFinished。
+    top.yukonga.miuix.kmp.overlay.OverlayDialog(
+        show = paddockServerDialogVisible,
+        title = "围场服务器地址",
+        onDismissRequest = {
+            pendingPaddockServer = {
+                actions.setPaddockServer(paddockServerInput.text.trim())
+            }
+            paddockServerDialogVisible = false
+        },
+        onDismissFinished = {
+            pendingPaddockServer()
+            pendingPaddockServer = { }
+        },
+        content = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                top.yukonga.miuix.kmp.basic.TextField(
+                    value = paddockServerInput,
+                    onValueChange = { paddockServerInput = it },
+                    label = "https:// 开头；留空恢复默认",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+              Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(
+                        text = "恢复默认",
+                        onClick = {
+                            paddockServerInput = TextFieldValue("")
+                            pendingPaddockServer = {
+                                actions.setPaddockServer("")
+                            }
+                            paddockServerDialogVisible = false
+                        }
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    TextButton(
+                        text = "保存",
+                        onClick = {
+                            pendingPaddockServer = {
+                                actions.setPaddockServer(paddockServerInput.text.trim())
+                                Toast.makeText(context, "已保存，下次进游戏生效", Toast.LENGTH_SHORT).show()
+                            }
+                            paddockServerDialogVisible = false
+                        }
+                    )
+                }
+            }
+        }
+    )
 }

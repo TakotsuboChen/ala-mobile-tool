@@ -29,8 +29,8 @@ object PaddockClient {
 
     private const val TAG = "PaddockClient"
 
-    /** 内置默认服务器（可被配置覆盖） */
-    private const val DEFAULT_SERVER = "https://paddock.example.com"
+    /** 内置默认服务器（可被配置覆盖；线上部署 paddock.takotsubo.cloud） */
+    private const val DEFAULT_SERVER = "https://paddock.takotsubo.cloud"
 
     private const val QUEUE_FILE = "paddock_pending_laps.json"
     private const val AUTH_FILE = "paddock_auth.json"
@@ -157,6 +157,22 @@ object PaddockClient {
             }
         } catch (e: Throwable) {
             Pair(false, "网络错误: ${e.message}")
+        }
+    }
+
+    /**
+     * 阻塞提交重置码换新密码（忘记密码流第二步；第一步在 CAMDA 群找 bot 要码）。
+     * 成功返回 null；失败返回错误文案。不自动登录——让用户用新密码走登录。
+     */
+    fun resetByCode(resetCode: String, newPassword: String): String? {
+        return try {
+            val body = JSONObject()
+                .put("reset_code", resetCode.trim().uppercase())
+                .put("new_password", newPassword)
+            val (code, resp) = postJson("$serverBase/v1/auth/reset-by-code", body, null)
+            if (code == 204) null else errText(code, resp)
+        } catch (e: Throwable) {
+            "网络错误: ${e.message}"
         }
     }
 

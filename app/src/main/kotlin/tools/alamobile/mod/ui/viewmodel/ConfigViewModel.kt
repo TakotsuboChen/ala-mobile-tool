@@ -72,6 +72,7 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
                 throttleCurvePoints = s.throttleCurvePoints,
                 brakeCurvePoints = s.brakeCurvePoints,
                 logEnabled = s.logEnabled,
+                paddockServer = s.paddockServer,
             )
         }
     }
@@ -108,6 +109,7 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
             throttleCurvePoints = s.throttleCurvePoints,
             brakeCurvePoints = s.brakeCurvePoints,
             logEnabled = s.logEnabled,
+            paddockServer = s.paddockServer,
         )
     }
 
@@ -164,6 +166,12 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
         scheduleSave()
     }
 
+    /** 围场服务器地址覆盖（S4）。空串 = 恢复内置默认。下次游戏进程启动生效。 */
+    fun setPaddockServer(v: String) {
+        _uiState.value = _uiState.value.copy(paddockServer = v.trim())
+        scheduleSave()
+    }
+
     /** 立即 flush（供 onServiceBind 等需要立刻落盘的场景）。 */
     fun flushNow() {
         saveJob?.cancel()
@@ -210,6 +218,8 @@ data class ConfigUiState(
     val throttleCurvePoints: List<ModConfig.CurvePoint>,
     val brakeCurvePoints: List<ModConfig.CurvePoint>,
     val logEnabled: Boolean,
+    // 围场服务器地址覆盖（空 = PaddockClient 内置默认）。
+    val paddockServer: String,
 ) {
     fun toSettings(): ModConfig.Settings = ModConfig.Settings(
         pedalMode = pedalMode,
@@ -246,5 +256,6 @@ data class ConfigUiState(
         throttleCurvePoints = throttleCurvePoints,
         brakeCurvePoints = brakeCurvePoints,
         logEnabled = logEnabled,
+        paddockServer = paddockServer,
     )
 }
