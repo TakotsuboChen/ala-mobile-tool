@@ -131,7 +131,11 @@ GET  /v1/me                          → 个人信息卡
 3. ✅ auth API：register-request / register-verify / login（reset-by-code 留 S4）；register-verify 已实现 bot 校验绑定路径，S1 过渡期靠管理端代绑（管理端未建前可 psql 手工 UPDATE pending_regs）。
 4. ✅ laps 上报（服务端 Toast 四条件判定事务）+ leaderboard（积分总榜/版本榜 + 赛道榜）。
 5. ⬜ 管理端 SSR：管理员账号、bot AppID/Secret、存储路径配置、用户与成绩管理（删除作弊成绩）。
-6. ⬜ 验证：docker compose 起本地栈 → curl 全链路（注册→传圈→榜单）+ 积分正确性。
+6. ✅ 验证：临时 Postgres 容器 + 本机 cargo run → curl 全链路（2026-08-31 实测通过）：
+   注册申请（同名在途 409 / 非法名 400 / 换名骗码 400）→ psql 代绑 → verify 建号（reg_seq 1/2）→
+   登录（错误密码 401）→ 传圈六用例（Toast 四条件全部正确）→ 积分总榜/版本榜（#1=100/#2=1，版本隔离 ✓）→
+   赛道榜（总榜/版本榜+圈时格式化 ✓）。修复 3 bug：records 主键 NULL 约束（alltime 行 version_code=0 占位）、
+   同名并发注册、Toast 双纪录维度耦合误报（version 首建缺失导致更差圈误报 alltime_server）。
 
 **S2 — 模块上传链路（实机可测）**
 1. `PaddockClient`（游戏进程内 OkHttp，独立线程；服务器地址内置默认+设置页覆盖）。
