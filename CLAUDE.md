@@ -17,6 +17,8 @@ Two game packages are supported (module is developed for both):
 Source repository: `https://github.com/TakotsuboChen/ala-mobile-tool`
 License: Apache-2.0
 
+**Sister repository**: `../ala-mobile-paddock` (`https://github.com/TakotsuboChen/ala-mobile-paddock`) — paddock (围场) private-server backend (Rust axum + Postgres + Garage + Caddy, Apache-2.0). Development sessions always run in **this** repo; both sides are developed together in one session. The sole contract source is `docs/PADDOCK_PLAN.md` (API shapes, points formula, track display names) — any contract change must update **both** repos in the same session.
+
 Supported game version: **Ala Mobile 8.0.4 (versionCode 200146)**. IL2CPP method offsets are version-specific; the module gates all native hooks behind `VersionGate`.
 
 **Log pulling (实机日志拉取)**: game-side logs live at `/sdcard/Android/data/<游戏包>/files/ala_tool.log` (Java) + `ala_tool_native.log` (native), where `<游戏包>` is **either** package name above depending on which build the user runs. Device log file timestamps are the fastest way to tell which build produced a given log.
@@ -176,7 +178,9 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - `native/src/music_hook.c` — main menu music mute + heartbeat signal.
 - `native/src/intro_hook.c` — intro V10 engine sound: mute introSound + one-shot signal.
 - `native/src/hide_pedals_hook.c` / `native/src/hide_pedals_hook.h` — hide game-native throttle/brake buttons via IRDSUIMobileControls + il2cpp_runtime_invoke(SetActive); on disable, restores hidden buttons via a stash + re-traverse pointer match (never dereferences stashed pointers).
-- `native/src/lap_hook.c` / `native/src/lap_hook.h` — time-trial valid-lap listener (log-only): hooks `odometerHandler.HandleSectorsTimes` (lap events) + `IRDSLevelLoadVariables.Awake` (session reset); valid-lap from game's own `validLap` bit; session gate via `champManager.isTimeAttack` (NULL = suspend); track ID via `LAPscene` probe (SceneManagerHelper + GetGPIndex). ⚠️ lap completion must fire on the `order==2` event, never on the 2→0 wrap (delayed a full S1). See `docs/LAP_HOOK_NOTES.md`.
+- `native/src/lap_hook.c` / `native/src/lap_hook.h` — time-trial valid-lap listener + paddock upload source: hooks `odometerHandler.HandleSectorsTimes` (lap events) + `IRDSLevelLoadVariables.Awake` (session reset); valid-lap from game's own `validLap` bit; session gate via `champManager.isTimeAttack` (NULL = suspend); track ID via `LAPscene` probe (SceneManagerHelper + GetGPIndex); valid laps exposed to Java via single-slot upload buffer (`lap_poll_upload`/`lap_mark_upload_consumed`). ⚠️ lap completion must fire on the `order==2` event, never on the 2→0 wrap (delayed a full S1). See `docs/LAP_HOOK_NOTES.md`.
+- `app/src/main/kotlin/tools/alamobile/mod/PaddockClient.kt` / `PaddockUploader.kt` — paddock (围场) leader-board client: HTTPS lap upload (HttpURLConnection, no new deps), 30-day local pending queue, login/register API, server Toast mapping; `PaddockUploader` polls native slot at 1Hz from AlaMobileModule's 15s delay path. Server base + track display names are a **shared contract** with the paddock repo (see below).
+- `app/src/main/kotlin/tools/alamobile/mod/ui/screen/paddock/` — Paddock UI page (4th bottom-bar page): login / two-step registration (code → CAMDA group → verify) + `LeaderboardScreen` (points/track boards via `Route.Paddock`).
 - `native/src/native_log.h` / `native/src/native_log.c` — shared native file logging (logcat + file, logEnabled-gated).
 - `app/src/main/kotlin/tools/alamobile/mod/util/Logger.kt` — unified Java logger (logcat + file, logEnabled-gated).
 - `app/src/main/kotlin/tools/alamobile/mod/util/LogExporter.kt` — merge module+game logs, FileProvider → ShareSheet.
