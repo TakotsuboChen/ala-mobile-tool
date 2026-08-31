@@ -8,12 +8,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`ala-mobile-tool` is an free, open-source LSPosed module for the Unity IL2CPP mobile F1 racing game **Ala Mobile** (package `com.Vince.AlamobileFormula`). It targets the modern **libxposed API 102** and uses native inline hooks to extend the game's input controls and DRS/aero behavior.
+`ala-mobile-tool` is an free, open-source LSPosed module for the Unity IL2CPP mobile F1 racing game **Ala Mobile**. It targets the modern **libxposed API 102** and uses native inline hooks to extend the game's input controls and DRS/aero behavior.
+
+Two game packages are supported (module is developed for both):
+- **官版 (official)**: `com.Vince.AlamobileFormula`
+- **共存版 (coexistence, renamed repackage)**: `com.Takotsubo.AlamobileFormula` — same game, different package name so it installs alongside the official one. All package-name checks (VersionGate, scope, log paths) must handle both.
 
 Source repository: `https://github.com/TakotsuboChen/ala-mobile-tool`
 License: Apache-2.0
 
 Supported game version: **Ala Mobile 8.0.4 (versionCode 200146)**. IL2CPP method offsets are version-specific; the module gates all native hooks behind `VersionGate`.
+
+**Log pulling (实机日志拉取)**: game-side logs live at `/sdcard/Android/data/<游戏包>/files/ala_tool.log` (Java) + `ala_tool_native.log` (native), where `<游戏包>` is **either** package name above depending on which build the user runs. Device log file timestamps are the fastest way to tell which build produced a given log.
 
 ## Development Decisions (already approved)
 
@@ -182,7 +188,7 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - `docs/TECHNICAL_ANALYSIS.md` — Ala Mobile game-engine reverse-engineering analysis, organized by subsystem (paper-style, LaTeX + Mermaid). Completed: ABS, vehicle dynamics (TC/ESC/steer assist), lap timing & track ID. Planned: aero/DRS, drivetrain.
 - `docs/MODULE_ABS_NOTES.md` — engineering notes for the ABS and TC subsystems: module hook layers, tunable field paths, native-scan toolchain pitfalls, upgrade verification checklist.
 - `docs/ABS_LEVEL_DESIGN.md` — ABS gear-level tuning design & finalized calibration (v2: intervention-strength b override + max brake pressure T_b scaling), same skeleton as TC_LEVEL_DESIGN.md.
-- `docs/TRACK_IDENTIFICATION.md` / `docs/LAP_HOOK_NOTES.md` — 16 GP track table (buildIndex 2–17, scene names verbatim; `trackToRace`='MobileScene' dead sign) + lap_hook engineering notes (HandleSectorsTimes semantics, session-gate matrix, upgrade checklist).
+- `docs/TRACK_IDENTIFICATION.md` / `docs/LAP_HOOK_NOTES.md` — 16 GP track table (buildIndex 2–17, scene names verbatim; `trackToRace`='MobileScene' dead sign) + lap_hook engineering notes (HandleSectorsTimes semantics, session-gate matrix, **9-session mode-signal matrix §4a**, upgrade checklist).
 
 ## TODO(human) Integration Points
 
