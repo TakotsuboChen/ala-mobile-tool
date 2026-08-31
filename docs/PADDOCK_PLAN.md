@@ -67,7 +67,8 @@
 
 ```sql
 users        (id, username UNIQUE, pass_hash argon2id, member_openid UNIQUE,
-              avatar_key, created_at, reg_seq)        -- reg_seq=第 x 位车手
+              avatar_key, created_at, reg_seq)        -- reg_seq=车手 ID：注册顺序从 1 起
+              -- （定案 2026-08-31：user_reg_seq 序列发放 + 唯一索引；榜单/verify/login 均返回）
 sessions     (user_id, token_hash, expires_at)         -- 90 天滑动
 pending_regs (reg_code, expires_at 30min, member_openid NULL, status)
 laps         (id, user_id, gp_index, version_code, lap_ms, s1,s2,s3 NULL,
@@ -87,9 +88,9 @@ records      (gp_index, kind: alltime|version, version_code NULL,
 ```
 POST /v1/auth/register-request  {username}          → 409 已存在 | {reg_code}
 POST /v1/auth/register-verify   {reg_code}          → 绑定 openid 后创建账号（bot 端已绑）
-                                                    → 204 就绪 | 404 码无效/过期
-POST /v1/auth/login             {username,password} → {token} (90d)
-POST /v1/auth/reset-by-code     {reset_code,new_password}
+                                                    → 201 {token, reg_seq} | 404 码无效/过期
+POST /v1/auth/login             {username,password} → {token, reg_seq} (90d)
+POST /v1/auth/reset-by-code     {reset_code,new_password} → 204 | 404 码无效/过期
 POST /v1/laps                   {gp_index, lap_ms, version_code} (Bearer)
                                                     → {personal: bool, server: bool,
                                                        toast: null|{level, track}}
