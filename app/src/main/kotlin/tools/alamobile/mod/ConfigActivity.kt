@@ -135,6 +135,7 @@ class ConfigActivity : ComponentActivity() {
                                 entry<Route.Configure> { mainScreenEntry() }
                                 entry<Route.Settings> { mainScreenEntry() }
                                 entry<Route.About> { AboutScreen() }
+                                entry<Route.Paddock> { tools.alamobile.mod.ui.screen.paddock.LeaderboardScreen() }
                             }
                         )
                     }

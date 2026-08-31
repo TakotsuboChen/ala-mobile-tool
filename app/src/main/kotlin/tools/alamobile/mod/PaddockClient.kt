@@ -299,6 +299,68 @@ object PaddockClient {
 
     // ── HTTP ────────────────────────────────────────────────
 
+    /** 榜单条目（积分榜/赛道榜共用解析子集） */
+    data class PointsEntry(val username: String, val points: Int)
+
+    data class TrackEntry(val rank: Int, val username: String, val lapDisplay: String)
+
+    data class TrackBoard(
+        val trackName: String,
+        val entries: List<TrackEntry>,
+    )
+
+    /** GET /v1/leaderboard/points（version=null → 总榜）。阻塞 IO。 */
+    fun fetchPointsBoard(version: Int?): List<PointsEntry> {
+        return try {
+            val q = if (version != null) "?version=$version" else ""
+            val (code, resp) = getJson("$serverBase/v1/leaderboard/points$q")
+            if (code != 200) return emptyList()
+            val arr = org.json.JSONArray(JSONObject(resp).optJSONArray("entries")?.toString() ?: "[]")
+            (0 until arr.length()).mapNotNull { i ->
+                val e = arr.optJSONObject(i) ?: return@mapNotNull null
+                PointsEntry(e.optString("username"), e.optInt("points"))
+            }
+        } catch (e: Throwable) {
+            AlaMobileModule.logX(Log.WARN, TAG, "fetchPointsBoard: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /** GET /v1/leaderboard/track/{gp}（version=null → 该赛道总榜）。阻塞 IO。 */
+    fun fetchTrackBoard(gpIndex: Int, version: Int?): TrackBoard? {
+        return try {
+            val q = if (version != null) "?version=$version" else ""
+            val (code, resp) = getJson("$serverBase/v1/leaderboard/track/$gpIndex$q")
+            if (code != 200) return null
+            val j = JSONObject(resp)
+            val arr = org.json.JSONArray(j.optJSONArray("entries")?.toString() ?: "[]")
+            val entries = (0 until arr.length()).mapNotNull { i ->
+                val e = arr.optJSONObject(i) ?: return@mapNotNull null
+                TrackEntry(e.optInt("rank"), e.optString("username"), e.optString("lap_display"))
+            }
+            TrackBoard(j.optString("track_name", "赛道"), entries)
+        } catch (e: Throwable) {
+            AlaMobileModule.logX(Log.WARN, TAG, "fetchTrackBoard: ${e.message}")
+            null
+        }
+    }
+
+    private fun getJson(url: String): Pair<Int, String> {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = CONNECT_TIMEOUT
+            readTimeout = READ_TIMEOUT
+        }
+        return try {
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val text = stream?.bufferedReader(StandardCharsets.UTF_8)?.use { it.readText() } ?: ""
+            Pair(code, text)
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     private fun errText(code: Int, resp: String): String =
         try { JSONObject(resp).optString("error", "HTTP $code") } catch (e: Throwable) { "HTTP $code" }
 

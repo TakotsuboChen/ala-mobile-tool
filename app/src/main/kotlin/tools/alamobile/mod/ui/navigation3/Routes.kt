@@ -30,5 +30,9 @@ sealed interface Route : NavKey, Parcelable {
 
     @Parcelize
     @Serializable
+    data object Paddock : Route
+
+    @Parcelize
+    @Serializable
     data object About : Route
 }

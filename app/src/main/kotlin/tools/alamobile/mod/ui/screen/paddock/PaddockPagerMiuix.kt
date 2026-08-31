@@ -26,6 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
+import tools.alamobile.mod.ui.navigation3.LocalNavigator
+import tools.alamobile.mod.ui.navigation3.Route
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Dp
@@ -66,6 +68,7 @@ fun PaddockPagerMiuix(
     val blurActive = backdrop != null
     val barColor = if (blurActive) Color.Transparent else colorScheme.surface
     val clipboard = LocalClipboardManager.current
+    val navigator = LocalNavigator.current
 
     Scaffold(
         topBar = {
@@ -96,7 +99,7 @@ fun PaddockPagerMiuix(
                         modifier = Modifier.padding(vertical = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        PaddockContent(uiState, actions, clipboard)
+                        PaddockContent(uiState, actions, clipboard, navigator)
                     }
                 }
             }
@@ -109,6 +112,7 @@ private fun PaddockContent(
     uiState: tools.alamobile.mod.ui.viewmodel.PaddockViewModel.UiState,
     actions: PaddockViewModel,
     clipboard: androidx.compose.ui.platform.ClipboardManager,
+    navigator: tools.alamobile.mod.ui.navigation3.Navigator,
 ) {
     if (uiState.loggedIn) {
         // ── 已登录：个人信息卡 ──
@@ -155,7 +159,7 @@ private fun PaddockContent(
             startAction = {
                 Icon(Icons.Rounded.Leaderboard, modifier = Modifier.padding(end = 6.dp), contentDescription = null, tint = colorScheme.onBackground)
             },
-            onClick = { /* TODO(S3后半): push 排行榜子页 */ },
+            onClick = { navigator.push(Route.Paddock) },
         )
     }
 }
