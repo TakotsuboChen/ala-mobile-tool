@@ -1,89 +1,78 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-08-31T01:53:00+08:00 · Git HEAD: `bc09553`
+生成时间: 2026-08-31T12:45:00+08:00 · Git HEAD: `9227460`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: `main` @ `bc09553` (2026-08-31)
-- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `bc09553`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA；不一致以 git 实际输出为准
+- 锚点: `main` @ `9227460` (2026-08-31)
+- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `9227460`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA；不一致以 git 实际输出为准
 - 待重探的 [?]: 见下方标记
-- 先读: `docs/LAP_HOOK_NOTES.md`（本轮新功能全部语义裁决与门禁矩阵）+ `docs/TRACK_IDENTIFICATION.md`（16 赛道表）
+- 先读: `docs/LAP_HOOK_NOTES.md`（含 §4a 九会话模式矩阵——本轮核心产出）+ `docs/TRACK_IDENTIFICATION.md`（16 赛道表）
 
 ## 1. 当前目标
-计时赛有效圈速监听（lap_hook，log-only 无 UI）已从零开发到实机闭环：圈速判定、16 赛道识别、模式门禁三路全实测通过。文档体系同步重构（8 文档迁入 docs/）。
+**用户定案（2026-08-31）：当前只做计时赛有效圈速，其他模式判定以后要继续挖但暂缓**——门禁已 9/9 全模式实测正确，功能处于"稳定收尾"态。数据源全就绪，剩余方向：计时赛圈速 UI 化（可选）与模式挖掘（远期）。
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **lap_hook 功能闭环**（`0596207`）：hook `IRDSLevelLoadVariables.Awake`(0x199DE28，会话重置+LLV 捕获) + `odometerHandler.HandleSectorsTimes`(0x1A0A1C4，圈段事件)——圈完成判定挂 order==2 事件即时判定；validLap 直接采信游戏原生位；会话最快有效圈本地维护。
-- [V] **实机四场验证**：Monza 计时赛（1:16.669 模块判定≡游戏 absoluteFastestLap）、五圈假象圈修复、Melbourne/Shangai/Monaco 双赛道切换重置正确、快速正赛+比赛周练习被门禁正确挂起（零误记）。
-- [V] **16 赛道表权威落定**（`docs/TRACK_IDENTIFICATION.md`）：APK BuildSettings（data.unity3d，UnityPy 解析）buildIndex 2–17 连续 16 场景；4/16 实机 LAPscene 交叉全吻合（`gpIndex = buildIndex − 2`）。
-- [V] **模式门禁终版**：主信号 `odometerHandler.champManager(0x4D8)→isTimeAttack(0x20)`；champ==NULL=挂起。计时赛（ta=1 记录）/比赛周练习（ta=0 挂起）/快速正赛（champ NULL 挂起）三路径实测正确。
-- [V] **文档重构**（`a1d9f40`+`bc09553`）：8 文档迁入 `docs/`（git mv 保留历史），根目录只留 README/CLAUDE/HANDOFF/RELEASE_NOTES；TECHNICAL_ANALYSIS 追加第 4 篇（圈速/赛道识别，附录 E/F）；新建 LAP_HOOK_NOTES + TRACK_IDENTIFICATION；README 功能条目、CLAUDE Files to Know（199 行 <200）同步。记忆 `docs-directory-layout.md` 已写。
-- [V] **构建+lint**：`./gradlew :app:assembleDebug :app:lint :app:assembleRelease` → BUILD SUCCESSFUL，EXIT=0（交接 run 全新 shell）。实机已装 release（设备 381QYFCN22B9A）。
-- 工作区: 干净，`main` 与 origin 同步（`0596207` 工作 / `a1d9f40` 文档重构 / `bc09553` CLAUDE.md / 本次 handoff 提交）。
+- [V] **lap_hook 功能闭环**（`0596207`）：hook `LLV.Awake`(0x199DE28) + `HandleSectorsTimes`(0x1A0A1C4)；圈完成挂 order==2 即时判定；validLap 采信游戏原生位；会话最快有效圈本地维护。
+- [V] **模式门禁 v2 实测 9/9 全对，代码零改动**：champManager→isTimeAttack 硬判 + champ==NULL=挂起。本轮全枚举采样（生涯澳 FP1/2/3/Q1/正赛 → 比赛周上海正赛 → 计时赛巴林 → 快速比赛伊莫拉 → GF 西班牙）全部门禁行为正确——计时赛记录 ✓，其余 8 场挂起 ✓。
+- [V] **模式信号全枚举矩阵落定**（`bd85c17`，docs/LAP_HOOK_NOTES §4a）：`LAPsession[awake]` 诊断行（LLV.Awake 场景加载即打，进赛道无需驾驶）11 信号；关键发现：生涯正赛 sessBits=4 vs 比赛周正赛 sessBits=1（两条置位路径）、cdSess 节次枚举 0-3=FP1-Q1/6=正赛、GF=`GlobalVariables.isGrandFestival` 专用位、fullQuali=周末级属性、raceModes 全场景=0 确认无区分力。
+- [V] **持久文档补共存版双包名**（`9227460`）：CLAUDE.md Overview 官版 `com.Vince.AlamobileFormula` + 共存版 `com.Takotsubo.AlamobileFormula` + 两包日志拉取路径。README 201 行原本已覆盖，未动。
+- [V] **构建**：`./gradlew :app:assembleDebug :app:assembleRelease` → BUILD SUCCESSFUL，EXIT=0。实机已装 release（共存版设备），9 会话采样就是它跑出来的。
+- 工作区: 干净，`main` 与 origin 同步（`bd85c17` 工作 / `9227460` 持久文档 / 本次 handoff 提交）。
 - 继承 [?]：多指污染修复等红米用户日志回传；Bug B 未复现未修。
 
 ### 测试/build 输出（本次交接 run 的真实输出，含退出码）
 ```
-./gradlew :app:assembleDebug :app:lint :app:assembleRelease → BUILD SUCCESSFUL in 3s，EXIT=0
-实机验证：4 场会话（计时赛×3 + 正赛/练习挂起×2）日志逐圈核对 → 全部正确
-git push → a2ee88f..0596207..a1d9f40..bc09553 main（三切片，成功）
+./gradlew :app:assembleDebug :app:assembleRelease → BUILD SUCCESSFUL，EXIT=0
+盲判测试：9 条 LAPsession[awake] 盲判 6.5/9，错的 2 条反哺矩阵（正赛指纹分裂发现）
+git push → bd85c17（工作）+ 9227460（持久文档）main，成功
 ```
 
 ## 3. 决策与理由
-- **圈完成判定挂 order==2 事件而非 2→0 回绕** [V]——回绕在下一圈 S1 过线才发生（30s+ 延迟），"第 5 圈消失"事故实证。order==2 事件本身携带完整圈时，收到即判。
-- **有效圈判定采信游戏原生 validLap 位，不复算** [V]——切弯/逆行判定是游戏判定的最终产物；复算赛道边界成本高且必有偏差。起步圈 outlap 语义自动继承。
-- **门禁"champ==NULL = 挂起"而非放行** [V]——快速正赛 champManager 恒 NULL（实机实证），v1 放行导致正赛误记（Shanghai 1:38.354）。过滤器失败模式必须朝"漏记"倾斜。
-- **赛道身份 = 场景 buildIndex，探测走 il2cpp 官方导出 + runtime_invoke** [V]——`GetGPIndex` 反汇编为纯算术（减基址 2）；Unity 方法直调有前科（get_gameObject 返回 this）。
-- **文档三分工** [V]——逆向结论→TECHNICAL_ANALYSIS 分篇（第 4 篇），工程语义→LAP_HOOK_NOTES，数据表→TRACK_IDENTIFICATION；根目录只留 4 入口（记忆 docs-directory-layout）。
-- 继承：拦截器回调零浮点、A/B 日志二分、指令级拦截而非字段读取、相位时钟单一写点——见 `.handoffs/20260831015043-handoff.md` §3。
+- **其他模式判定降为远期，现阶段只做计时赛** [V]（用户定案 2026-08-31）——v2 门禁已 9/9 全对，继续挖无行为收益；矩阵空格（Q2/Q3/多人）只影响未来 UI 的模式标签完整度。
+- **LAPsession 诊断行保留不删** [V]——它是 UI 化的模式标签信号源；与 rfHits/hitAge（可删）区分处置。
+- **诊断行挂 LLV.Awake 而非圈完成事件** [V]——模式信号进赛道时已定死；用户采样成本从"跑完整圈"压到"进赛道即退"。双门控（awake 必打 + sector 可选对照互补）。
+- 继承：圈完成挂 order==2、validLap 采信原生位、champ==NULL=挂起、赛道身份=buildIndex、文档三分工、拦截器零浮点——见 `.handoffs/20260831124000-handoff.md` §3。
+- 继承：实机测试默认 release 构建后**立即 adb install 装机**（一条链跑完，adb 找不到设备才问）——记忆 device-test-release-build，2026-08-31 事故加固。
 
 ## 4. 失败的尝试 — 不要再试
 > 全部前向搬运，永不丢弃。完整历史见 `.handoffs/` 目录 + docs/LAP_HOOK_NOTES.md §6。
 
-### 本轮新增（lap_hook 三版演化，全部实机实证）
-- [X] **圈完成判定等 order 2→0 回绕** → 判定延迟到下一圈 S1 过线（30s+），用户在途的第 5 圈"消失"（1:20.468 未出结论）。判定必须挂 order==2 事件本身。
-- [X] **sectorOrder 按 1-based 判 `==3`** → 永不命中（0-based 0/1/2），LAPbest/LAPinv 全程不触发。
-- [X] **把 HandleSectorsTimes 当过线单次事件** → 实为圈段过线事件簇（簇内连发数帧 13–27ms），v1 无节流日志 165 行；且"每帧 HUD 刷新"的二次修正也不准确——真相是事件簇。
-- [X] **gate v1 "champ==NULL → 放行"** → 快速正赛 champManager 恒 NULL，正赛圈被误记为 LAPinv（Shanghai 1:38.354）。v2 改 NULL=挂起。
-- [X] **trackToRace 当赛道名** → 移动端恒 'MobileScene'（外壳场景名），废签；16 赛道走 LAPscene 探测链。
-- [X] **bestLapTimeInfo(0x240) 当历史最佳** → 是当前圈实时分段（999.0=段未开始哨兵）；历史最佳在 IRDSStatistics.bestLapTimesInfoByCar 字典（未读，无需求）。
-- [X] **raceModes/isQuali/sessBits(timedSession) 当会话类型判据** → raceModes 全场景=0 无区分力；isQuali 练习赛也为 1（语义=非正赛圈速 UI 状态）；timedSession 排位/练习=1 与"计时赛"字面义相反。全部降级旁证，主判据只用 champManager+isTimeAttack。
-- [X] **切片 1 提交混入 git mv 暂存的 rename** → `git mv` 自动 stage，后续 `git add <files>` commit 时 rename 被夹带（`0596207` feat 混入 6 个文档 rename）。功能+迁移混提交，已接受未 force push；今后 `git mv` 后要么立即单独提交，要么 `git restore --staged` 分离。
+### 本轮新增
+- [X] **只构建不装机就交采样清单** → 用户按清单白跑一轮（10 次进赛道全空转，设备上是旧版）。装机是取证链路第一环，`assembleRelease` 后必须立即 `adb install -r`。
+- [X] **凭静态指纹盲判模式** → 9 场判对 6.5 场：生涯正赛 sessBits=4 ≠ 比赛周正赛 sessBits=1，"正赛有唯一指纹"假设被实测证伪。判定模式必须查 §4a 矩阵，勿按字段名字面义推断。
 
-### 继承死路（指示灯信号链 v1→v5 + FPSIMD 污染，全部实机实证）
-- [X] **拦截回调用 SHADOWHOOK_INTERCEPT_DEFAULT + 回调内浮点比较** → s0 污染毁档位（`cf869fd` 修复：零浮点）。**拦截浮点指令的回调严禁任何浮点操作**。
-- [X] **WITH_FPSIMD_WRITE_ONLY 补救** → 恢复进零，flags 路线不可信。
-- [X] **v1 读 pulseBrakes(0x408) 电平** / **v2 条件复算** / **v3 拦截器+帧头清零** / **v4 相位双写点** / **拦截命中不滤 0xF0** → 全否决，详见 docs/MODULE_ABS_NOTES §2c。
-- [X] **v2 全局缩 T_b / v3 p₀ 同缩 / v4 门控分流 / v5 输入端线性缩放** → 四条全否决，v6 饱和重映射定案（docs/ABS_LEVEL_DESIGN §4）。
-- [X] 断言"show taps 圆点不跟随"→官方文档证伪；GameTurbo 设置层 A/B 无效；MotionEvent.isResampled 编译失败；getRawX/Y 直调 API 29+ lint 报错（统一走 helper）。
-- [?] OnTouchListener 探 decorView 层事件（框架推理未实测）。
-- [X] 边框缝隙数学无解必须层内不透明；档位值 0.90 贴 native clamp 静默截断；押 p0 主旋钮被推翻；usesABS 恢复漏置位；只写 absEnable 不够；每帧写 ctor 默认≠真值；画笔模式技术成功被用户否决；commit 时间推 APK 内容单因推断；adb force-stop 用户在用设备；滑块 v1/v2 帧数 1/6 归因错误、GestureAxisBlocker 整向量消费、perfetto shorthand、测量期间手触、miuix 查源码先联网；proxy_shift_up 打日志洪水（18810 条/21min）；IL2CPP 不能 dlopen/直接调 RVA；后台 pthread 调 Unity API 崩溃。
+### 继承死路（lap_hook 三版演化 + 指示灯信号链 + FPSIMD，全部实机实证）
+- [X] **圈完成判定等 order 2→0 回绕** → 判定延迟 30s+，第 5 圈"消失"。必须挂 order==2 事件本身。
+- [X] **sectorOrder 按 1-based 判 ==3** → 永不命中（0-based）。
+- [X] **把 HandleSectorsTimes 当过线单次事件** → 实为圈段过线事件簇（连发数帧 13–27ms）。
+- [X] **gate v1 "champ==NULL → 放行"** → 快速正赛恒 NULL，正赛误记（Shanghai）。v2 改 NULL=挂起。
+- [X] **trackToRace 当赛道名** / **bestLapTimeInfo 当历史最佳** / **raceModes/isQuali/sessBits 当会话类型判据** → 废签/分段表/无区分力，详见 docs/LAP_HOOK_NOTES §6。
+- [X] **切片提交混入 git rename** → `git mv` 后要立即单独提交或 `git restore --staged` 分离。
+- [X] **拦截器回调浮点操作** → s0 污染毁档位，严禁（docs/MODULE_ABS_NOTES §2c）。**WITH_FPSIMD 补救也不可信**。
+- [X] ABS v1-v5 全否决（v6 饱和重映射定案）；指示灯信号链 v1-v5 全否决（拦截器定案）；proxy_shift_up 日志洪水（18810 条/21min）；IL2CPP 不能 dlopen/直调 RVA；后台 pthread 调 Unity API 崩溃——见 `.handoffs/20260831124000-handoff.md` §4。
 
 ## 5. 已知坑
-- ⚠️ **拦截器回调零浮点是长期红线** [V]——CLAUDE.md pedal_hook 条目 + docs/MODULE_ABS_NOTES §2c + 记忆。往 `abs_rf_intercept_pre` 加浮点逻辑会复发档位失效。
-- ⚠️ **lap_hook 圈完成判定挂 order==2 是红线** [V]——已写入 CLAUDE.md lap_hook 条目 + docs/LAP_HOOK_NOTES §6。改回回绕判定会重现"消失圈"。
-- ⚠️ **lap_hook 日志只许在 `order_changed || valid_changed` 边界内** [V]——HandleSectorsTimes 是事件簇，往簇内每帧加日志会洪水（参照 proxy_shift_up 18810 条教训）。
-- ⚠️ **多指污染待回传裁决** [?]（继承）——修复已给复现用户，回传后按三分支裁决（`.handoffs/20260829205358-handoff.md` §6）。
-- ⚠️ **隐藏踏板"重启后仍隐藏"= remote 配置旧值（Bug B）** [?]（继承）——无新证据，实测未复现则搁置。
-- ⚠️ **ConfigReceiver 与 15s init 竞态窗口** [?]（继承，窄窗口暂不修）。
-- ⚠️ **日志推送分片丢失** [?]（继承，用户裁决搁置）。导出为空排查经验 [V]：72 字节=游戏侧 logEnabled 未开；release 包可直读 `/sdcard/Android/data/<游戏包>/files/ala_tool*.log` 兜底。
-- ⚠️ **v6 重映射的 pulse 相位边界** [?]（继承）——pulse 帧 tempBrakeF=0 时 bp 采样可能异常，未深究。
-- ⚠️ **ABSdiag 的 0x414 死参数/0x3D4 读法/offsets_sheet 0x1A62E10 勘误** [?]（继承，未恶化不动）。
-- ⚠️ **指示灯拦截地址 0x1A7B7DC 与 lap_hook 全部 RVA 硬编码** [V]——8.0.4 专用，同受 VersionGate 门控；升级游戏版本必须重跑 Il2CppDumper + BuildSettings 场景表解析（docs/LAP_HOOK_NOTES §7 验证清单）。
-- ⚠️ **lap_hook LAPmode 诊断行与 rfHits/hitAge 诊断行** [V]——取证完成，下一版可整段移除。
-- ⚠️ **16 赛道表 12/16 条未实机跑过** [?]——表 L1 权威（BuildSettings）可信，但 MelbourneRifatta/Monza/Shangai/Monaco 之外 12 条只有静态证据。
-- ⚠️ **门禁 champ==NULL 分支的多语义风险** [?]——NULL 已实测=快速正赛；其他可能走 NULL 的会话（多人房间？）未采样，若用户报"某模式没记录/误记录"先查 champManager 挂载情况。
-- ⚠️ 曲线编辑器 QP 高频路径/pager settle 回抓/滑块 v3 快弹簧/冷启动 janky [?]（继承，未恶化不动）。
+- ⚠️ **拦截器回调零浮点是长期红线** [V]——复发即档位失效。
+- ⚠️ **圈完成判定挂 order==2 是红线** [V]——改回回绕判定重现"消失圈"。
+- ⚠️ **lap_hook 日志只许在 `order_changed || valid_changed` 边界内** [V]——事件簇路径加日志会洪水。
+- ⚠️ **多指污染待回传裁决** [?]（继承）。
+- ⚠️ **隐藏踏板 Bug B / ConfigReceiver 竞态 / 日志分片丢失** [?]（继承，搁置中）。
+- ⚠️ **指示灯拦截地址与 lap_hook 全部 RVA 硬编码** [V]——8.0.4 专用；升级游戏必须重跑 Il2CppDumper + BuildSettings 解析（docs/LAP_HOOK_NOTES §7）。
+- ⚠️ **矩阵空格** [?]——Q2/Q3（cdSess 4/5 预期值未采样）、多人房间（gv bit0）、`[sector]` 对照行未采过。挖其他模式时先补这些。
+- ⚠️ **16 赛道表 12/16 条未实机跑过** [?]（继承）。
+- ⚠️ **门禁 champ==NULL 多语义** [?]——NULL 实测=快速正赛/GF/计时赛新档；其他走 NULL 的会话未穷举，报异常先查 champManager 挂载。
+- ⚠️ 曲线编辑器 QP/pager 回抓/滑块快弹簧/冷启动 janky [?]（继承，未恶化不动）。
 
 ## 6. 下一步（有序）
-1. **等复现用户回传多指日志**（核心等待，继承）——回传后按三分支裁决。
-2. （可选）补排位赛 sessBits 样本（当前 sessBits 矩阵：正赛=1/练习=6，排位未采样）——非阻塞，sessBits 只是旁证。
-3. （可选清理）删 `NativeBridge.hidePedalsApply()` 死代码（继承）+ 移除 abs_diag_log 的 rfHits 诊断行 + lap_hook LAPmode 诊断行（取证完成）。
-4. 若用户反馈 ESC 场景制动异常 → 按 `.handoffs/20260830004912-handoff.md` §4 做通道隔离。
-5. （可选）计时赛圈速 UI 化（当前 log-only）——数据源已就绪，读模块本地 best（比游戏 absoluteFastestLap 早一个读点）。
+1. **计时赛圈速 UI 化**（当前 log-only，用户未拍板；数据源已就绪）——读模块本地 best（比游戏 absoluteFastestLap 早一个读点），模式标签可用 LAPsession 静态集 + §4a 矩阵。
+2. （可选清理）删 `NativeBridge.hidePedalsApply()` 死代码 + 移除 abs_diag_log 的 rfHits/hitAge 诊断行。lap_hook LAPsession 行保留。
+3. **若用户报 ESC 场景制动异常** → 按 `.handoffs/20260830004912-handoff.md` §4 做通道隔离。
+4. （继承）等红米用户回传多指日志，回传后按三分支裁决。
+5. （远期）其他模式判定继续挖掘——先补 §4a 空格（Q2/Q3/多人/`[sector]` 行），再挖 champManager 多语义。
 
 ## 7. 留给用户的开放问题
-- 计时赛圈速是否要 UI 化（overlay 显示当前圈/最快圈）？当前 log-only。
-- 工具按钮记忆位置无 UI 重置入口（继承）——需要单独重置手势吗？
-- TC/ABS 指示灯是否需要亮度/闪烁频率调节项？（继承，当前规格固定）
+- 计时赛圈速 UI 化形态（overlay 显示当前圈/最快圈）？暂缓中，等用户发起。
+- 工具按钮记忆位置无 UI 重置入口（继承）。
+- TC/ABS 指示灯亮度/闪烁频率调节项？（继承，规格固定中）
 - 继承：复现用户 HyperOS 版本；分片丢失修复优先级、冷启动验收标准。
