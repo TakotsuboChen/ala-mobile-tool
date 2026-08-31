@@ -137,17 +137,18 @@ GET  /v1/me                          → 个人信息卡
    赛道榜（总榜/版本榜+圈时格式化 ✓）。修复 3 bug：records 主键 NULL 约束（alltime 行 version_code=0 占位）、
    同名并发注册、Toast 双纪录维度耦合误报（version 首建缺失导致更差圈误报 alltime_server）。
 
-**S2 — 模块上传链路（实机可测）**
-1. `PaddockClient`（游戏进程内 OkHttp，独立线程；服务器地址内置默认+设置页覆盖）。
-2. lap_hook order==2 → JNI 上抛（扩展现有信号通道，native 零新 hook）。
-3. 处理响应：Toast（系统 Toast 即可，四条件取最高）+ 本地队列重传/未登录缓存 30 天。
-4. 登录/注册移动端逻辑先以最小页面（可先用普通 View/Dialog）打通。
-5. 验证：实机计时赛刷圈 → 成绩上榜 → 破纪录 Toast。
+**S2 — 模块上传链路（实机可测）** ✅（2026-08-31，`f848a3d`，代码完成+三闸通过；实机验证待设备接入）
+1. ✅ `PaddockClient`（HttpURLConnection 零新依赖，游戏进程直传；本地待传队列 30 天 TTL 上限 200；401/网络失败入队）。
+2. ✅ lap_hook order==2 → native 单槽 (gp_index,lap_ms,seq) → JNI `pollLapUpload`/`markLapUploadConsumed` → `PaddockUploader` 1Hz 主线程轮询。**零新 hook**，沿用 intro/TcAbs 轮询惯例。
+3. ✅ 响应处理：Toast 四条件取最高（服务端判定文案直达）+ 未登录自动入队。
+4. ✅ 登录/注册 API 客户端已就绪（S3 的围场页直接消费）。
+5. ⬜ 实机验证：计时赛刷圈 → 成绩上榜 → 破纪录 Toast（等设备）。
 
 **S3 — 围场 UI（完整体验）**
-1. 底栏"围场"页（配置与设置之间）：个人信息卡（头像+用户名+积分）。
-2. 排行榜子页：积分总榜/版本筛选、赛道榜（16 赛道选择 + 版本筛选）。
-3. 登录/注册页正式 miuix 化：通行证核验流程、复制弹窗、"我已校验"、头像上传+裁剪（vanniktech/android-image-cropper 4.6.0）。
+1. ✅ 底栏"围场"页（配置与设置之间，页 2）：通行证核验（登录/注册两步流：申请码→复制→发群→贴码 verify 自动登录）；已登录显示用户名卡+退出。方格旗图标自绘 ChequeredFlagIcon（`acc9970`）。
+2. ✅ 排行榜子页（`e47e15f`）： Route.Paddock 二级导航；积分榜/赛道榜 tab + 16 赛道中文名 spinner + 版本筛选（总榜/8.0.4）；数据 PaddockClient.fetchPointsBoard/fetchTrackBoard。
+3. ⬜ 头像上传+裁剪（vanniktech/android-image-cropper 4.6.0）——依赖 Garage 对象存储通路（S4 一并）。
+- 服务器地址覆盖 UI + 游戏进程读取链路：TODO（当前 PaddockClient 用内置默认占位域名，部署后替换并接 ModConfig）。
 
 **S4 — CAMDA bot**
 1. webhook 回调处理器（并入 axum，Ed25519 签名校验）+ 全量群消息三处配置核对。
