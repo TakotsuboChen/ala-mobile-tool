@@ -1,78 +1,73 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-08-31T12:45:00+08:00 · Git HEAD: `9227460`
+生成时间: 2026-08-31T17:10:00+08:00 · Git HEAD: `9a8be24`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: `main` @ `9227460` (2026-08-31)
-- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `9227460`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA；不一致以 git 实际输出为准
+- 锚点: `main` @ `9a8be24` (2026-08-31)
+- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `9a8be24`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA；不一致以 git 实际输出为准
 - 待重探的 [?]: 见下方标记
-- 先读: `docs/LAP_HOOK_NOTES.md`（含 §4a 九会话模式矩阵——本轮核心产出）+ `docs/TRACK_IDENTIFICATION.md`（16 赛道表）
+- 先读: `docs/PADDOCK_PLAN.md`（围场私服第 1 期唯一契约源，两仓共用）+ `docs/LAP_HOOK_NOTES.md`（§4a 矩阵）
 
 ## 1. 当前目标
-**用户定案（2026-08-31）：当前只做计时赛有效圈速，其他模式判定以后要继续挖但暂缓**——门禁已 9/9 全模式实测正确，功能处于"稳定收尾"态。数据源全就绪，剩余方向：计时赛圈速 UI 化（可选）与模式挖掘（远期）。
+**围场私服第 1 期（圈速排行榜）**：S1 后端 / S2 模块上传 / S3 围场 UI 三个切片代码全部完成并推送；用户定案"全过程做好再测，然后有问题再针对性修"——即先完成剩余 S4（CAMDA bot）与部署，再做一次端到端实测，按实测结果针对性修。完成定义：实机计时赛刷圈 → 成绩上榜 → 赛道中文名 Toast。
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **lap_hook 功能闭环**（`0596207`）：hook `LLV.Awake`(0x199DE28) + `HandleSectorsTimes`(0x1A0A1C4)；圈完成挂 order==2 即时判定；validLap 采信游戏原生位；会话最快有效圈本地维护。
-- [V] **模式门禁 v2 实测 9/9 全对，代码零改动**：champManager→isTimeAttack 硬判 + champ==NULL=挂起。本轮全枚举采样（生涯澳 FP1/2/3/Q1/正赛 → 比赛周上海正赛 → 计时赛巴林 → 快速比赛伊莫拉 → GF 西班牙）全部门禁行为正确——计时赛记录 ✓，其余 8 场挂起 ✓。
-- [V] **模式信号全枚举矩阵落定**（`bd85c17`，docs/LAP_HOOK_NOTES §4a）：`LAPsession[awake]` 诊断行（LLV.Awake 场景加载即打，进赛道无需驾驶）11 信号；关键发现：生涯正赛 sessBits=4 vs 比赛周正赛 sessBits=1（两条置位路径）、cdSess 节次枚举 0-3=FP1-Q1/6=正赛、GF=`GlobalVariables.isGrandFestival` 专用位、fullQuali=周末级属性、raceModes 全场景=0 确认无区分力。
-- [V] **持久文档补共存版双包名**（`9227460`）：CLAUDE.md Overview 官版 `com.Vince.AlamobileFormula` + 共存版 `com.Takotsubo.AlamobileFormula` + 两包日志拉取路径。README 201 行原本已覆盖，未动。
-- [V] **构建**：`./gradlew :app:assembleDebug :app:assembleRelease` → BUILD SUCCESSFUL，EXIT=0。实机已装 release（共存版设备），9 会话采样就是它跑出来的。
-- 工作区: 干净，`main` 与 origin 同步（`bd85c17` 工作 / `9227460` 持久文档 / 本次 handoff 提交）。
-- 继承 [?]：多指污染修复等红米用户日志回传；Bug B 未复现未修。
+- [V] **S1 paddock 后端全部完成**（`8fcd44a`，paddock 仓）：axum 单二进制（/v1 API + /admin 管理端 SSR）+ 8 表 migration + Docker 四容器；curl 全链路实测：注册（含 409/400 校验）→ psql 代绑 → verify → 传圈六用例（Toast 四条件全对）→ 积分榜（#1=100/#2=1，版本隔离）→ 删圈重算回放正确 + 管理端登录/代绑/删圈实测。
+- [V] **S2 模块上传链路**（模块仓 `f848a3d`）：lap_hook order==2 边界写单槽 → JNI `pollLapUpload/markLapUploadConsumed` → `PaddockUploader` 1Hz 轮询 → `PaddockClient` HTTPS 直传；待传队列 30 天 TTL；native **零新 hook**。
+- [V] **S3 围场 UI**（`acc9970` + `e47e15f`）：第 4 页 pager + 方格旗自绘 icon；登录/注册两步流（围场页）；排行榜二级页（积分/赛道 tab × 16 赛道中文名 × 版本筛选）；Route.Paddock 导航。
+- [V] **构建门禁**：`./gradlew :app:assembleDebug :app:lint :app:assembleRelease` → 3× BUILD SUCCESSFUL，EXIT=0（本 handoff 前完整重跑）。lint 0 errors（48 warnings 为历史 baseline 内）。
+- [V] 本仓 `main` @ `9a8be24` 与 origin 同步、工作区干净；paddock 仓 `main` @ `8fcd44a` 同步、干净。
 
 ### 测试/build 输出（本次交接 run 的真实输出，含退出码）
 ```
-./gradlew :app:assembleDebug :app:assembleRelease → BUILD SUCCESSFUL，EXIT=0
-盲判测试：9 条 LAPsession[awake] 盲判 6.5/9，错的 2 条反哺矩阵（正赛指纹分裂发现）
-git push → bd85c17（工作）+ 9227460（持久文档）main，成功
+./gradlew :app:assembleDebug :app:lint :app:assembleRelease → 3× BUILD SUCCESSFUL，EXIT=0
+git push → 9a8be24（CLAUDE.md）main，成功；paddock 仓最后推送 8fcd44a
 ```
 
 ## 3. 决策与理由
-- **其他模式判定降为远期，现阶段只做计时赛** [V]（用户定案 2026-08-31）——v2 门禁已 9/9 全对，继续挖无行为收益；矩阵空格（Q2/Q3/多人）只影响未来 UI 的模式标签完整度。
-- **LAPsession 诊断行保留不删** [V]——它是 UI 化的模式标签信号源；与 rfHits/hitAge（可删）区分处置。
-- **诊断行挂 LLV.Awake 而非圈完成事件** [V]——模式信号进赛道时已定死；用户采样成本从"跑完整圈"压到"进赛道即退"。双门控（awake 必打 + sector 可选对照互补）。
-- 继承：圈完成挂 order==2、validLap 采信原生位、champ==NULL=挂起、赛道身份=buildIndex、文档三分工、拦截器零浮点——见 `.handoffs/20260831124000-handoff.md` §3。
-- 继承：实机测试默认 release 构建后**立即 adb install 装机**（一条链跑完，adb 找不到设备才问）——记忆 device-test-release-build，2026-08-31 事故加固。
+- **围场 = 私服第一步，只做计时赛有效圈**（用户 2026-08-31 定案）——S1(后端)→S2(上传)→S3(UI)→S4(bot) 切片顺序执行中，S1-S3 代码完成。
+- **防伪全放行**（用户推翻早期"合理性检查"选择）：登录态是唯一门槛，成绩管理靠服务端删圈重算（已实测）。客户端 4xx 参数错丢弃、401/网络错误入队，与此精确对齐。
+- **native→Java 用 1Hz 轮询单槽而非 JNI 回调**——沿用 intro/TcAbs 指示灯已验证惯例；圈完成分钟级一遇，轮询成本可忽略；native 回调 Java 需 AttachCurrentThread 复杂度不成比例。否决：JNI 向上回调。
+- **单槽消费语义**：uploadLap 无论成败都 markConsumed——成功数据在服务端、失败在本地队列文件，单槽不留。seq 单调去重防双读。
+- **records.alltime 行 version_code=0 占位**（复合主键列隐式 NOT NULL）；删圈重算持有者=最快圈主人（非 min(user_id)，DISTINCT ON 语义用 ORDER BY lap_ms LIMIT 1 实现）。
+- **miuix 组件红线**：TextField 用 TextFieldValue 重载（新版主签名是 TextFieldState，勿混）；无 SuperArrow（是 ArrowPreference）；Text fontSize 是 sp 非 dp；askama 表达式字面量用双引号。
+- 继承：圈完成挂 order==2、拦截器零浮点、日志只在边界分支、场景名拼写照抄（`Shangai` 单 a）、实机默认 release 一条链（本次 adb 无设备未装）。
 
 ## 4. 失败的尝试 — 不要再试
 > 全部前向搬运，永不丢弃。完整历史见 `.handoffs/` 目录 + docs/LAP_HOOK_NOTES.md §6。
 
-### 本轮新增
-- [X] **只构建不装机就交采样清单** → 用户按清单白跑一轮（10 次进赛道全空转，设备上是旧版）。装机是取证链路第一环，`assembleRelease` 后必须立即 `adb install -r`。
-- [X] **凭静态指纹盲判模式** → 9 场判对 6.5 场：生涯正赛 sessBits=4 ≠ 比赛周正赛 sessBits=1，"正赛有唯一指纹"假设被实测证伪。判定模式必须查 §4a 矩阵，勿按字段名字面义推断。
+### 本轮新增（后端实测揪出）
+- [X] **records 复合主键列放可 NULL 维度** → Postgres 主键列隐式 NOT NULL，alltime 行插不进。改 alltime 行 version_code=0 占位，kind 列做真正区分。
+- [X] **Toast 两纪录维度共用 if/else 出口** → 首圈只建 alltime 行，第二圈更差圈被误判"版本首建"误报 version_server。两维度必须独立判定独立 upsert。
+- [X] **同名并发注册不拦** → 同名双 pending 同时在途。pending_regs 锁存 username + 在途 409 + verify 校验一致（顺带堵换名骗码）。
+- [X] **sqlx `migrate!("migrations")` 相对路径 / `query_as!` 宏离线编译** → 退运行时形态：`sqlx::migrate!()` + `query_as::<_,T>` + FromRow。FromRow 查询 SELECT 必须含全部字段（缺列报 "no column found"）。
+- [X] **askama 模板单引号字符串 / 嵌套 content 不加 |safe** → 表达式字面量要双引号；嵌套变量输出默认 HTML 转义。
+- [X] **axum `nest("/admin")` + route("/") 对 `/admin/`（带斜杠）404** → `/admin` 无斜杠正常；未深究，绕过。
+- [X] **askama 0.14 / miuix 无 SuperArrow**（KernelSU 记忆里的组件名）→ miuix 0.14.x 叫 `ArrowPreference`；查 references/miuix 本地源码为准。
+- [X] **miuix TextField 新版主签名是 TextFieldState** → 但保留 TextFieldValue 重载；UI 层持 TextFieldValue state、onValueChange 同步 ViewModel String。
+- [X] **Write 工具输出污染**（本轮两次：PaddockClient drainQueue 塞入大量垃圾 token）→ 定位后 python 按行精准修复。大文件生成后先 grep 抽查污染再继续。
+- [X] **axum 0.8 积分 SQL 里 `?` 接线后 `min(user_id)` 重算语义** → 删圈重算持有者不能 min(user_id)（拿到的可能是慢圈车主），必须 `ORDER BY lap_ms ASC, created_at ASC LIMIT 1` 取最快圈主人。
 
-### 继承死路（lap_hook 三版演化 + 指示灯信号链 + FPSIMD，全部实机实证）
-- [X] **圈完成判定等 order 2→0 回绕** → 判定延迟 30s+，第 5 圈"消失"。必须挂 order==2 事件本身。
-- [X] **sectorOrder 按 1-based 判 ==3** → 永不命中（0-based）。
-- [X] **把 HandleSectorsTimes 当过线单次事件** → 实为圈段过线事件簇（连发数帧 13–27ms）。
-- [X] **gate v1 "champ==NULL → 放行"** → 快速正赛恒 NULL，正赛误记（Shanghai）。v2 改 NULL=挂起。
-- [X] **trackToRace 当赛道名** / **bestLapTimeInfo 当历史最佳** / **raceModes/isQuali/sessBits 当会话类型判据** → 废签/分段表/无区分力，详见 docs/LAP_HOOK_NOTES §6。
-- [X] **切片提交混入 git rename** → `git mv` 后要立即单独提交或 `git restore --staged` 分离。
-- [X] **拦截器回调浮点操作** → s0 污染毁档位，严禁（docs/MODULE_ABS_NOTES §2c）。**WITH_FPSIMD 补救也不可信**。
-- [X] ABS v1-v5 全否决（v6 饱和重映射定案）；指示灯信号链 v1-v5 全否决（拦截器定案）；proxy_shift_up 日志洪水（18810 条/21min）；IL2CPP 不能 dlopen/直调 RVA；后台 pthread 调 Unity API 崩溃——见 `.handoffs/20260831124000-handoff.md` §4。
+### 继承死路（lap_hook 三版演化 + 指示灯信号链 + FPSIMD，全部实机实证，详见 .handoffs/20260831170000-handoff.md §4）
+- [X] 圈完成等 order 2→0 回绕 / sectorOrder 1-based / HandleSectorsTimes 当过线单事件 / gate v1 "champ==NULL→放行" / trackToRace 当赛道名 / bestLapTimeInfo 当历史最佳 / raceModes 当判据 / 切片提交混 git rename / 拦截器浮点操作 / ABS v1-v5 / 指示灯 v1-v5 / proxy_shift 日志洪水 / IL2CPP dlopen / 后台线程调 Unity API——全部前向有效，勿重试。
 
 ## 5. 已知坑
-- ⚠️ **拦截器回调零浮点是长期红线** [V]——复发即档位失效。
-- ⚠️ **圈完成判定挂 order==2 是红线** [V]——改回回绕判定重现"消失圈"。
-- ⚠️ **lap_hook 日志只许在 `order_changed || valid_changed` 边界内** [V]——事件簇路径加日志会洪水。
-- ⚠️ **多指污染待回传裁决** [?]（继承）。
-- ⚠️ **隐藏踏板 Bug B / ConfigReceiver 竞态 / 日志分片丢失** [?]（继承，搁置中）。
-- ⚠️ **指示灯拦截地址与 lap_hook 全部 RVA 硬编码** [V]——8.0.4 专用；升级游戏必须重跑 Il2CppDumper + BuildSettings 解析（docs/LAP_HOOK_NOTES §7）。
-- ⚠️ **矩阵空格** [?]——Q2/Q3（cdSess 4/5 预期值未采样）、多人房间（gv bit0）、`[sector]` 对照行未采过。挖其他模式时先补这些。
-- ⚠️ **16 赛道表 12/16 条未实机跑过** [?]（继承）。
-- ⚠️ **门禁 champ==NULL 多语义** [?]——NULL 实测=快速正赛/GF/计时赛新档；其他走 NULL 的会话未穷举，报异常先查 champManager 挂载。
-- ⚠️ 曲线编辑器 QP/pager 回抓/滑块快弹簧/冷启动 janky [?]（继承，未恶化不动）。
+- ⚠️ **拦截器回调零浮点 / order==2 判定 / 边界日志三项红线** [V]（继承，长期有效）。
+- ⚠️ **服务端 track_display_name 与模块端 LeaderboardScreen 赛道中文名是两份硬编码拷贝** [V]——契约源 PADDOCK_PLAN §5，加赛道（8.0.5+）必须两侧同改；`Shangai` 单 a。
+- ⚠️ **PaddockClient DEFAULT_SERVER 是占位域名** `https://paddock.example.com` [V]——VPS 部署后必须替换 + 服务器地址覆盖接 ModConfig（S3 遗留 TODO）。
+- ⚠️ **QQ webhook Ed25519 签名细节 / member_openid 退群语义** [?]（S4 实现时核对官方文档）。
+- ⚠️ 继承 [?]：多指污染修复等红米日志回传；Bug B 未复现；16 赛道表 12/16 未实机；门禁 champ==NULL 多语义；矩阵空格（Q2/Q3/多人）。
+- ⚠️ 继承死路：曲线编辑器 QP/pager 回抓等——见 `.handoffs/20260831170000-handoff.md` §4/§5（本会话未恶化未动）。
 
 ## 6. 下一步（有序）
-1. **计时赛圈速 UI 化**（当前 log-only，用户未拍板；数据源已就绪）——读模块本地 best（比游戏 absoluteFastestLap 早一个读点），模式标签可用 LAPsession 静态集 + §4a 矩阵。
-2. （可选清理）删 `NativeBridge.hidePedalsApply()` 死代码 + 移除 abs_diag_log 的 rfHits/hitAge 诊断行。lap_hook LAPsession 行保留。
-3. **若用户报 ESC 场景制动异常** → 按 `.handoffs/20260830004912-handoff.md` §4 做通道隔离。
-4. （继承）等红米用户回传多指日志，回传后按三分支裁决。
-5. （远期）其他模式判定继续挖掘——先补 §4a 空格（Q2/Q3/多人/`[sector]` 行），再挖 champManager 多语义。
+1. **VPS 部署 paddock**（compose 栈就绪：app/pg/garage/caddy）→ 换 PaddockClient 真实域名 → 服务器地址覆盖接 ModConfig + 设置页 UI。
+2. **S4 CAMDA bot**：webhook 处理器（Ed25519 验签）+ 校验码监听→绑 member_openid→被动回复 + 重置密码码。依赖 VPS 公网 HTTPS + 开放平台回调三处配置（见 PADDOCK_PLAN §4a 调研结论）。
+3. **实机端到端验证**（用户定案：全过程做好再测）：装机 release → 围场页注册（走管理端代绑或 bot）→ 计时赛刷圈 → 成绩上榜 + Toast → 有问题针对性修。
+4. （可选清理）删 `hidePedalsApply()` 死代码 + abs_diag_log rfHits/hitAge 行。
+5. （远期）围场头像上传+裁剪；矩阵空格补采（Q2/Q3/多人）。
 
 ## 7. 留给用户的开放问题
-- 计时赛圈速 UI 化形态（overlay 显示当前圈/最快圈）？暂缓中，等用户发起。
-- 工具按钮记忆位置无 UI 重置入口（继承）。
-- TC/ABS 指示灯亮度/闪烁频率调节项？（继承，规格固定中）
-- 继承：复现用户 HyperOS 版本；分片丢失修复优先级、冷启动验收标准。
+- VPS 与域名何时到位（S4 bot 与真实域名替换的前置）。
+- 头像裁剪上传优先级（可推迟到榜单功能验证后）。
+- 继承：多指日志回传裁决、工具按钮重置入口、指示灯亮度调节等（未恶化不动）。
