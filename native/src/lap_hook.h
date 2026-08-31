@@ -22,6 +22,13 @@ typedef struct {
 
 bool lap_install_hooks(const lap_hook_config_t *config);
 
+// ── 围场上传通道（S2）──
+// 轮询取走未消费的有效圈事件（order==2 边界写入的单槽缓冲）。
+// 返回 true 时 *out_gp_index∈[0,15]、*out_lap_ms 为完整圈毫秒；
+// Java 消费成功后调 lap_mark_upload_consumed()。lap_seq 用于去重（单调递增）。
+bool lap_poll_upload(int32_t *out_lap_seq, int32_t *out_gp_index, int32_t *out_lap_ms);
+void lap_mark_upload_consumed(int32_t lap_seq);
+
 #ifdef __cplusplus
 }
 #endif

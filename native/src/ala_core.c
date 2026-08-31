@@ -250,6 +250,37 @@ Java_tools_alamobile_mod_NativeBridge_initLap(JNIEnv *env, jclass clazz,
     }
 }
 
+// ── 围场上传通道（S2）：Java 1Hz 轮询取走 order==2 有效圈事件 ──
+// 返回 true 时 outLapSeq 去重用、outGpIndex∈[0,15]、outLapMs 毫秒。
+JNIEXPORT jboolean JNICALL
+Java_tools_alamobile_mod_NativeBridge_pollLapUpload(JNIEnv *env, jclass clazz,
+                                                    jintArray outLapSeq,
+                                                    jintArray outGpIndex,
+                                                    jintArray outLapMs) {
+    (void) clazz;
+    if (env == NULL || outLapSeq == NULL || outGpIndex == NULL || outLapMs == NULL)
+        return JNI_FALSE;
+    jint buf[3];
+    int32_t seq = 0, gp = 0, ms = 0;
+    if (!lap_poll_upload(&seq, &gp, &ms)) return JNI_FALSE;
+    buf[0] = (jint) seq;
+    buf[1] = (jint) gp;
+    buf[2] = (jint) ms;
+    // 三个单元素数组写入（Java 侧 new 出来的，此处必非 NULL——NULL 已在前面拦截）
+    (*env)->SetIntArrayRegion(env, outLapSeq, 0, 1, &buf[0]);
+    (*env)->SetIntArrayRegion(env, outGpIndex, 0, 1, &buf[1]);
+    (*env)->SetIntArrayRegion(env, outLapMs, 0, 1, &buf[2]);
+    return JNI_TRUE;
+}
+
+// Java 侧消费成功后确认（native 置 consumed，防重复上传）。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_markLapUploadConsumed(JNIEnv *env, jclass clazz, jint lapSeq) {
+    (void) env;
+    (void) clazz;
+    lap_mark_upload_consumed((int32_t) lapSeq);
+}
+
 JNIEXPORT void JNICALL
 Java_tools_alamobile_mod_NativeBridge_setThrottle(JNIEnv *env, jclass clazz, jfloat value) {
     (void) env;

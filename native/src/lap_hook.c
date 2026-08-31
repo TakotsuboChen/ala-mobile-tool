@@ -109,6 +109,17 @@ static volatile float g_best_valid_lap = 0.0f;
 static int g_last_order = -1;
 static int g_last_valid = -1;
 static char g_track_name[64] = "?";              // 最近一次读到的 trackToRace（ASCII 摘录）
+static volatile int32_t g_current_gp_index = -1; // LAPscene 探测结果（0..15，-1=未知）
+
+// ── 围场上传单槽缓冲 ──
+// order==2 有效圈边界写入 (gp_index, lap_ms)；Java 层 1Hz 轮询 pollLapUpload()
+// 取走。单槽 + seq 校验：写侧只进（seq 递增），读侧消费后置 consumed；
+// 圈完成分钟级一遇，丢槽概率可忽略（轮询窗口 1s vs 事件间隔 30s+）。
+// version_code 由 Java 层自填（native 不读游戏版本——VersionGate 已在 Java 判定）。
+static volatile int32_t g_upload_seq = 0;        // 事件序号（0=无待传）
+static volatile int32_t g_upload_gp = -1;
+static volatile int32_t g_upload_lap_ms = 0;
+static volatile int32_t g_upload_consumed_seq = 0;  // Java 已消费到的 seq
 
 static void *g_llv_awake_stub = NULL;
 static void *g_llv_awake_orig = NULL;
@@ -448,6 +459,8 @@ static void probe_track_identity(void) {
                      ? *(int32_t *) ((uintptr_t) boxed + 0x10) : -1;
 
     LOGI("LAPscene: scene='%s' buildIndex=%d gpIndex=%d", scene, build_index, gp_idx);
+    // 记录当前赛道身份供上传链取用（gpIndex 0..15 有效；-1 = 探测失败不上传）
+    g_current_gp_index = (gp_idx >= 0 && gp_idx <= 15) ? (int32_t) gp_idx : -1;
     // probe 成功后 g_track_name 升级为 Unity 场景名（权威赛道身份，
     // 见 docs/TRACK_IDENTIFICATION.md）——LAPini/LAPbest/LAPdone 等行从此带真名。
     if (scene[0] != '\0' && strcmp(scene, "?") != 0) {
@@ -642,6 +655,17 @@ static void proxy_odometer_handle_sectors_times(void *this, int sector_order,
                 LOGI("LAPdone: valid lap %s (session best %s, track='%s')",
                      now_buf, prev_buf, g_track_name);
             }
+            // ── 围场上传通道：有效圈（无论是否破会话纪录）都抛给 Java 层 ──
+            // 定案「每有效圈都上传」。gp_index 未知（探测失败）时不上传。
+            // 定案：无物理阈值拒收（全放行）——validLap 位是唯一有效性门槛。
+            if (g_current_gp_index >= 0) {
+                int32_t ms = (int32_t) (total_lap_time * 1000.0f + 0.5f);
+                g_upload_gp = g_current_gp_index;
+                g_upload_lap_ms = ms;
+                g_upload_seq++;   // volatile 递增单写者（主线程）——发布序：先写数据后写 seq
+            } else {
+                LOGI("LAPup: skip upload (gp_index unknown)");
+            }
         } else {
             char inv_buf[16];
             fmt_lap_time(total_lap_time, inv_buf, sizeof(inv_buf));
@@ -746,4 +770,23 @@ bool lap_install_hooks(const lap_hook_config_t *config) {
         LOGI("lap_hook: all hooks installed (log-only, no gameplay writes)");
     }
     return ok;
+}
+// ═══════════════════════════════════════════════════════════════════════════
+// 围场上传通道（Java 轮询出口）
+// ═══════════════════════════════════════════════════════════════════════════
+// 有未消费的有效圈事件时返回 true 并填充出参（gpIndex 0..15 / lapMs 毫秒），
+// Java 侧随后调 lapUploadMarkConsumed() 确认消费。单槽语义：同一时刻最多
+// 一个待传圈；Java 1Hz 轮询 + 事件分钟级间隔 ⇒ 实践中不会覆盖。
+bool lap_poll_upload(int32_t *out_lap_seq, int32_t *out_gp_index, int32_t *out_lap_ms) {
+    if (out_lap_seq == NULL || out_gp_index == NULL || out_lap_ms == NULL) return false;
+    int32_t seq = g_upload_seq;
+    if (seq == 0 || seq == g_upload_consumed_seq) return false;  // 无新事件
+    *out_lap_seq = seq;
+    *out_gp_index = g_upload_gp;
+    *out_lap_ms = g_upload_lap_ms;
+    return true;
+}
+
+void lap_mark_upload_consumed(int32_t lap_seq) {
+    if (lap_seq > g_upload_consumed_seq) g_upload_consumed_seq = lap_seq;
 }

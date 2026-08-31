@@ -278,6 +278,19 @@ object NativeBridge {
         odometerHandlerHandleSectorsTimes: Long
     )
 
+    /**
+     * 围场上传通道（S2）：轮询取走 order==2 有效圈事件（单槽，见 lap_hook.c）。
+     * 有未消费事件返回 true，outLapSeq 去重用（单调递增）、
+     * outGpIndex∈[0,15]、outLapMs=完整圈毫秒。消费成功后调
+     * [markLapUploadConsumed]。
+     */
+    @JvmStatic
+    external fun pollLapUpload(outLapSeq: IntArray, outGpIndex: IntArray, outLapMs: IntArray): Boolean
+
+    /** native 单槽消费确认（与 [pollLapUpload] 配对）。 */
+    @JvmStatic
+    external fun markLapUploadConsumed(lapSeq: Int)
+
     @JvmStatic
     external fun setThrottle(value: Float)
 
