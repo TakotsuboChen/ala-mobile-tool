@@ -130,7 +130,7 @@ GET  /v1/me                          → 个人信息卡
 2. ✅ 数据模型 migration（users/sessions/pending_regs/laps/best_laps/records）+ Argon2id 哈希。
 3. ✅ auth API：register-request / register-verify / login（reset-by-code 留 S4）；register-verify 已实现 bot 校验绑定路径，S1 过渡期靠管理端代绑（管理端未建前可 psql 手工 UPDATE pending_regs）。
 4. ✅ laps 上报（服务端 Toast 四条件判定事务）+ leaderboard（积分总榜/版本榜 + 赛道榜）。
-5. ⬜ 管理端 SSR：管理员账号、bot AppID/Secret、存储路径配置、用户与成绩管理（删除作弊成绩）。
+5. ✅ 管理端 SSR（2026-08-31，`8fcd44a`）：askama 4 页 + cookie 会话 + 环境变量播种管理员；**代绑 openid 闭环实测通过**（页面粘贴 → 409/400 校验 → verify 建号）；删圈同事务回放 laps 重算 best_laps/records + 审计留痕，实测 90000→92000 回放正确。bot AppID/Secret 与存储方式配置项随 S4/S3 再补。
 6. ✅ 验证：临时 Postgres 容器 + 本机 cargo run → curl 全链路（2026-08-31 实测通过）：
    注册申请（同名在途 409 / 非法名 400 / 换名骗码 400）→ psql 代绑 → verify 建号（reg_seq 1/2）→
    登录（错误密码 401）→ 传圈六用例（Toast 四条件全部正确）→ 积分总榜/版本榜（#1=100/#2=1，版本隔离 ✓）→
