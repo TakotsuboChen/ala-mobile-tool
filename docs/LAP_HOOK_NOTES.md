@@ -53,27 +53,74 @@ probe（无 hook）LAPscene：SceneManagerHelper.get_ActiveSceneName /
 | `LAPbest` | 过圈且有效且刷新会话最佳 | **当前最快有效圈速** |
 | `LAPdone` | 过圈且有效未破纪录 | 圈时 + 会话最佳 |
 | `LAPinv` | 过圈但无效 | 圈时（切弯圈也有完整时间） |
-| `LAPgate` | 非计时赛会话首事件 | 挂起提示（每会话一次） |
-| `LAPmode` | 挂起态的圈完成事件 | 六信号诊断行（终版 gate 取证材料） |
+| `LAPgate` | 非计时赛会话首个圈段事件 | 挂起提示（每会话一次） |
+| `LAPsession[awake]` | LLV.Awake（场景加载瞬间） | 模式信号全集（静态集，进赛道即打，无需驾驶） |
+| `LAPsession[sector]` | 会话首个圈段事件 | 同上 + odometer 链真实值（champ/isQuali），对照补全 |
 
 ## 4. 模式门禁（终版）
 
 **需求定案（用户，2026-08-31）**：只记计时赛，其他会话一律不记。
 **主信号**：`odometerHandler.champManager (0x4D8)` → `ChampionshipManager.isTimeAttack (0x20)`。
 
-| 会话类型 | champManager | isTimeAttack | sessBits | 结果 |
-|---|---|---|---|---|
-| 计时赛 | 非 NULL | **1** | 未采样 | 记录 ✓ [V] |
-| 比赛周第三节自由练习 | 非 NULL | **0** | 6 (fp=1,timed=1) | 挂起 ✓ [V] |
-| 快速模式正赛 | **NULL** | 未知 | 1 (race=1) | 挂起（NULL 分支）✓ [V] |
-| 排位 | [?] | [?] | [?] | 按 ta=0/NULL 挂起（未实测） |
+| 会话类型 | champManager | isTimeAttack | 结果 |
+|---|---|---|---|
+| 计时赛 | 非 NULL | **1** | 记录 ✓ [V] |
+| 比赛周第三节自由练习 | 非 NULL | **0** | 挂起 ✓ [V] |
+| 快速模式正赛 | **NULL** | 未知 | 挂起（NULL 分支）✓ [V] |
 
 - v1 死路：`champ==NULL → 放行`——快速正赛 champManager 恒 NULL，正赛圈被误记
   （Shanghai 1:38.354 事件）。v2 改"NULL = 模式未知 = 挂起"，三路径全堵。
-- 排除信号：`raceModes`（正赛/练习均 0，无区分力）；`isQuali`（练习赛也为 1，
-  语义是"非正赛圈速 UI 状态"而非排位）；`sessBits` 降级旁证（`timedSession`
-  在排位/练习为 1，与"计时赛"字面义相反，勿当主判据）。
 - 切回计时赛时自动清最佳圈 + 重探赛道（`g_mode_gated` 复位路径），模式间数据零串写。
+
+### 4a. 模式信号全枚举矩阵（2026-08-31 实机 9 会话采样，全 [V]）
+
+采样方式：`LAPsession[awake]` 诊断行（hook LLV.Awake，场景加载瞬间单发；
+每模式**进赛道即退，无需驾驶**）。采样行程：生涯澳大利亚
+FP1/FP2/FP3/Q1（无成绩未进 Q2/Q3）/正赛 → 比赛周上海正赛 → 计时赛巴林 →
+快速比赛伊莫拉 → GRAND FESTIVAL 西班牙。
+
+位定义：`sessBits` = IRDSStatistics 静态三布尔
+（bit0=isRaceSession / bit1=isFreePracticeSession / bit2=timedSession）；
+`gvBits` = GlobalVariables 静态三位
+（bit0=isMultiplayerMatch / bit1=isRace / bit2=isGrandFestival）；
+cd* = `GlobalVariables.championshipData` 实例字段。
+
+| # | 会话 | sessBits | gvBits | cdSess | cdRound | cdTrack | fullQuali |
+|---|---|---|---|---|---|---|---|
+| 1 | 生涯·澳大利亚 FP1 | 0 | 0 | 0 | 0 | 0 | 1 |
+| 2 | 生涯·澳大利亚 FP2 | 6 | 0 | 1 | 0 | 0 | 1 |
+| 3 | 生涯·澳大利亚 FP3 | 6 | 0 | 2 | 0 | 0 | 1 |
+| 4 | 生涯·澳大利亚 Q1 | 6 | 0 | 3 | 0 | 0 | 1 |
+| 5 | 生涯·澳大利亚**正赛** | **4** | 2 | 6 | 0 | 0 | 1 |
+| 6 | 比赛周·上海**正赛** | **1** | 2 | 6 | 0 | 1 | 0 |
+| 7 | 快速比赛（伊莫拉） | 1 | 0 | 0* | 0 | 0 | 0 |
+| 8 | 计时赛（巴林） | 0 | 2 | 0* | 0 | 0 | 0 |
+| 9 | GRAND FESTIVAL（西班牙） | 1 | **2**(bit2=GF) | 0* | 0 | 0 | 0 |
+
+\* 全零 champData 实例——快速类模式挂一个空 ChampionshipData，非 NULL。
+
+**实测裁决**：
+
+- **节次枚举（cdSess）**：0/1/2/3 = FP1/FP2/FP3/Q1，6 = 正赛（两个正赛样本
+  独立证实）。Q2/Q3 预期 4/5（未采样，[?]）。
+- **正赛指纹分裂**（重要）：生涯正赛走 `timedSession` 置位路径（sessBits=4），
+  比赛周正赛走 `isRaceSession` 路径（sessBits=1）——**两条代码路径，勿把
+  任一单独指纹当"正赛"判据**。
+- **fullQuali 是周末级属性**：生涯澳大利亚站=1（全程排位制 Q1/Q2/Q3），
+  比赛周上海=0（短排位）。非生涯全局设置。
+- **GF 专用位**：`GlobalVariables.isGrandFestival`（gv bit2）一击命中，
+  GF 判定首选信号。
+- **计时赛负指纹**：sessBits=0（IRDS 三位全零）+ gvBits=2（isRace 亮）+
+  champData 新建档全零。计时赛不占 IRDS 会话位——主判据仍只有
+  champManager.isTimeAttack。
+- **raceModes 全场景=0**（含正赛），确认无区分力，维持排除。
+- 门禁回归：9 会话在 v2 门禁（ta 硬判 + NULL=挂起）下行为全部正确——
+  计时赛记录 ✓，其余 8 场（练习×3、排位、生涯正赛、比赛周正赛、快速比赛、
+  GF）全挂起 ✓，零误记。
+
+**未采样空格**：Q2/Q3（cdSess 4/5 待证）、多人房间（gv bit0 挂起实测缺）、
+排位第二节起 fp 位是否回落 [?]。`LAPsession[sector]` 对照行（带
+champ/isQuali 真实值）尚未采过——下次进赛道过一次 S1 线即补全。
 
 ## 5. 赛道识别
 
@@ -103,4 +150,4 @@ metadata 字面量 L2 + 实机 LAPscene L3 交叉，4/16 已实测全部吻合�
    `+0xC2DC`/`+0xD598` 无全局规律，须逐方法核对）。
 2. 重解 `data.unity3d` BuildSettings 场景表（UnityPy）核对 16 场景 buildIndex。
 3. 实机跑计时赛一圈：`LAPscene`/`LAPbest` 正常 + `track` 为场景真名。
-4. 实机跑一场快速正赛：只出现 `LAPgate`/`LAPmode`，无圈速行。
+4. 实机跑一场快速正赛：只出现 `LAPgate`/`LAPsession`，无圈速行。

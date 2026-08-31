@@ -207,6 +207,13 @@ static il2cpp_field_static_get_value_t   g_field_static_get_value;
 static void *g_f_race = NULL;    // isRaceSession
 static void *g_f_fp = NULL;      // isFreePracticeSession
 static void *g_f_timed = NULL;   // timedSession
+// GlobalVariables（游戏全局模式身份证，dump.cs:37457-37480）——模式入口 UI
+// 选定后写入的静态位。isGrandFestival 是 GRAND FESTIVAL 快速模式专用位；
+// championshipData 静态引用指向 ChampionshipData 实例（生涯/比赛周会话编号）。
+static void *g_f_gf = NULL;      // GlobalVariables.isGrandFestival
+static void *g_f_israce = NULL;  // GlobalVariables.isRace
+static void *g_f_ismp = NULL;    // GlobalVariables.isMultiplayerMatch
+static void *g_f_champ_data = NULL; // GlobalVariables.championshipData (ChampionshipData*)
 static int g_mode_resolved = 0;  // FieldInfo 解析完成标记（含失败）
 
 static void *g_m_scene_name = NULL;    // SceneManagerHelper.get_ActiveSceneName
@@ -224,6 +231,12 @@ static int g_probe_state = 0;  // 0=未做 1=成功 2=失败（防每圈重试�
 // 不可把 champManager 引用链未就绪的计时赛全部堵死。
 static int g_mode_skip_logged = 0;
 static int g_mode_gated = 0;   // 当前事件是否处于挂起态（本事件点判得）
+// LAPsession 诊断行双门控：
+// - g_session_diag_logged = LLV.Awake 行（场景加载瞬间，无驾驶数据）；
+// - g_sector_diag_logged  = 首个圈段事件行（带 odometer 链真实值）。
+// 两行各自单发防洪水；玩家只进赛道不驾驶 = 只有 Awake 行（采样最省时）。
+static int g_session_diag_logged = 0;
+static int g_sector_diag_logged = 0;
 
 static void resolve_il2cpp_api(void) {
     if (g_runtime_invoke != NULL) return;
@@ -255,39 +268,76 @@ static void resolve_mode_signals(void) {
     size_t n = 0;
     void **asms = g_domain_get_assemblies(g_domain_get(), &n);
     if (asms == NULL) { g_mode_resolved = 1; return; }
-    for (size_t i = 0; i < n && g_f_race == NULL; i++) {
+    for (size_t i = 0; i < n && (g_f_race == NULL || g_f_gf == NULL); i++) {
         void *image = g_assembly_get_image(asms[i]);
         if (image == NULL) continue;
-        void *klass = g_class_from_name(image, "IRDS.Game", "IRDSStatistics");
-        if (klass == NULL) continue;
-        void *iter = NULL;
-        void *field;
-        while ((field = g_class_get_fields(klass, &iter)) != NULL) {
-            const char *fn = g_field_get_name(field);
-            if (fn == NULL) continue;
-            if (strcmp(fn, "isRaceSession") == 0) g_f_race = field;
-            else if (strcmp(fn, "isFreePracticeSession") == 0) g_f_fp = field;
-            else if (strcmp(fn, "timedSession") == 0) g_f_timed = field;
-            if (g_f_race != NULL && g_f_fp != NULL && g_f_timed != NULL) break;
+        if (g_f_race == NULL) {
+            void *klass = g_class_from_name(image, "IRDS.Game", "IRDSStatistics");
+            if (klass != NULL) {
+                void *iter = NULL;
+                void *field;
+                while ((field = g_class_get_fields(klass, &iter)) != NULL) {
+                    const char *fn = g_field_get_name(field);
+                    if (fn == NULL) continue;
+                    if (strcmp(fn, "isRaceSession") == 0) g_f_race = field;
+                    else if (strcmp(fn, "isFreePracticeSession") == 0) g_f_fp = field;
+                    else if (strcmp(fn, "timedSession") == 0) g_f_timed = field;
+                    if (g_f_race != NULL && g_f_fp != NULL && g_f_timed != NULL) break;
+                }
+                LOGI("lap_hook: IRDSStatistics fields resolved: race=%p fp=%p timed=%p",
+                     g_f_race, g_f_fp, g_f_timed);
+            }
         }
-        LOGI("lap_hook: IRDSStatistics fields resolved: race=%p fp=%p timed=%p",
-             g_f_race, g_f_fp, g_f_timed);
+        if (g_f_gf == NULL) {
+            void *klass = g_class_from_name(image, "", "GlobalVariables");
+            if (klass != NULL) {
+                void *iter = NULL;
+                void *field;
+                while ((field = g_class_get_fields(klass, &iter)) != NULL) {
+                    const char *fn = g_field_get_name(field);
+                    if (fn == NULL) continue;
+                    if (strcmp(fn, "isGrandFestival") == 0) g_f_gf = field;
+                    else if (strcmp(fn, "isRace") == 0) g_f_israce = field;
+                    else if (strcmp(fn, "isMultiplayerMatch") == 0) g_f_ismp = field;
+                    else if (strcmp(fn, "championshipData") == 0) g_f_champ_data = field;
+                    if (g_f_gf != NULL && g_f_israce != NULL &&
+                        g_f_ismp != NULL && g_f_champ_data != NULL) break;
+                }
+                LOGI("lap_hook: GlobalVariables fields resolved: gf=%p israce=%p ismp=%p champData=%p",
+                     g_f_gf, g_f_israce, g_f_ismp, g_f_champ_data);
+            }
+        }
     }
     g_mode_resolved = 1;
 }
 
-// ── LAPmode 诊断行：把全部候选模式信号一次打齐，供两场会话对比落定
+// ChampionshipData 会话标识字段的实例偏移（dump.cs:36254-36292 实证）。
+// championshipData 静态引用在生涯/比赛周会话非 NULL；快速模式/GF 预期为
+// NULL（未实测，诊断行可观测）。
+#define OFF_CD_CURRENT_SESSION 0x4C   // ChampionshipData.currentSession (int)
+#define OFF_CD_ROUND_NUMBER    0x38   // ChampionshipData.roundNumber (int)
+#define OFF_CD_CURRENT_TRACK   0x48   // ChampionshipData.currentTrack (int)
+#define OFF_CD_FULL_QUALI      0x2B   // ChampionshipData.fullQuali (bool)
+
+// ── LAPsession 诊断行：把全部候选模式信号一次打齐，供各模式采样表落定
 //    终版 gate 组合（champManager 链在快速模式正赛实测为 NULL，单信号
 //    不可靠——见 2026-08-31 Shanghai 正赛误记事件）。
-static void lapmode_diag(void *this, void *champ, int is_ta) {
+//
+// ⚠️ 触发时机 = LLV.Awake（场景加载瞬间，无需驾驶）。odometer 实例链
+//    （champ/isQuali/taCount）在 Awake 时尚不可得，打 -1 占位——这些字段
+//    已有 [V] 实测结论，采样只需静态信号集（进赛道即出，玩家可立即退出）。
+static void lapmode_diag(void *odometer, void *champ, int is_ta, const char *phase) {
     int rm = -1, iq = -1, ta_n = -1, sess = -1;
+    int gv = -1, cd_session = -1, cd_round = -1, cd_track = -1, cd_fullquali = -1;
     if (g_llv != NULL) {
         rm = (int) *(volatile int32_t *) ((uintptr_t) g_llv + OFF_LLV_RACE_MODES);
     }
-    iq = *(uint8_t *) ((uintptr_t) this + OFF_ODOMETER_IS_QUALI) ? 1 : 0;
-    void *list = *(void *volatile *) ((uintptr_t) this + OFF_ODOMETER_TA_TIMES);
-    if (list != NULL) {
-        ta_n = (int) *(volatile int32_t *) ((uintptr_t) list + OFF_LIST_SIZE);
+    if (odometer != NULL) {
+        iq = *(uint8_t *) ((uintptr_t) odometer + OFF_ODOMETER_IS_QUALI) ? 1 : 0;
+        void *list = *(void *volatile *) ((uintptr_t) odometer + OFF_ODOMETER_TA_TIMES);
+        if (list != NULL) {
+            ta_n = (int) *(volatile int32_t *) ((uintptr_t) list + OFF_LIST_SIZE);
+        }
     }
     if (g_f_race != NULL && g_f_fp != NULL && g_f_timed != NULL) {
         uint8_t r = 0, f = 0, t = 0;
@@ -297,8 +347,28 @@ static void lapmode_diag(void *this, void *champ, int is_ta) {
         sess = (r ? 1 : 0) | (f ? 2 : 0) | (t ? 4 : 0);
         // bit0=isRaceSession bit1=isFreePracticeSession bit2=timedSession
     }
-    LOGI("LAPmode: ta=%d champ=%p raceModes=%d isQuali=%d taCount=%d sessBits=%d",
-         is_ta, champ, rm, iq, ta_n, sess);
+    // GlobalVariables 位（gf/isRace/isMP）+ championshipData 实例字段。
+    // isMultiplayerMatch 兼带 1 位（0/1），三位置一个字节避免行过长。
+    if (g_f_gf != NULL && g_f_israce != NULL && g_f_ismp != NULL && g_f_champ_data != NULL) {
+        uint8_t gf = 0, israce = 0, ismp = 0;
+        void *champ_data = NULL;
+        g_field_static_get_value(g_f_gf, &gf);
+        g_field_static_get_value(g_f_israce, &israce);
+        g_field_static_get_value(g_f_ismp, &ismp);
+        g_field_static_get_value(g_f_champ_data, &champ_data);
+        gv = (gf ? 4 : 0) | (israce ? 2 : 0) | (ismp ? 1 : 0);
+        // bit0=isMultiplayerMatch bit1=isRace bit2=isGrandFestival
+        if (champ_data != NULL) {
+            cd_session = (int) *(volatile int32_t *) ((uintptr_t) champ_data + OFF_CD_CURRENT_SESSION);
+            cd_round = (int) *(volatile int32_t *) ((uintptr_t) champ_data + OFF_CD_ROUND_NUMBER);
+            cd_track = (int) *(volatile int32_t *) ((uintptr_t) champ_data + OFF_CD_CURRENT_TRACK);
+            cd_fullquali = *(uint8_t *) ((uintptr_t) champ_data + OFF_CD_FULL_QUALI) ? 1 : 0;
+        }
+    }
+    LOGI("LAPsession[%s]: ta=%d champ=%p isQuali=%d taCount=%d sessBits=%d "
+         "gvBits=%d cdSess=%d cdRound=%d cdTrack=%d fullQuali=%d raceModes=%d",
+         phase, is_ta, champ, iq, ta_n, sess, gv, cd_session, cd_round,
+         cd_track, cd_fullquali, rm);
 }
 
 // ── MethodInfo 解析：遍历全部程序集找两个类的目标方法（lazy 一次性）。
@@ -448,10 +518,22 @@ static void proxy_llv_awake(void *this, void *method_info) {
     g_probe_state = 0;
     g_mode_skip_logged = 0;
     g_mode_gated = 0;
+    g_session_diag_logged = 0;
+    g_sector_diag_logged = 0;
     char track[64];
     il2cpp_string_read_ascii(*(void **) ((uintptr_t) this + OFF_LLV_TRACK_TO_RACE),
                              track, sizeof(track));
     LOGI("LAPtrack: LLV captured, trackToRace='%s' (this=%p)", track, this);
+
+    // LAPsession 单发行：场景加载瞬间打（模式静态信号此时已定死——
+    // GlobalVariables / championshipData / IRDSStatistics 三布尔）。玩家
+    // 进赛道即可退出下一个，无需驾驶；odometer 链字段打 -1（不可得）。
+    {
+        resolve_il2cpp_api();
+        resolve_mode_signals();
+        lapmode_diag(NULL, NULL, -1, "awake");
+        g_session_diag_logged = 1;
+    }
 
     typedef void (*orig_t)(void *, void *);
     if (g_llv_awake_orig != NULL) {
@@ -491,26 +573,28 @@ static void proxy_odometer_handle_sectors_times(void *this, int sector_order,
     // Shanghai 事件）。v2 语义：
     //   champ 非 NULL → 按 isTimeAttack 硬判（0=挂起 1=记录）
     //   champ == NULL → **模式未知 = 挂起**（宁缺勿滥，正赛绝不能再进日志）
-    //                    + 每圈完成事件打 LAPmode 诊断行收集终版信号。
-    // 计时赛若也走 NULL 分支会被暂挂——诊断行数据回来后替换权威信号。
+    // LAPsession 诊断行 = 会话首个圈段事件单发（含计时赛路径，模式间对照
+    // 用同一格式）——模式信号进赛道时已定死，无需等圈完成采样。
     {
         void *champ = *(void *volatile *) ((uintptr_t) this + OFF_ODOMETER_CHAMP_MANAGER);
         int is_ta = (champ != NULL)
                 ? (*(uint8_t *) ((uintptr_t) champ + OFF_CHAMP_IS_TIME_ATTACK) ? 1 : 0)
                 : -1;
-        int lap_done_evt = (sector_order == 2 && total_lap_time > 0.0f &&
-                            sector_order != g_last_order);
+
+        if (!g_sector_diag_logged) {
+            // 首个圈段事件：补打带 odometer 链真实值的模式信号行
+            //（Awake 时 champ/isQuali 不可得，此处为对照补全，单发防洪水）
+            resolve_il2cpp_api();
+            resolve_mode_signals();
+            lapmode_diag(this, champ, is_ta, "sector");
+            g_sector_diag_logged = 1;
+        }
 
         if (is_ta <= 0) {
             g_mode_gated = 1;
             g_last_order = -1;
             g_last_valid = -1;
-            if (lap_done_evt) {
-                // 圈完成事件：打诊断行（非计时赛/模式未知的证据材料）
-                resolve_il2cpp_api();
-                resolve_mode_signals();
-                lapmode_diag(this, champ, is_ta);
-            } else if (!g_mode_skip_logged) {
+            if (!g_mode_skip_logged) {
                 LOGI("LAPgate: non-TimeAttack session, lap logging suspended (is_ta=%d)", is_ta);
                 g_mode_skip_logged = 1;
             }
