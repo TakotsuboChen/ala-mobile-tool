@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.Lightbulb
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Flip
 import androidx.compose.material.icons.rounded.LockOpen
@@ -553,7 +554,7 @@ fun ConfigurePagerMiuix(
                                 summary = "在牵引力控制和防抱死制动系统干预时显示闪烁的指示灯",
                                 startAction = {
                                     Icon(
-                                        Icons.Rounded.Bolt,
+                                        Icons.Rounded.Lightbulb,
                                         modifier = Modifier.padding(end = 6.dp),
                                         contentDescription = null,
                                         tint = colorScheme.onBackground

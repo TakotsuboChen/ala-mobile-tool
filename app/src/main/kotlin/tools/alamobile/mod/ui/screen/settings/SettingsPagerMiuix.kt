@@ -35,8 +35,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -50,12 +52,15 @@ import tools.alamobile.mod.ui.util.BlurredBar
 import tools.alamobile.mod.ui.util.rememberBlurBackdrop
 import tools.alamobile.mod.ui.viewmodel.ConfigUiState
 import tools.alamobile.mod.ui.viewmodel.ConfigViewModel
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
@@ -101,11 +106,20 @@ fun SettingsPagerMiuix(
         mutableStateOf(UpdatePreferences.getChannel(context))
     }
 
-    // 围场服务器编辑弹窗（S4）：OverlayDialog 常驻组合树由 show 驱动；
-    // 保存副作用放 onDismissFinished（退出动画完成后），与 EulaDialog 同模式。
-    var paddockServerDialogVisible by remember { mutableStateOf(false) }
+    // 围场服务器：选项菜单（0=CAMDA 默认，1=自定义）+ 自定义时的输入框。
+    // 自定义输入防抖保存（stop 输入 800ms 落库），切回默认立即保存。
+    val paddockServerCustom = uiState.paddockServer.isNotBlank()
+    var paddockServerSelection by remember(paddockServerCustom) {
+        mutableStateOf(if (paddockServerCustom) 1 else 0)
+    }
     var paddockServerInput by remember { mutableStateOf(TextFieldValue(uiState.paddockServer)) }
-    var pendingPaddockServer by remember { mutableStateOf<(() -> Unit)>({ }) }
+    var paddockServerSaveJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    val paddockServerItems = remember {
+        listOf(
+            DropdownItem(text = "CAMDA（默认）"),
+            DropdownItem(text = "自定义")
+        )
+    }
     val channelItems = remember {
         listOf(
             DropdownItem(text = "稳定版"),
@@ -206,12 +220,12 @@ fun SettingsPagerMiuix(
                             )
                         }
 
-                        // ── 组 2.5: 围场服务器（S4）──
+                        // ── 组 2.5: 围场服务器（S4，2026-09-01 改选项菜单）──
                         Card(modifier = Modifier.fillMaxWidth()) {
-                            ArrowPreference(
-                                title = "围场服务器地址",
-                                summary = if (uiState.paddockServer.isBlank()) "默认（paddock.takotsubo.cloud）"
-                                          else uiState.paddockServer,
+                            OverlaySpinnerPreference(
+                                items = paddockServerItems,
+                                selectedIndex = paddockServerSelection,
+                                title = "围场服务器",
                                 startAction = {
                                     Icon(
                                         Icons.Rounded.Public,
@@ -220,8 +234,45 @@ fun SettingsPagerMiuix(
                                         tint = colorScheme.onBackground
                                     )
                                 },
-                                onClick = { paddockServerDialogVisible = true }
+                                onSelectedIndexChange = { sel ->
+                                    paddockServerSelection = sel
+                                    if (sel == 0) {
+                                        // 切回默认：清输入并立即保存
+                                        paddockServerInput = TextFieldValue("")
+                                        actions.setPaddockServer("")
+                                        Toast.makeText(context, "已恢复默认服务器", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
                             )
+                            AnimatedVisibility(visible = paddockServerSelection == 1) {
+                                Column {
+                                    TextField(
+                                        value = paddockServerInput,
+                                        onValueChange = { paddockServerInput = it },
+                                        label = "请以 https:// 开头",
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                                    )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                                        horizontalArrangement = Arrangement.End,
+                                    ) {
+                                        TextButton(
+                                            text = "保存",
+                                            onClick = {
+                                                paddockServerSaveJob?.cancel()
+                                                paddockServerSaveJob = scope.launch { actions.setPaddockServer(paddockServerInput.text.trim()) }
+                                                Toast.makeText(context, "重启模块生效", Toast.LENGTH_SHORT).show()
+                                            },
+                                            colors = ButtonDefaults.textButtonColorsPrimary(),
+                                            modifier = Modifier.width(120.dp),
+                                        )
+                                    }
+                                }
+                            }
                         }
 
                         // ── 组 3: 激活 / 协议 ──
@@ -307,58 +358,4 @@ fun SettingsPagerMiuix(
             }
         )
     }
-
-    // 围场服务器编辑弹窗（S4）。常驻组合树、show 驱动；保存走 onDismissFinished。
-    top.yukonga.miuix.kmp.overlay.OverlayDialog(
-        show = paddockServerDialogVisible,
-        title = "围场服务器地址",
-        onDismissRequest = {
-            pendingPaddockServer = {
-                actions.setPaddockServer(paddockServerInput.text.trim())
-            }
-            paddockServerDialogVisible = false
-        },
-        onDismissFinished = {
-            pendingPaddockServer()
-            pendingPaddockServer = { }
-        },
-        content = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                top.yukonga.miuix.kmp.basic.TextField(
-                    value = paddockServerInput,
-                    onValueChange = { paddockServerInput = it },
-                    label = "https:// 开头；留空恢复默认",
-                    modifier = Modifier.fillMaxWidth(),
-                )
-              Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    TextButton(
-                        text = "恢复默认",
-                        onClick = {
-                            paddockServerInput = TextFieldValue("")
-                            pendingPaddockServer = {
-                                actions.setPaddockServer("")
-                            }
-                            paddockServerDialogVisible = false
-                        }
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    TextButton(
-                        text = "保存",
-                        onClick = {
-                            pendingPaddockServer = {
-                                actions.setPaddockServer(paddockServerInput.text.trim())
-                                Toast.makeText(context, "已保存，下次进游戏生效", Toast.LENGTH_SHORT).show()
-                            }
-                            paddockServerDialogVisible = false
-                        }
-                    )
-                }
-            }
-        }
-    )
 }

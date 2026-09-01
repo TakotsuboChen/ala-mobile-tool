@@ -5,21 +5,27 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.add
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.Leaderboard
 import androidx.compose.material.icons.rounded.Logout
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -35,6 +41,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -152,8 +159,12 @@ private fun PaddockContent(
     clipboard: androidx.compose.ui.platform.ClipboardManager,
     navigator: tools.alamobile.mod.ui.navigation3.Navigator,
 ) {
+    // 退出登录确认弹窗（常驻组合树，show 驱动）——声明在函数级，与 loggedIn 分支解耦
+    var showLogoutDialog by remember { mutableStateOf(false) }
+    var logoutDialogMounted by remember { mutableStateOf(false) }
+
     if (uiState.loggedIn) {
-        // ── 已登录：个人信息卡 + 排行榜入口 ──
+        // ── 已登录：用户信息连体卡 + 功能入口 ──
         // 头像：登录后有 userId 时异步拉取（无头像/失败保持 Person 图标）
         var avatar by remember(uiState.userId) { mutableStateOf<android.graphics.Bitmap?>(null) }
         LaunchedEffect(uiState.userId) {
@@ -165,43 +176,108 @@ private fun PaddockContent(
                 }
             }
         }
+
+        // 用户信息连体卡：首行（头像+粗体用户名）较高，下两行仿设备信息行高
         Card(modifier = Modifier.fillMaxWidth()) {
-            ArrowPreference(
-                title = uiState.username.ifBlank { "车手" },
-                summary = if (uiState.regSeq > 0) "车手 #$uiState.regSeq · 围场通行证已核验" else "围场通行证已核验",
-                startAction = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp, horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
                     if (avatar != null) {
                         androidx.compose.foundation.Image(
                             bitmap = avatar!!.asImageBitmap(),
                             contentDescription = null,
                             modifier = Modifier
-                                .padding(end = 6.dp)
-                                .size(40.dp)
+                                .size(56.dp)
                                 .clip(androidx.compose.foundation.shape.CircleShape),
                         )
                     } else {
-                        Icon(Icons.Rounded.Person, modifier = Modifier.padding(end = 6.dp), contentDescription = null, tint = colorScheme.onBackground)
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Rounded.Person,
+                                modifier = Modifier.size(32.dp),
+                                contentDescription = null,
+                                tint = colorScheme.onBackground,
+                            )
+                        }
                     }
-                },
-                onClick = { },
-            )
+                    Column {
+                        Text(
+                            text = uiState.username.ifBlank { "车手" },
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        if (uiState.regSeq > 0) {
+                            Text(
+                                text = "车手 #${uiState.regSeq}",
+                                fontSize = 13.sp,
+                                color = colorScheme.onBackground.copy(alpha = 0.6f),
+                            )
+                        }
+                    }
+                }
+                // 三列统计：标题行 + 值行（行高仿概览页设备信息 15sp）
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    StatCell("赛季积分", Modifier.weight(1f))
+                    StatCell("赛季胜场", Modifier.weight(1f))
+                    StatCell("计时赛积分", Modifier.weight(1f))
+                }
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    StatValue("暂无", Modifier.weight(1f))
+                    StatValue("暂无", Modifier.weight(1f))
+                    StatValue(if (uiState.totalPoints > 0) "${uiState.totalPoints}" else "暂无", Modifier.weight(1f))
+                }
+            }
         }
+
+        // 计时赛排行榜（独立卡）+ 大奖赛/娱乐匹配（连体卡）
         Card(modifier = Modifier.fillMaxWidth()) {
             ArrowPreference(
-                title = "圈速排行榜",
-                summary = "查看积分榜与赛道榜",
+                title = "计时赛排行榜",
                 startAction = {
                     Icon(Icons.Rounded.Leaderboard, modifier = Modifier.padding(end = 6.dp), contentDescription = null, tint = colorScheme.onBackground)
                 },
                 onClick = { navigator.push(Route.Paddock) },
             )
+        }
+        Card(modifier = Modifier.fillMaxWidth()) {
+            ArrowPreference(
+                title = "大奖赛",
+                summary = "争夺积分，成为赛季车手冠军",
+                startAction = {
+                    Icon(Icons.Rounded.EmojiEvents, modifier = Modifier.padding(end = 6.dp), contentDescription = null, tint = colorScheme.onBackground)
+                },
+                onClick = { actions.toastDev() },
+            )
+            ArrowPreference(
+                title = "娱乐匹配",
+                summary = "短程正赛，享受赛道攻防",
+                startAction = {
+                    Icon(Icons.Rounded.SportsEsports, modifier = Modifier.padding(end = 6.dp), contentDescription = null, tint = colorScheme.onBackground)
+                },
+                onClick = { actions.toastDev() },
+            )
+        }
+
+        // 退出登录：整页最下的独立卡，点击弹确认（防误触）
+        Card(modifier = Modifier.fillMaxWidth()) {
             ArrowPreference(
                 title = "退出登录",
-                summary = "清除本机登录态（成绩保留在服务器）",
                 startAction = {
                     Icon(Icons.Rounded.Logout, modifier = Modifier.padding(end = 6.dp), contentDescription = null, tint = colorScheme.onBackground)
                 },
-                onClick = { actions.logout() },
+                onClick = { showLogoutDialog = true },
             )
         }
     } else {
@@ -212,6 +288,89 @@ private fun PaddockContent(
         )
         VerifyCard(uiState, actions)
     }
+
+    // 退出登录确认弹窗：常驻组合树（show 驱动），确认才真正登出
+    if (showLogoutDialog || logoutDialogMounted) {
+        logoutDialogMounted = true
+        LogoutConfirmDialog(
+            show = showLogoutDialog,
+            onConfirm = {
+                showLogoutDialog = false
+                actions.logout()
+            },
+            onDismiss = { showLogoutDialog = false },
+            onDismissFinished = { logoutDialogMounted = false },
+        )
+    }
+}
+
+/** 退出登录确认弹窗：左"取消"右蓝色"退出"。 */
+@Composable
+private fun LogoutConfirmDialog(
+    show: Boolean,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    onDismissFinished: () -> Unit,
+) {
+    OverlayDialog(
+        show = show,
+        onDismissRequest = onDismiss,
+        onDismissFinished = onDismissFinished,
+        content = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "确定要退出登录吗？",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 12.dp),
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    TextButton(
+                        text = "取消",
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(modifier = Modifier.width(20.dp))
+                    TextButton(
+                        text = "退出",
+                        onClick = onConfirm,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.textButtonColorsPrimary(),
+                    )
+                }
+            }
+        },
+    )
+}
+
+/** 统计列标题（第二行）。 */
+@Composable
+private fun StatCell(title: String, modifier: Modifier = Modifier) {
+    Text(
+        text = title,
+        fontSize = 15.sp,
+        color = colorScheme.onBackground.copy(alpha = 0.6f),
+        modifier = modifier,
+        textAlign = TextAlign.Center,
+    )
+}
+
+/** 统计列值（第三行）。 */
+@Composable
+private fun StatValue(value: String, modifier: Modifier = Modifier) {
+    Text(
+        text = value,
+        fontSize = 15.sp,
+        modifier = modifier,
+        textAlign = TextAlign.Center,
+    )
 }
 
 /** 登录/注册并排表单：用户名+密码共用，左"注册"右蓝色"登录"。 */
@@ -230,7 +389,7 @@ private fun VerifyCard(uiState: tools.alamobile.mod.ui.viewmodel.PaddockViewMode
             TextField(
                 value = loginPass,
                 onValueChange = { loginPass = it; actions.setLoginPass(it.text) },
-                label = "密码（≥8位，数字+字母）",
+                label = "密码",
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -249,49 +408,91 @@ private fun VerifyCard(uiState: tools.alamobile.mod.ui.viewmodel.PaddockViewMode
                 )
             }
             TextButton(
-                text = if (uiState.showReset) "收起重置密码" else "忘记密码？",
-                onClick = { actions.setShowReset(!uiState.showReset) },
+                text = "忘记密码？",
+                onClick = { actions.setShowReset(true) },
                 enabled = !uiState.loading,
                 modifier = Modifier.fillMaxWidth(),
             )
-            if (uiState.showReset) {
-                ResetPasswordForm(uiState, actions)
-            }
         }
+    }
+
+    // 重置密码弹窗：常驻组合树（show 驱动），提交成功后由 ViewModel 置 showReset=false 关闭
+    var resetDialogMounted by remember { mutableStateOf(false) }
+    if (uiState.showReset || resetDialogMounted) {
+        resetDialogMounted = true
+        ResetPasswordDialog(
+            uiState = uiState,
+            actions = actions,
+            onDismiss = { actions.setShowReset(false) },
+            onDismissFinished = { resetDialogMounted = false },
+        )
     }
 }
 
+/**
+ * 重置密码弹窗：居中粗体标题"重置密码" + 说明正文 + 重置码/新密码两输入框
+ * （新密码不标条件，格式错误走 Toast），左灰"取消"右蓝"提交重置"。
+ */
 @Composable
-private fun ResetPasswordForm(
+private fun ResetPasswordDialog(
     uiState: tools.alamobile.mod.ui.viewmodel.PaddockViewModel.UiState,
     actions: PaddockViewModel,
+    onDismiss: () -> Unit,
+    onDismissFinished: () -> Unit,
 ) {
     var resetCode by remember { mutableStateOf(TextFieldValue(uiState.resetCode)) }
     var resetPass by remember { mutableStateOf(TextFieldValue(uiState.resetPass)) }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
-        Text(
-            "在模块交流 QQ 群发送「重置密码 你的用户名」，助理回复重置码后回填：",
-            fontSize = 13.sp,
-        )
-        TextField(
-            value = resetCode,
-            onValueChange = { resetCode = it; actions.setResetCode(it.text) },
-            label = "重置码",
-            modifier = Modifier.fillMaxWidth(),
-        )
-        TextField(
-            value = resetPass,
-            onValueChange = { resetPass = it; actions.setResetPass(it.text) },
-            label = "新密码（≥8位，数字+字母）",
-            modifier = Modifier.fillMaxWidth(),
-        )
-        TextButton(
-            text = if (uiState.loading) "提交中…" else "提交重置",
-            onClick = { actions.submitReset() },
-            enabled = !uiState.loading,
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
+    OverlayDialog(
+        show = uiState.showReset,
+        onDismissRequest = onDismiss,
+        onDismissFinished = onDismissFinished,
+        content = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = "重置密码",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    text = "在模块交流 QQ 群发送「重置密码 你的用户名」，助理回复重置码后回填：",
+                    fontSize = 14.sp,
+                )
+                TextField(
+                    value = resetCode,
+                    onValueChange = { resetCode = it; actions.setResetCode(it.text) },
+                    label = "重置码",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                TextField(
+                    value = resetPass,
+                    onValueChange = { resetPass = it; actions.setResetPass(it.text) },
+                    label = "新密码",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    TextButton(
+                        text = "取消",
+                        onClick = onDismiss,
+                        enabled = !uiState.loading,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(modifier = Modifier.width(20.dp))
+                    TextButton(
+                        text = if (uiState.loading) "提交中…" else "提交重置",
+                        onClick = { actions.submitReset() },
+                        enabled = !uiState.loading,
+                        colors = ButtonDefaults.textButtonColorsPrimary(),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        },
+    )
 }
 
 /**

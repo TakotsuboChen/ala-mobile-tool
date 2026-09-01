@@ -2,24 +2,25 @@ package tools.alamobile.mod.ui.screen.paddock
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.add
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -43,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import tools.alamobile.mod.PaddockClient
+import tools.alamobile.mod.ui.navigation3.LocalNavigator
 import tools.alamobile.mod.ui.theme.LocalEnableBlur
 import tools.alamobile.mod.ui.util.BlurredBar
 import tools.alamobile.mod.ui.util.rememberBlurBackdrop
@@ -61,12 +63,14 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * 圈速排行榜二级页（围场 → 圈速排行榜 push 进来）。
- * 顶部 tab 切换：积分总榜 / 赛道榜（赛道选择 16 条 + 版本筛选）。
- * 榜单行：排名 圆形头像 用户名 ……… 右对齐圈速/积分（一人一行连排，无分隔）。
+ * 计时赛排行榜二级页（围场 → 计时赛排行榜 push 进来）。
+ * 顶部 tab 切换：积分总榜 / 赛道榜（赛道选择 16 条 + 版本筛选），Crossfade 过渡。
+ * 榜单行：排名 圆形头像 用户名 ……… 右对齐圈速/积分（一人一行连排，无分隔）；
+ * 内边距对齐 miuix 标准 16dp（与 preference 行左右端一致）。
  */
 @Composable
 fun LeaderboardScreen() {
+    val navigator = LocalNavigator.current
     val scrollBehavior = MiuixScrollBehavior()
     val enableBlur = LocalEnableBlur.current
     val backdrop = rememberBlurBackdrop(enableBlur)
@@ -75,15 +79,16 @@ fun LeaderboardScreen() {
 
     // 0=积分榜 1=赛道榜
     var tabIndex by remember { mutableIntStateOf(0) }
-    // 赛道榜参数（gp_index 2..17 → 赛道表索引 0..15，显示名见 TRACK_NAMES）
-    var selectedTrack by remember { mutableIntStateOf(12) }   // 默认蒙扎（gp_index=12）
+    // 赛道榜参数（gp_index 0..15，与 TRACK_NAMES 索引一致；默认第一个=阿尔伯特公园）
+    var selectedTrack by remember { mutableIntStateOf(0) }
     var selectedVersion by remember { mutableIntStateOf(0) }  // 0=总榜 1=8.0.4(200146)
     val VERSION_CODES = arrayOf(200146)
-    val VERSION_LABELS = remember { listOf("总榜", "8.0.4") }
 
     var points by remember { mutableStateOf<List<PaddockClient.PointsEntry>>(emptyList()) }
     var trackBoard by remember { mutableStateOf<PaddockClient.TrackBoard?>(null) }
     var loading by remember { mutableStateOf(false) }
+    // 首次进入（无旧内容可保留）才显示加载中；之后切条件保留旧内容，数据到位整体淡切
+    var everLoaded by remember { mutableStateOf(false) }
 
     LaunchedEffect(tabIndex, selectedTrack, selectedVersion) {
         loading = true
@@ -94,19 +99,22 @@ fun LeaderboardScreen() {
             trackBoard = withContext(Dispatchers.IO) { PaddockClient.fetchTrackBoard(selectedTrack, v) }
         }
         loading = false
+        everLoaded = true
     }
 
     Scaffold(
         topBar = {
             BlurredBar(backdrop) {
                 TopAppBar(
-                    title = "圈速排行榜",
+                    title = "计时赛排行榜",
                     color = barColor,
                     scrollBehavior = scrollBehavior,
                     navigationIcon = {
                         Icon(
                             Icons.AutoMirrored.Rounded.ArrowBack,
-                            modifier = Modifier.padding(12.dp),
+                            modifier = Modifier
+                                .padding(12.dp)
+                                .clickable { navigator.pop() },
                             contentDescription = "返回",
                         )
                     },
@@ -141,18 +149,24 @@ fun LeaderboardScreen() {
                             VersionSpinner(selectedVersion) { selectedVersion = it }
                         }
 
-                        // ── 榜单内容（连排行，无分隔）──
-                        if (loading) {
-                            Text(
-                                "加载中…",
-                                fontSize = 14.sp,
-                                color = colorScheme.onBackground.copy(alpha = 0.5f),
-                                modifier = Modifier.padding(4.dp),
-                            )
-                        } else if (tabIndex == 0) {
-                            PointsBoard(points)
-                        } else {
-                            TrackBoardView(trackBoard)
+                        // ── 榜单内容（连排行，无分隔；切换 Crossfade 过渡）──
+                        // 数据到达才切 Crossfade state（加载期间保留旧内容，不闪"加载中"）
+                        val boardState = when {
+                            !everLoaded -> BoardState.Loading
+                            tabIndex == 0 -> BoardState.Points(points)
+                            else -> BoardState.Track(trackBoard)
+                        }
+                        Crossfade(targetState = boardState, animationSpec = tween(350), label = "board") { state ->
+                            when (state) {
+                                BoardState.Loading -> Text(
+                                    "加载中…",
+                                    fontSize = 14.sp,
+                                    color = colorScheme.onBackground.copy(alpha = 0.5f),
+                                    modifier = Modifier.padding(16.dp),
+                                )
+                                is BoardState.Points -> PointsBoard(state.entries)
+                                is BoardState.Track -> TrackBoardView(state.board)
+                            }
                         }
                     }
                 }
@@ -163,6 +177,13 @@ fun LeaderboardScreen() {
 
 /** 头像内存缓存（屏幕级即可：榜单页进出重建，天然淘汰）。key = avatar_url。 */
 private val avatarCache = ConcurrentHashMap<String, Bitmap>()
+
+/** 榜单内容状态（Crossfade target）：数据类承载实际数据，保证只在数据到位时切换。 */
+private sealed interface BoardState {
+    data object Loading : BoardState
+    data class Points(val entries: List<PaddockClient.PointsEntry>) : BoardState
+    data class Track(val board: PaddockClient.TrackBoard?) : BoardState
+}
 
 /** 榜单行头像：有 URL 异步取（缓存），无 URL/失败显示 Person 占位。 */
 @Composable
@@ -200,6 +221,14 @@ private fun AvatarOrPlaceholder(avatarUrl: String?) {
     }
 }
 
+/** 前三名奖牌 emoji（其余名次显示数字）。 */
+private fun rankLabel(rank: Int): String = when (rank) {
+    1 -> "🥇"
+    2 -> "🥈"
+    3 -> "🥉"
+    else -> "$rank"
+}
+
 /** 积分榜行：排名 头像 用户名 …… 右对齐积分。 */
 @Composable
 private fun PointsBoard(points: List<PaddockClient.PointsEntry>) {
@@ -214,7 +243,7 @@ private fun PointsBoard(points: List<PaddockClient.PointsEntry>) {
                 )
             }
             if (points.isEmpty()) {
-                Text("暂无成绩", fontSize = 14.sp, color = colorScheme.onBackground.copy(alpha = 0.5f), modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                Text("暂无成绩", fontSize = 14.sp, color = colorScheme.onBackground.copy(alpha = 0.5f), modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             }
         }
     }
@@ -234,27 +263,31 @@ private fun TrackBoardView(board: PaddockClient.TrackBoard?) {
                 )
             }
             if (board?.entries.isNullOrEmpty()) {
-                Text("暂无成绩", fontSize = 14.sp, color = colorScheme.onBackground.copy(alpha = 0.5f), modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                Text("暂无成绩", fontSize = 14.sp, color = colorScheme.onBackground.copy(alpha = 0.5f), modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             }
         }
     }
 }
 
-/** 一行：排名（等宽） 圆形头像 用户名 …… 右对齐数值。行间无分隔，连排。 */
+/**
+ * 一行：排名（等宽） 圆形头像 用户名 …… 右对齐数值。行间无分隔，连排。
+ * 水平内边距 16dp = miuix preference 标准（BasicComponentDefaults.InsideMargin），
+ * 与页面上其他 preference 卡的左右端严格对齐。
+ */
 @Composable
 private fun BoardRow(rank: Int, avatarUrl: String?, name: String, value: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 7.dp),
+            .padding(horizontal = 16.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
-            text = "$rank",
+            text = rankLabel(rank),
             fontSize = 15.sp,
             color = colorScheme.onBackground.copy(alpha = 0.6f),
-            modifier = Modifier.width(24.dp),
+            modifier = Modifier.width(28.dp),
         )
         AvatarOrPlaceholder(avatarUrl)
         Text(
@@ -303,7 +336,7 @@ private fun TrackSpinner(selected: Int, onPick: (Int) -> Unit) {
 
 @Composable
 private fun VersionSpinner(selected: Int, onPick: (Int) -> Unit) {
-    val items = remember { listOf(DropdownItem(text = "总榜"), DropdownItem(text = "8.0.4 版本榜")) }
+    val items = remember { listOf(DropdownItem(text = "全部"), DropdownItem(text = "8.0.4")) }
     OverlaySpinnerPreference(
         items = items,
         selectedIndex = selected,
