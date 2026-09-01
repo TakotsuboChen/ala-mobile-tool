@@ -150,6 +150,51 @@ object PaddockClient {
 
     fun hasToken(): Boolean = !authToken.isNullOrBlank()
 
+    /**
+     * 拉取个人资料（GET /v1/me，Bearer）。用途：模块进程重进后恢复登录态展示
+     * （token 只证明身份，username/reg_seq/积分必须另拉）。
+     * ok=true → profile 有效；ok=false 且 needRelogin=true → token 失效/账号被删，
+     * 调用方应 clearAuth 登出；needRelogin=false → 网络问题，保留 token 下次再试。
+     * 阻塞 IO，工作线程调用。
+     */
+    data class MeResult(
+        val ok: Boolean,
+        val needRelogin: Boolean = false,
+        val userId: String = "",
+        val username: String = "",
+        val regSeq: Long = 0,
+        val hasAvatar: Boolean = false,
+        val totalPoints: Long = 0,
+    )
+
+    fun fetchMe(): MeResult {
+        val token = authToken ?: return MeResult(ok = false, needRelogin = true)
+        return try {
+            val (code, resp) = getJson("$serverBase/v1/me", token)
+            when {
+                code == 200 -> {
+                    val j = JSONObject(resp)
+                    MeResult(
+                        ok = true,
+                        userId = j.optString("user_id"),
+                        username = j.optString("username"),
+                        regSeq = j.optLong("reg_seq"),
+                        hasAvatar = j.optBoolean("has_avatar"),
+                        totalPoints = j.optLong("total_points"),
+                    )
+                }
+                code == 401 -> MeResult(ok = false, needRelogin = true)
+                else -> {
+                    Logger.log(Log.WARN, TAG, "fetchMe: HTTP $code ${errText(code, resp)}")
+                    MeResult(ok = false)
+                }
+            }
+        } catch (e: Throwable) {
+            Logger.log(Log.WARN, TAG, "fetchMe failed: ${e.message}")
+            MeResult(ok = false)
+        }
+    }
+
     /** 当前内存 token（flush 兜底用），不读文件。 */
     fun peekAuthToken(): String? = authToken
 
@@ -466,11 +511,12 @@ object PaddockClient {
         }
     }
 
-    private fun getJson(url: String): Pair<Int, String> {
+    private fun getJson(url: String, token: String? = null): Pair<Int, String> {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = CONNECT_TIMEOUT
             readTimeout = READ_TIMEOUT
+            if (token != null) setRequestProperty("Authorization", "Bearer $token")
         }
         return try {
             val code = conn.responseCode

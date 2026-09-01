@@ -99,7 +99,9 @@ POST /v1/laps                   {gp_index, lap_ms, version_code} (Bearer)
                                                        toast: null|{level, track}}
 GET  /v1/leaderboard/points?version=      → 积分总榜/版本榜
 GET  /v1/leaderboard/track/{gp_index}?version= → 赛道榜（总榜不分版本）
-GET  /v1/me                          → 个人信息卡
+GET  /v1/me                      (Bearer) → {user_id, username, reg_seq, has_avatar, total_points}
+    （2026-09-01 实现：模块重进后恢复登录态展示；total_points=计时赛总积分，与积分总榜同口径
+     （跨版本 best-of-best 每赛道积分求和，无成绩=0）；401=token 失效→模块自动登出）
 ```
 
 错误码明确返回（401 掉登录态→模块进缓存补传路径）。
