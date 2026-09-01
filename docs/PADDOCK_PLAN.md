@@ -86,11 +86,14 @@ records      (gp_index, kind: alltime|version, version_code NULL,
 ## 4. API 草案（/v1）
 
 ```
-POST /v1/auth/register-request  {username}          → 409 已存在 | {reg_code}
-POST /v1/auth/register-verify   {reg_code}          → 绑定 openid 后创建账号（bot 端已绑）
-                                                    → 201 {token, reg_seq} | 404 码无效/过期
-POST /v1/auth/login             {username,password} → {token, reg_seq} (90d)
+POST /v1/auth/register-request  {username,password}  → 409 已存在 | {reg_code, message_hint}
+    （2026-09-01 v2：申请时一并设密+发车手 ID（存 pending_regs），bot 校验成功即建号）
+POST /v1/auth/login             {username,password} → {token, user_id, reg_seq, has_avatar} (90d)
+    （has_avatar=false → 注册后首次登录，模块引导上传头像；旧 register-verify 端点已删）
 POST /v1/auth/reset-by-code     {reset_code,new_password} → 204 | 404 码无效/过期
+POST /v1/me/avatar              (Bearer, body=JPEG/PNG ≤2MB) → {uploaded, url}（Garage 存储）
+GET  /v1/me/avatar              (Bearer) → {uploaded, url}（查自己是否有头像）
+GET  /v1/avatar/{user_id}       → 200 图片字节 | 404 无头像（公开端点）
 POST /v1/laps                   {gp_index, lap_ms, version_code} (Bearer)
                                                     → {personal: bool, server: bool,
                                                        toast: null|{level, track}}
@@ -100,6 +103,21 @@ GET  /v1/me                          → 个人信息卡
 ```
 
 错误码明确返回（401 掉登录态→模块进缓存补传路径）。
+
+### 注册流程（v2，2026-09-01 定案：bot 校验即建号）
+
+```
+模块：输入用户名+密码 → POST register-request（服务端哈希密码+nextval 发号存 pending）
+     → 弹窗展示"申请围场通行证#码"（点击复制指令）→ 用户复制后发 CAMDA 群
+bot：群内匹配码 → 绑 member_openid → 建号事务（DELETE pending RETURNING → INSERT users）
+     → 回复"@用户名 校验成功，欢迎您加入 CAMDA，您是全服第 x 位车手！请返回模块直接点击登录。"
+模块：用户回 App 用同一账号密码 → POST login → has_avatar=false → 跳头像上传页
+```
+
+- 车手 ID（reg_seq）在**申请时**即发放：bot 回复需要序号；未完成注册的号作废
+  （顺序不乱，允许空缺——与"严格连续"的取舍已由用户定案）
+- 密码在申请时一并设置（服务端哈希落 pending），bot 建号时直接使用——
+  模块端无 verify 步骤、无校验码回填
 
 ## 5. 赛道中文名对照（key=场景名，逐字照抄 [V]）
 
