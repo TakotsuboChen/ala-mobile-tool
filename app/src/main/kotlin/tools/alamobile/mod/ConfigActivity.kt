@@ -136,6 +136,7 @@ class ConfigActivity : ComponentActivity() {
                                 entry<Route.Settings> { mainScreenEntry() }
                                 entry<Route.About> { AboutScreen() }
                                 entry<Route.Paddock> { tools.alamobile.mod.ui.screen.paddock.LeaderboardScreen() }
+                                entry<Route.Avatar> { tools.alamobile.mod.ui.screen.paddock.AvatarScreen() }
                             }
                         )
                     }

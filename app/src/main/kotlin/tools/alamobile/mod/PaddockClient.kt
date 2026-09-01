@@ -11,6 +11,7 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import tools.alamobile.mod.util.Logger
 
 /**
  * 围场（Paddock）客户端：计时赛有效圈上报 + 登录态维护 + 本地待传队列。
@@ -72,86 +73,139 @@ object PaddockClient {
                 authToken = o.optString("token", "").takeIf { it.isNotEmpty() }
             }
         } catch (e: Throwable) {
-            AlaMobileModule.logX(Log.WARN, TAG, "loadAuth failed: ${e.message}")
+            Logger.log(Log.WARN, TAG, "loadAuth failed: ${e.message}")
+        }
+        // 本地文件没有 token（或读取失败）→ 从 daemon Remote Preferences 恢复。
+        // 根因修复：模块进程与游戏进程的 externalFilesDir 是两个目录（Android 11+
+        // scoped storage 互不可见），本地文件只在写它的进程可见；daemon 常驻且
+        // 两进程都能访问，是 token 的权威存储。游戏进程经 remoteTokenReader 读。
+        if (authToken.isNullOrBlank()) {
+            val reader = remoteTokenReader
+            if (reader == null) {
+                Logger.log(Log.WARN, TAG, "loadAuth: no remote reader injected (module process expected)")
+            } else {
+                try {
+                    authToken = reader()?.takeIf { it.isNotEmpty() }
+                    if (authToken != null) {
+                        Logger.log(Log.INFO, TAG, "auth restored from remote prefs")
+                    } else {
+                        Logger.log(Log.WARN, TAG, "loadAuth: remote token empty/missing")
+                    }
+                } catch (e: Throwable) {
+                    Logger.log(Log.WARN, TAG, "remote token read failed: ${e.message}")
+                }
+            }
         }
     }
 
-    /** 登录成功后持久化 token（ConfigActivity 登录页与游戏进程共用这一份） */
+    /**
+     * 游戏进程注入的 daemon token 读取器（与 ModConfig.remoteConfigReader 同模式）。
+     * AlaMobileModule.onPackageReady 里赋值 = getRemotePreferences(PREF_GROUP).getString(KEY_PADDOCK_TOKEN)。
+     * 模块进程不注入（null）——它本地文件直读。
+     */
+    @Volatile var remoteTokenReader: (() -> String?)? = null
+
+    /** 登录成功后持久化 token（模块进程写：本地 + daemon 双写；游戏进程恢复用 daemon） */
     fun saveAuth(token: String) {
         authToken = token
         try {
             val o = JSONObject().put("token", token)
             authFile().writeText(o.toString())
         } catch (e: Throwable) {
-            AlaMobileModule.logX(Log.WARN, TAG, "saveAuth failed: ${e.message}")
+            Logger.log(Log.WARN, TAG, "saveAuth failed: ${e.message}")
+        }
+        // 双写 daemon（LSPosed Remote Preferences）：service 未绑定时静默跳过
+        //（本地文件仍在，下次 ConfigActivity 启动时 flush 逻辑兜底——见 App.onServiceBind）
+        try {
+            val service = App.xposedService
+            if (service != null) {
+                service.getRemotePreferences(App.PREF_GROUP)
+                    .edit()
+                    .putString(App.KEY_PADDOCK_TOKEN, token)
+                    .apply()
+                Logger.log(Log.INFO, TAG, "token saved to remote prefs")
+            } else {
+                Logger.log(Log.WARN, TAG, "xposedService not bound, token saved locally only")
+            }
+        } catch (e: Throwable) {
+            Logger.log(Log.WARN, TAG, "remote token save failed: ${e.message}")
         }
     }
 
     fun clearAuth() {
         authToken = null
         authFile().delete()
+        // 同步清 daemon：退出登录必须两侧都清，否则游戏进程还能用旧 token 传圈
+        try {
+            val service = App.xposedService
+            if (service != null) {
+                service.getRemotePreferences(App.PREF_GROUP)
+                    .edit()
+                    .remove(App.KEY_PADDOCK_TOKEN)
+                    .apply()
+            }
+        } catch (_: Throwable) {
+        }
     }
 
     fun hasToken(): Boolean = !authToken.isNullOrBlank()
 
+    /** 当前内存 token（flush 兜底用），不读文件。 */
+    fun peekAuthToken(): String? = authToken
+
     /**
-     * 阻塞登录。成功返回 true 并保存 token；失败返回 false（错误文案从服务端原样带回）。
+     * 阻塞登录。成功返回 reg_seq/needs_avatar；失败返回错误文案（服务端原样带回）。
+     * needs_avatar=true 表示注册后首次登录（无头像），UI 引导上传。
      * ConfigActivity/登录 UI 在工作线程调用。
      */
-    fun login(username: String, password: String): Pair<Boolean, String> {
+    data class LoginResult(
+        val ok: Boolean,
+        val message: String,
+        val userId: String = "",
+        val regSeq: Long = 0,
+        val needsAvatar: Boolean = false,
+    )
+
+    fun login(username: String, password: String): LoginResult {
         return try {
             val body = JSONObject().put("username", username).put("password", password)
             val (code, resp) = postJson("$serverBase/v1/auth/login", body, null)
             if (code == 200) {
-                val token = JSONObject(resp).optString("token")
+                val j = JSONObject(resp)
+                val token = j.optString("token")
                 if (token.isNotEmpty()) {
                     saveAuth(token)
-                    Pair(true, "OK")
+                    LoginResult(
+                        ok = true, message = "OK",
+                        userId = j.optString("user_id"),
+                        regSeq = j.optLong("reg_seq"),
+                        needsAvatar = !j.optBoolean("has_avatar"),
+                    )
                 } else {
-                    Pair(false, "响应缺少 token")
+                    LoginResult(ok = false, message = "响应缺少 token")
                 }
             } else {
-                Pair(false, errText(code, resp))
+                LoginResult(ok = false, message = errText(code, resp))
             }
         } catch (e: Throwable) {
-            Pair(false, "网络错误: ${e.message}")
+            LoginResult(ok = false, message = "网络错误: ${e.message}")
         }
     }
 
     /**
-     * 注册申请：返回 (成功?, reg_code 或错误文案)。
-     * 成功时用户需去 CAMDA 群发送 "申请围场通行证#<code>"。
+     * 注册申请：用户名+密码 → 服务端生成 pending 会话（哈希密码+发车手 ID）。
+     * 成功返回 (true, "申请围场通行证#<code>")——用户复制后发 CAMDA 群，
+     * bot 校验成功即建号，之后回模块直接登录（同用户名+密码）。
      */
-    fun registerRequest(username: String): Pair<Boolean, String> {
+    fun registerRequest(username: String, password: String): Pair<Boolean, String> {
         return try {
-            val body = JSONObject().put("username", username)
+            val body = JSONObject().put("username", username).put("password", password)
             val (code, resp) = postJson("$serverBase/v1/auth/register-request", body, null)
             if (code == 200) {
                 val j = JSONObject(resp)
-                Pair(true, j.optString("message_hint", j.optString("reg_code")))
-            } else {
-                Pair(false, errText(code, resp))
-            }
-        } catch (e: Throwable) {
-            Pair(false, "网络错误: ${e.message}")
-        }
-    }
-
-    /**
-     * 注册校验（群内校验成功后调用）：返回 (成功?, 登录响应或错误文案)。
-     * 成功时自动保存 token 完成登录。
-     */
-    fun registerVerify(regCode: String, username: String, password: String): Pair<Boolean, String> {
-        return try {
-            val body = JSONObject()
-                .put("reg_code", regCode)
-                .put("username", username)
-                .put("password", password)
-            val (code, resp) = postJson("$serverBase/v1/auth/register-verify", body, null)
-            if (code == 201) {
-                val token = JSONObject(resp).optString("token", "")
-                if (token.isNotEmpty()) saveAuth(token)
-                Pair(true, "欢迎加入围场！")
+                val code1 = j.optString("reg_code")
+                if (code1.isNotEmpty()) Pair(true, "申请围场通行证#$code1")
+                else Pair(false, "响应缺少 reg_code")
             } else {
                 Pair(false, errText(code, resp))
             }
@@ -200,13 +254,13 @@ object PaddockClient {
                     val toast = parseToast(resp)
                     // 首次成功 → 补传队列里的旧圈（限流：每次成功上传最多带 10 条）
                     if (drainQueue(token, 10) > 0) {
-                        AlaMobileModule.logX(Log.INFO, TAG, "queue drained")
+                        Logger.log(Log.INFO, TAG, "queue drained")
                     }
                     toast
                 }
                 code == 401 -> { enqueue(gpIndex, lapMs); null }
                 else -> { // 4xx 参数类错误：不重传（服务端明确拒绝）
-                    AlaMobileModule.logX(Log.WARN, TAG, "upload rejected: $code ${errText(code, resp)}")
+                    Logger.log(Log.WARN, TAG, "upload rejected: $code ${errText(code, resp)}")
                     null
                 }
             }
@@ -214,7 +268,7 @@ object PaddockClient {
             enqueue(gpIndex, lapMs)
             null
         } catch (e: Throwable) {
-            AlaMobileModule.logX(Log.WARN, TAG, "uploadLap failed: ${e.message}")
+            Logger.log(Log.WARN, TAG, "uploadLap failed: ${e.message}")
             null
         }
     }
@@ -262,7 +316,7 @@ object PaddockClient {
             while (arr.length() > QUEUE_MAX) arr.remove(0)
             queueFile().writeText(arr.toString())
         } catch (e: Throwable) {
-            AlaMobileModule.logX(Log.WARN, TAG, "enqueue failed: ${e.message}")
+            Logger.log(Log.WARN, TAG, "enqueue failed: ${e.message}")
         }
     }
 
@@ -316,9 +370,9 @@ object PaddockClient {
     // ── HTTP ────────────────────────────────────────────────
 
     /** 榜单条目（积分榜/赛道榜共用解析子集） */
-    data class PointsEntry(val username: String, val points: Int)
+    data class PointsEntry(val username: String, val points: Int, val avatarUrl: String?)
 
-    data class TrackEntry(val rank: Int, val username: String, val lapDisplay: String)
+    data class TrackEntry(val rank: Int, val username: String, val lapDisplay: String, val avatarUrl: String?)
 
     data class TrackBoard(
         val trackName: String,
@@ -334,10 +388,10 @@ object PaddockClient {
             val arr = org.json.JSONArray(JSONObject(resp).optJSONArray("entries")?.toString() ?: "[]")
             (0 until arr.length()).mapNotNull { i ->
                 val e = arr.optJSONObject(i) ?: return@mapNotNull null
-                PointsEntry(e.optString("username"), e.optInt("points"))
+                PointsEntry(e.optString("username"), e.optInt("points"), e.optString("avatar_url").takeIf { it.isNotEmpty() })
             }
         } catch (e: Throwable) {
-            AlaMobileModule.logX(Log.WARN, TAG, "fetchPointsBoard: ${e.message}")
+            Logger.log(Log.WARN, TAG, "fetchPointsBoard: ${e.message}")
             emptyList()
         }
     }
@@ -352,11 +406,62 @@ object PaddockClient {
             val arr = org.json.JSONArray(j.optJSONArray("entries")?.toString() ?: "[]")
             val entries = (0 until arr.length()).mapNotNull { i ->
                 val e = arr.optJSONObject(i) ?: return@mapNotNull null
-                TrackEntry(e.optInt("rank"), e.optString("username"), e.optString("lap_display"))
+                TrackEntry(e.optInt("rank"), e.optString("username"), e.optString("lap_display"), e.optString("avatar_url").takeIf { it.isNotEmpty() })
             }
             TrackBoard(j.optString("track_name", "赛道"), entries)
         } catch (e: Throwable) {
-            AlaMobileModule.logX(Log.WARN, TAG, "fetchTrackBoard: ${e.message}")
+            Logger.log(Log.WARN, TAG, "fetchTrackBoard: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * 上传头像（裁剪后的图片字节，JPEG/PNG，≤2MB）。阻塞 IO。
+     * 成功返回 null；失败返回错误文案。
+     */
+    fun uploadAvatar(bytes: ByteArray, contentType: String): String? {
+        val token = authToken ?: return "未登录"
+        return try {
+            val conn = (URL("$serverBase/v1/me/avatar").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = CONNECT_TIMEOUT
+                readTimeout = 30_000   // 图片上传放宽
+                doOutput = true
+                setRequestProperty("Content-Type", contentType)
+                setRequestProperty("Authorization", "Bearer $token")
+                setFixedLengthStreamingMode(bytes.size)
+            }
+            try {
+                conn.outputStream.use { it.write(bytes) }
+                val code = conn.responseCode
+                if (code == 200) null else errText(code, conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "")
+            } finally {
+                conn.disconnect()
+            }
+        } catch (e: Throwable) {
+            "网络错误: ${e.message}"
+        }
+    }
+
+    /**
+     * 下载头像（公开端点）。avatarUrl 可以是绝对 URL 或服务端返回的相对路径
+     * （/v1/avatar/{id}）——相对路径拼 serverBase。返回图片字节或 null。阻塞 IO。
+     */
+    fun fetchAvatar(avatarUrl: String): ByteArray? {
+        val url = if (avatarUrl.startsWith("http")) avatarUrl else "$serverBase$avatarUrl"
+        return try {
+            val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = CONNECT_TIMEOUT
+                readTimeout = READ_TIMEOUT
+            }
+            try {
+                if (conn.responseCode != 200) return null
+                conn.inputStream.use { it.readBytes() }
+            } finally {
+                conn.disconnect()
+            }
+        } catch (e: Throwable) {
             null
         }
     }
