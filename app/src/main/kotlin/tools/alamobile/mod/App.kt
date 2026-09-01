@@ -84,6 +84,11 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
         const val KEY_MODULE_LOADED = "module_loaded_v1"
         const val KEY_NONROOT_CONFIRMED = "nonroot_confirmed_v1"
 
+        // 围场登录 token（存同一份 Remote Preferences）。模块进程登录时写，
+        // 游戏进程读——两进程 externalFilesDir 互不可见（scoped storage），
+        // daemon 是 token 的权威跨进程通道（与 config_json 同路）。
+        const val KEY_PADDOCK_TOKEN = "paddock_token_v1"
+
         /**
          * NPatch 管理器的 RemoteApiProvider authority。
          * 见 references/NPatch/manager/src/main/.../RemoteApiProvider.kt —
@@ -197,6 +202,10 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
             try {
                 val settings = ModConfig.read(this)
                 tools.alamobile.mod.util.Logger.setEnabled(settings.logEnabled)
+                // 围场客户端初始化（登录页 saveAuth/loadAuth 需要 appContext——
+                // 不 init 时 saveAuth 的 authFile() 直接抛"not initialized"，
+                // 本地 token 文件永远写不出来，曾导致"登录成功但游戏进程拿不到 token"）
+                PaddockClient.init(this, settings.paddockServer.takeIf { it.isNotBlank() })
             } catch (_: Throwable) {
                 // 配置读失败不阻塞 service binding
             }
@@ -277,6 +286,18 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
             // filesDir 的 JSON 始终是最新值（ModConfig.write 每次都写 filesDir），
             // 重复 flush 无害：RemotePreferences.doCommit 只在有 diff 时推。
             flushLocalConfigToRemote(service)
+            // 围场 token 同样兜底：登录时 service 未绑 → saveAuth 只写了本地文件，
+            // service 绑上时补写 daemon（游戏进程才能读到）。
+            try {
+                val token = PaddockClient.peekAuthToken() ?: return
+                service.getRemotePreferences(PREF_GROUP)
+                    .edit()
+                    .putString(KEY_PADDOCK_TOKEN, token)
+                    .apply()
+                Log.i(TAG, "App: flushed paddock token to remote prefs")
+            } catch (e: Throwable) {
+                Log.w(TAG, "App: flush paddock token failed", e)
+            }
         }
     }
 

@@ -223,6 +223,20 @@ class AlaMobileModule : XposedModule() {
                 null
             }
         }
+        // 围场 token reader（同 remoteConfigReader 模式）：daemon 里的登录态。
+        // 根因修复：模块进程与游戏进程 externalFilesDir 是两个目录（scoped storage
+        // 互不可见），本地 auth 文件只在写它的进程可见——daemon 才是跨进程权威通道。
+        PaddockClient.remoteTokenReader = {
+            try {
+                val t = getRemotePreferences(tools.alamobile.mod.App.PREF_GROUP)
+                    .getString(tools.alamobile.mod.App.KEY_PADDOCK_TOKEN, null)
+                logX(Log.INFO, TAG, "remote token read: ${if (t == null) "null (key missing)" else "len=${t.length}"}")
+                t
+            } catch (e: Throwable) {
+                logX(Log.WARN, TAG, "remote token read failed: ${e.message}")
+                null
+            }
+        }
 
         // 注册 ConfigReceiver：接收 ConfigActivity 发来的定向广播（带最新配置 JSON），
         // 写入游戏进程自己的 externalFilesDir。Remote Preferences 路线下广播的价值是
@@ -505,6 +519,11 @@ class AlaMobileModule : XposedModule() {
                             val serverOverride = cfg.paddockServer.takeIf { it.isNotBlank() }
                             PaddockUploader.start(ctx, serverOverride, 200146)
                             logX(Log.INFO, TAG, "PaddockUploader started (server=${serverOverride ?: "default"})")
+                            if (PaddockClient.hasToken()) {
+                                logX(Log.INFO, TAG, "PaddockUploader: token present (auth=${if (PaddockClient.pendingCount() > 0) "restored, queue pending" else "ok"})")
+                            } else {
+                                logX(Log.WARN, TAG, "PaddockUploader: no token (laps will queue locally)")
+                            }
                         } catch (e: Throwable) {
                             logX(Log.ERROR, TAG, "PaddockUploader init failed: ${e.message}")
                         }
