@@ -1,80 +1,81 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-09-01T00:35:00+08:00 · Git HEAD: `9666f67`（模块仓）/ paddock 仓 `5b2d85f`
+生成时间: 2026-09-01T13:32:18+08:00 · Git HEAD: `629f98c`（模块仓）/ paddock 仓 `f646318`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: `main` @ `9666f67`（2026-09-01）；paddock 仓 `main` @ `5b2d85f`
-- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `9666f67`；paddock 仓同理对 `5b2d85f`。不一致以 git 实际输出为准
+- 锚点: `main` @ `629f98c`（2026-09-01）；paddock 仓 `main` @ `f646318`
+- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `629f98c`；paddock 仓同理对 `f646318`。不一致以 git 实际输出为准
 - 待重探的 [?]: 见下方标记
-- 先读: `docs/PADDOCK_PLAN.md`（契约源）+ `paddock-api/src/qq_bot.rs` 头注（bot 鉴权事实速记已沉淀进 paddock README）
+- 先读: `docs/PADDOCK_PLAN.md`（契约源，§4 已更新为注册流 v2）
 
 ## 1. 当前目标
-**围场私服第 1 期收尾与实机验证**。本会话完成了 S4 bot 全部 + 管理端完全体 + VPS 上线 + 实机联调到"群注册校验回复成功"；遗留 3 个实机 bug（见 §2/§6）。用户定案：**下个版本重构模块和服务端的一堆东西**——先重构，再重做端到端。
+**围场第 1 期功能全部落地并上线 v11**。本会话完成：围场 UI 全重做 + 注册流 v2（bot 校验即建号）+ 头像完整链路 + 管理端四轮增强 + 修复三层上传链路 bug。端到端实测：登录→token daemon 恢复→刷圈→Toast→榜单（Monza 1:15.705 上榜，车手 #3）全通。
 
-完成定义：实机计时赛刷圈 → 成绩上榜 → 赛道中文名 Toast → QQ 群注册全流程无人干预。
+完成定义剩余项：QQ 群注册全流程复测（bot 新文案"您是全服第 x 位车手"群内实测）。
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **paddock v9 已上线** `https://paddock.takotsubo.cloud`（compose app/pg/garage 三容器；反代 = 1Panel openresty 终结 443→127.0.0.1:8080；迁移 0003 含车手 ID 序列/reset_codes/configs 表）。`/v1/health` 200。
-- [V] **bot 群链路实测通**：群 @消息验签进站 → 指令匹配 → `member_openid` 识别 → **被动回复成功送达群里**（"无法识别你的群身份"是修复前 v8 的反馈，v9 已修嵌套读取）；私聊被动回复实测通（"消息已发送"+ROBOT1.0 id）。
-- [V] **实机暴露 3 个未解决 bug**（用户实测反馈）：
-  1. 围场页"我已校验"完成注册时**报错**，但服务端实际已建号成功（注册 OK，响应处理或流程 UI 有 bug）；
-  2. 用户反馈注册流程本身与其预期不一致（UI 流程要重新设计，见 §7）；
-  3. 已注册用户在围场页**登录报错** `Failed resolution of: Lio/github/libxposed/api/XposedModule;`——游戏进程内 HttpURLConnection 链路上某处触碰了 Xposed 类（疑似 PaddockUploader/PaddockClient 在游戏进程的类加载问题），未复现定位。
-- [V] 群全量消息（GROUP_MESSAGE_CREATE，不@）平台至今未推送（@ 消息正常）——平台侧问题，配置已全开；用户要求注册**不依赖 @**，此堵点未解。
-- [V] 构建：模块 `assembleDebug+lint` BUILD SUCCESSFUL EXIT=0；paddock `cargo build --release` EXIT=0。
-- [V] 工作区：两仓干净（本 handoff 提交后）；模块仓 HEAD `9666f67`，paddock `5b2d85f`，均与 origin 同步。
+- [V] **paddock v11 已上线**（compose app/pg/garage；migration 0004 自动跑）。`/v1/health` 200；赛道榜返回 `avatar_url`；`register-request` 带 password 实测发码 + 同名 409。
+- [V] **端到端上传实测通**：游戏日志 `remote token read: len=48` → `auth restored` → `queue drained` → `Toast: 您已刷新蒙扎国家赛车场 的全服历史最佳成绩！`；榜单 API 确认 Takotsubo（reg_seq=3）Monza 1:15.705 100分。
+- [V] **头像上传链路实测通**：真 Garage SigV4 上传 200 → 下载字节 `cmp` 一致。
+- [V] **管理端新功能上线**（浏览器待用户复测）：用户改名/删除（prompt 输用户名确认，删后重算 records）、成绩圈时编辑（毫秒，0<ms≤3600000）、时间显示北京时间。
+- [V] **模块 release APK 已装机**（12:47 无线 adb `192.168.50.142`，含榜单重做+头像+全部修复）。用户尚未反馈新 UI 视觉验收。
+- [V] 构建：模块 `assembleDebug+lint` EXIT=0、`assembleRelease` EXIT=0；paddock `cargo build --release` EXIT=0（仅剩继承的 server_best warning）。
+- [V] 工作区：两仓全部提交推送干净。
 
-### 测试/build 输出（本次交接 run 的真实输出，含退出码）
+### 测试/build 输出（真实退出码）
 ```
-./gradlew :app:assembleDebug :app:lint → BUILD SUCCESSFUL in 13s, EXIT=0
-cargo build --release → Finished EXIT=0（paddock 仓）
-实机端到端：注册"半通"（服务端建号成功/客户端报错）、登录失败（XposedModule 类解析）、群校验回复 v9 修复后待复测
+./gradlew :app:assembleDebug :app:lint → BUILD SUCCESSFUL, EXIT=0
+./gradlew :app:assembleRelease → BUILD SUCCESSFUL, EXIT=0
+cargo build --release → Finished EXIT=0（paddock）
+端到端：登录→daemon token→传圈→Toast→榜单 全通 [V]；群内 bot 新文案复测未做 [?]
 ```
 
 ## 3. 决策与理由
-- **管理端完全体优先于实机测试**（用户定案）——S4 bot + 管理端设置页/改密码/改用户名/人工重置 + 车手 ID 全部做完才进实机，不再"半成品先测"。
-- **车手 ID = reg_seq 注册顺序从 1 起**（用户 2026-08-31 定案）：`user_reg_seq` Postgres 序列发放 + UNIQUE 索引；verify/login 响应、两个榜单、管理端用户页均返回/展示。契约已更新 PADDOCK_PLAN §3/§4。
-- **bot 只在单一自拉群工作，不配群白名单**（用户定案）——被动回复直接发消息来源群（`d.group_openid`），管理端已去掉 bot_group_openid 配置项。
-- **管理端用户名必须可改**（用户反馈）——设置页新增改用户名（验当前密码，改完全会话作废）。
-- bot 鉴权事实（逐篇核对官方 11 篇文档）：`Authorization: QQBot {token}` 非 Bearer；被动回复 msg_id 用 `d.id`；群/单聊发送者身份在 `d.author.member_openid`/`user_openid`（嵌套）；群被动窗 5min/5 次、单聊 60min/4 次；token 获取 `POST bots.qq.com/app/getAppAccessToken`。已沉淀进 paddock README + 代码头注。
-- 镜像分发：本地 build → `save|zstd|scp|load`（v2..v9 迭代 9 次），VPS 1.8G 内存不现场编译。
-- 继承：全放行防伪、1Hz 轮询单槽、order==2 挂圈、拦截器零浮点。
+- **注册流 v2：bot 校验即建号**（用户定案）——申请时一并设密+发 reg_seq 存 pending_regs，bot 绑 openid 后直接建号并回复"@用户名 校验成功，欢迎您加入 CAMDA，您是全服第 x 位车手！请返回模块直接点击登录。"；`register-verify` 端点删除。否决"申请只存名、bot 回复不放序号"——用户要求回复带车手序号，只能申请时发号（未完成注册的号作废，顺序不乱允许空缺）。
+- **登录 token 走 Remote Preferences daemon**（key `paddock_token_v1`）——两进程 externalFilesDir 按包名隔离互不可见，daemon 是唯一已验证跨进程通道；`saveAuth` 双写/`loadAuth` daemon 恢复/`clearAuth` 双清/`App.onServiceBind` 补 flush。
+- **头像 SigV4 手写**（~80 行）——不用 aws-sdk（opt-level="z" 体积敏感）；只服务 Put/Get 两形态。PutObject 200 + GetObject 字节级 cmp 一致 [V]。
+- **车手 ID 申请时发放**——bot 回复需要序号；代价是 ID 有空缺（用户接受）。
+- **管理端删除用户**：prompt 输入用户名确认；删用户事务先收集 (gp,version) 维度再 CASCADE 删 + 逐维度重算 records（records 外键 SET NULL 会悬空，必须重算）。
+- 继承：全放行防伪、1Hz 轮询单槽、order==2 挂圈、拦截器零浮点、miuix preference 全盘照搬。
 
 ## 4. 失败的尝试 — 不要再试
 > 全部前向搬运，永不丢弃。完整历史见 `.handoffs/`。
 
-### 本轮新增（QQ bot webhook 联调）
-- [X] **`bearer_auth()` 调 QQ API** → 401 `11241 Authorization参数格式错误`。QQ 鉴权头是自定义 scheme `QQBot {token}`，不是 RFC Bearer。接第三方平台的鉴权头必须按其文档写，不用 `bearer_auth()` 便捷方法。
-- [X] **被动回复用事件外层 id（`事件类型:hex` 形态）当 msg_id** → 400 `40034024 msg_id无效或越权`。被动回复必须用 `d.id`（ROBOT1.0_ 形态）。
-- [X] **GroupMessage 把 member_openid 声明在 d 顶层** → 永远取空 → 回复"无法识别群身份"。实际在 `d.author.member_openid` 嵌套（C2C 是 `d.author.user_openid`）。**教训：写完 payload 解析结构必须用真实 payload 原文逐字段核对，不能凭文档表格直觉**。
-- [X] **凭据未配置时假设平台报错信息可信** → 平台"签名校验不通过"是笼统文案，真因是服务端当时无凭据无法应答 op=13。排障先看服务端日志分清"没应答"vs"验签失败"。
-- [X] **在 VPS 上 cargo build** → 1.8G 内存 OOM 风险。本地构建镜像 → save/zstd/scp/load，5.7MB 传输。
-- [X] **WSL 密钥直用 /mnt/d（0777）** → SSH 拒用。拷进 ext4 chmod 600。
-- [X] **诊断盲区靠猜** → "群消息权限没放量"等猜测被 payload 全量落盘（v7 `payload 原文` 日志）一击终结。webhook 排障先加原文日志再讨论。
-- [?] **服务端归一化 `#` 前空格**（v8 仍保留）——起因是用户手机 QA 模块的 Pangu 化插空格，非官方行为；保留无害（防全角＃等变体），但不要据此声称"官方客户端插空格"。
+### 本轮新增（三层上传链路 + UI 集成）
+- [X] **两进程共用代码引用 `AlaMobileModule.logX`** → 模块进程 NoClassDefFoundError（XposedModule），被外层 catch 拼成"网络错误"伪装。共用代码只准用 `Logger`；libxposed-api 是 compileOnly，只有游戏进程被 LSPosed 注入。诊断指纹：报错文案与某 catch 模板逐字吻合 + 报错类是 compileOnly 依赖。
+- [X] **`PaddockClient` 单例只在游戏进程 init** → 模块进程 `saveAuth` 写文件必抛 "not initialized" 且被吞，token 从未持久化。object 单例掩盖了"每进程都要各自初始化"。
+- [X] **登录态靠 externalFilesDir 文件跨进程** → 按包名隔离互不可见（Android 11+ scoped storage），"两进程都可见"的原注释是错的。必须走 daemon。
+- [X] **`CropImageActivity` 用模块主主题** → AppCompatActivity 强制 AppCompat 系主题，IllegalStateException 闪退。manifest 单独 override `Theme.Cropper`。
+- [X] **`Theme.Cropper` 用 NoActionBar** → 裁剪确认按钮走 options menu（showAsAction=always），NoActionBar 下 menu 无处渲染=白屏无按钮。必须带 ActionBar（反编译字节码确认，非文档）。
+- [X] **改代码后只跑 assembleDebug 就装旧 release APK** → "老样子"假象。装机前必须当场 `assembleRelease`。
+- [X] **sqlx 泛型闭包 `FnOnce(&mut Transaction)->Future` 抽象** → HRTB lifetime 推导失败。放弃抽象直写两份事务代码（recalc_delete / recalc_edit 各自调 recalc_dims）。
+- [X] **axum 0.8 写 `:user_id` 路由** → 启动 panic "Path segments must not start with `:`"。0.8 用 `{user_id}`。
+- [X] **zsh `$UID` 当临时变量** → bad math expression。换名（如 `RID`）。
+- [X] **VPS SSH 端口 22/root** → Connection closed。实际 `takotsubo@8.134.50.222 -p 4142`，docker 要 sudo。
 
-### 继承死路（lap_hook 三版演化 + 指示灯信号链 + FPSIMD，全部实机实证，详见 .handoffs/20260901003000-handoff.md §4）
-- [X] 圈完成等 order 2→0 回绕 / sectorOrder 1-based / HandleSectorsTimes 当过线单事件 / gate v1 "champ==NULL→放行" / trackToRace 当赛道名 / bestLapTimeInfo 当历史最佳 / raceModes 当判据 / 切片提交混 git rename / 拦截器浮点操作 / ABS v1-v5 / 指示灯 v1-v5 / proxy_shift 日志洪水 / IL2CPP dlopen / 后台线程调 Unity API / records 复合主键 NULL 维度 / Toast 双维度共用出口 / askama 单引号 / miuix SuperArrow / sqlx::migrate! 相对路径+query_as! 宏离线 / axum nest("/admin") 带斜杠 404 / Write 工具输出污染——全部 [X] 前向有效，勿重试。
+### 继承死路（全部 [X] 前向有效，详见 .handoffs/20260901003000-handoff.md §4）
+- lap_hook 三版演化 + 指示灯信号链 + FPSIMD：圈完成等 order 2→0 回绕 / sectorOrder 1-based / HandleSectorsTimes 当过线单事件 / gate v1 "champ==NULL→放行" / trackToRace 当赛道名 / bestLapTimeInfo 当历史最佳 / raceModes 当判据 / 切片提交混 git rename / 拦截器浮点操作 / ABS v1-v5 / 指示灯 v1-v5 / proxy_shift 日志洪水 / IL2CPP dlopen / 后台线程调 Unity API / records 复合主键 NULL 维度 / Toast 双维度共用出口 / askama 单引号 / miuix SuperArrow / sqlx::migrate! 相对路径+query_as! 宏离线 / axum nest("/admin") 带斜杠 404 / Write 工具输出污染。
+- QQ bot webhook：bearer_auth 调 QQ API（要 `QQBot {token}`）/ 被动回复用事件外层 id（要用 `d.id`）/ member_openid 声明在 d 顶层（在 `d.author` 嵌套）/ 凭据未配置时信平台报错文案 / VPS 上 cargo build（OOM，本地 build+save/scp）/ WSL 密钥直用 /mnt/d / 诊断盲区靠猜（先加 payload 原文日志）。
 
 ## 5. 已知坑
-- ⚠️ **群全量消息（GROUP_MESSAGE_CREATE，不@）平台不推送** [V]——开放平台配置全开（Webhook + 全部接收 + IP 白名单 8.134.50.222）、@ 消息和 GROUP_MEMBER_ADD 都正常推送，唯独不@的群消息静默丢弃。处理代码已就位（handle_group_message 两事件同路径），平台哪天推了立即生效。堵住"注册不依赖 @"的需求，用户明确要求必须不 @。
-- ⚠️ **v9 群校验回复链路修复后未复测** [?]——member_openid 嵌套修复（v9）后用户尚未再发群申请码验证；预期回复"校验成功"。
-- ⚠️ **实机登录 `XposedModule` 类解析崩溃** [?]——围场页登录报 `Failed resolution of: Lio/github/libxposed/api/XposedModule;`。疑似游戏进程里 Paddock 链路（PaddockUploader/PaddockClient 或 ModConfig）间接触发了 Xposed 类加载。唯一线索：报错文案格式与 PaddockClient 的 `网络错误: ${e.message}` 拼接一致，即发生在 HttpURLConnection 调用层之下。
-- ⚠️ **注册"已校验"步骤 UI 报错但服务端建号成功** [?]——register-verify 的响应（201 {token,reg_seq...}）或客户端对 404/409 的展示有问题；服务端数据正确意味着请求本身到了，需看 PaddockClient.registerVerify 的具体返回分支。
-- ⚠️ **QQ 平台推送内容不可信到字节级**：事件外层 id、author 结构、content 前导空格都可能与文档示例有差异，解析必须以落盘 payload 为准（v7 起有 `payload 原文` 日志）。
-- ⚠️ 继承：双仓赛道中文名两份硬编码（契约源 PADDOCK_PLAN §5，`Shangai` 单 a）；继承 [?]：多指日志回传、Bug B 未复现、16 赛道 12/16 未实机、门禁 champ==NULL 多语义、矩阵空格。
+- ⚠️ **群全量消息（不@）平台至今不推送** [V]——配置全开、@ 消息正常，唯独不@静默丢弃。处理代码已就位。堵住"注册不依赖 @"需求。需提工单或接受 @-only。
+- ⚠️ **bot 新回复文案（带车手序号）群内未复测** [?]——v2 建号逻辑代码验证过，但真实群内"发申请码→@回复带序号"全流程待跑。
+- ⚠️ **QQ 被动回复无真 @mention API** [V]——回复的 `@用户名` 只是文本前缀，群里显示为普通文字。
+- ⚠️ **Garage 22 字节测试对象残留** [V]——bucket `avatars` 里 `avatars/98f7fad3…`（已删用户的测试头像）无 shell/aws cli 清不掉；无害（按 user_id 命名，不会复用）。
+- ⚠️ **Toast 文案"蒙扎国家赛车场 的"多空格** [V]——parseToast 模板 `$track 的` 拼接，track 值可能带尾空格；纯文案瑕疵。
+- ⚠️ **lint baseline 13 条失效** [V]——`/doctor` 逻辑建议下次重新生成（AndroidGradlePluginVersion 等已修复项还挂着）。
+- ⚠️ 继承：双仓赛道中文名两份硬编码（契约源 PADDOCK_PLAN §5，`Shangai` 单 a）；继承 [?]：多指日志回传、16 赛道 12/16 未实机、门禁 champ==NULL 多语义、矩阵空格。
 
 ## 6. 下一步（有序）
-1. **复测 v9 群校验回复**：群里再发 `@bot 申请围场通行证#码`——预期"校验成功"回复；通过后围场页走完注册（注意 §5 的"已校验报错"bug，服务端已建号时 verify 会 404——重复注册同码）。
-2. **修"我已校验"报错**：先看服务端日志 verify 响应码，再对照 PaddockClient.registerVerify 分支；大概率是 201 body 解析或"码已被用"路径的文案映射缺失。
-3. **修登录 XposedModule 类解析崩溃**：抓 release 实机日志（`ala_tool.log` + logcat），定位 Xposed 类从哪条链路进的游戏进程 classloader；候选嫌疑：PaddockUploader 15s 延迟路径的异常处理引用了 Xposed 类型。
-4. **重构**（用户定案"下个版本重构模块和服务端的一堆东西"）：范围由用户下次指定；已注册用户在库（reg_seq 1 号已建号成功）。
-5. （可选清理）删 `hidePedalsApply()` 死代码 + abs_diag_log rfHits/hitAge 行；payload 原文日志转 debug 或限速。
+1. **用户视觉验收新 UI**：围场页（登录/注册并排+注册弹窗）、排行榜新行布局（头像/连排/全称）、头像上传裁剪页——装机完成但用户尚未确认视觉。
+2. **群内复测 bot 新文案**：发 `@bot 申请围场通行证#码` → 预期回复"校验成功…您是全服第 x 位车手！请返回模块直接点击登录。"
+3. **管理端浏览器复测**：用户改名/删除、成绩编辑、北京时间显示。
+4. （可选清理）Toast 文案空格、lint baseline 重新生成、Garage 测试对象、删 hidePedalsApply 死代码 + abs_diag_log rfHits 行、payload 原文日志转 debug。
+5. 重构（用户此前定案"下个版本重构模块和服务端的一堆东西"）——范围待用户下次指定。
 
 ## 7. 留给用户的开放问题
-- 注册流程形态：用户说"我之前说的注册流程本来也不是这样的"——重构时需用户重述预期流程（现实现=申请码→群发码→我来校验→回填码+密码）。
-- 群消息不@推送：配置全开平台仍不推，需要提工单还是接受 @-only？影响注册 UX（@ 要翻列表）。
-- QQ 模块 Pangu 化插空格（用户自己处理）vs 服务端归一化已并存，用户模块修完后两者兼容。
-- 头像上传+裁剪（依赖 Garage 初始化，未开始）。
+- 群消息不@推送：提工单还是接受 @-only？影响注册 UX。
+- 注册流程若还有体验不符预期的地方（v2 弹窗文案/按钮布局），用户验收后反馈。
+- 头像上传入口目前只在首登自动跳转+（规划中）个人卡点击——是否需要在围场页加显式入口？
 - 继承：多指日志回传裁决、工具按钮重置入口、指示灯亮度调节等（未恶化不动）。
