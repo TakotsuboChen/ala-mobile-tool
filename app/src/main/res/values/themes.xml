@@ -4,4 +4,13 @@
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
+
+    <!-- 头像裁剪页（canhub CropImageActivity 是 AppCompatActivity，要求 AppCompat 系主题；
+         模块自身主题是 framework Material，直接用会 IllegalStateException 闪退。
+         ⚠️ 必须带 ActionBar：裁剪确认按钮走 options menu（showAsAction=always），
+         NoActionBar 主题下 menu 无处渲染 → 裁剪页无确认按钮） -->
+    <style name="Theme.Cropper" parent="Theme.AppCompat.DayNight.DarkActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
 </resources>

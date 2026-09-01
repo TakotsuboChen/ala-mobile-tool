@@ -154,6 +154,9 @@ dependencies {
     // Network
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
+
+    // 头像裁剪（围场注册后首登上传）
+    implementation(libs.image.cropper)
 }
 
 kotlin {

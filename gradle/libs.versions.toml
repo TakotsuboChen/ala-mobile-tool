@@ -15,6 +15,7 @@ libxposed-service = "102.0.0"
 shadowhook = "2.0.1"
 okhttp = "4.12.0"
 kotlinx-serialization-json = "1.7.3"
+image-cropper = "4.6.0"
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -59,3 +60,6 @@ shadowhook = { group = "com.bytedance.android", name = "shadowhook", version.ref
 # Network
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinx-serialization-json" }
+
+# 头像裁剪（围场注册后首登上传；依赖 OkHttp，与项目网络栈一致）
+image-cropper = { group = "com.vanniktech", name = "android-image-cropper", version.ref = "image-cropper" }
