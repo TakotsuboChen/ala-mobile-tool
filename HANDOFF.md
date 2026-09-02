@@ -1,78 +1,81 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-09-02T00:45:00+08:00 · Git HEAD: `c483943`（模块仓）/ paddock 仓 `f489214`
+生成时间: 2026-09-02T18:35:00+08:00 · Git HEAD: `00b0795`（模块仓）/ paddock 仓 `f489214`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: 模块仓 `main` @ `c483943`（2026-09-02）；paddock 仓 `main` @ `f489214`
-- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `c483943`；paddock 仓同理对 `f489214`。不一致以 git 实际输出为准
+- 锚点: 模块仓 `main` @ `00b0795`（2026-09-02）；paddock 仓 `main` @ `f489214`
+- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `00b0795`；paddock 仓同理对 `f489214`。不一致以 git 实际输出为准
 - 待重探的 [?]: 见下方标记
-- 先读: `docs/PADDOCK_PLAN.md`（契约源，§4 已落实 GET /v1/me）
+- 先读: `docs/PADDOCK_PLAN.md`（契约源）
 
 ## 1. 当前目标
-**围场第 1 期 UI 打磨与登录态恢复**。本会话完成：`GET /v1/me` 端点（服务端+模块全链路）+ 登录态恢复 + 用户信息连体卡 + 排行榜/弹窗/设置页共 11 条用户 UI 反馈全部落地。服务端 v12 已部署上线，模块 release 已装机，用户已完成两轮视觉验收（第二轮 11 条全部确认改善）。
-
-完成定义剩余项：QQ 群注册全流程复测（bot 新文案"您是全服第 x 位车手"群内实测）。
+**围场排行榜大规模数据实测 + 性能/动画时序重做**。本会话：服务器注入 205 名测试车手（用户名+头像+全 16 赛道圈速）实测榜单 → 据实测反馈重做 `LeaderboardScreen`（LazyColumn 行级 items / 头像降采样 / 排名居中 / 两阶段切换动画 / 尾部留白），4 轮迭代全部落地并装机 → 测试数据已全部清理，服务器回到真实状态。完成定义已达成（排行榜 205 人规模实测通过，动画无闪现无掉帧）。
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **paddock v12 已上线**（`paddock-api:v12`，compose 切标签 up -d）。`/v1/health` 200；`GET /v1/me` 无 token → 401"缺少登录态，请先登录围场"。旧 v11 镜像在 VPS 可回滚。
-- [V] **`GET /v1/me` 全链路通**：用户实测登录后正常进入（此前 401 自动登出 bug 已修，见 §4）；重进模块恢复用户名/积分待用户最终确认，但链路各环节（fetchMe→ViewModel init→连体卡渲染）代码已验证。
-- [V] **模块 release APK 已装机**（22:39 无线 adb `192.168.50.142:41673`，含全部 11 条 UI 反馈修复）。
-- [V] 构建：模块 `assembleDebug+lint` EXIT=0（52 warnings 全部在 baseline 内）；`assembleRelease` EXIT=0；paddock `cargo build --release` EXIT=0（仅剩继承的 server_best warning）。
-- [V] 工作区：两仓全部提交推送干净（模块仓 HEAD `c483943`，paddock 仓 `f489214`）。
+- [V] **排行榜重做已提交推送**（模块仓 `2aed156` + CLAUDE.md `00b0795`），release 已装机（adb 192.168.50.142:39345，Success）
+- [V] **测试数据已全部清理**：`DELETE FROM users WHERE reg_seq>=1000` → DELETE 205；核对 users=1/max_seq=3、laps=10（8 条测试前 + 2 条用户本轮实测上传的真实圈速）、best_laps=2、records=4（全是 Takotsubo 真实纪录）。paddock 仓无改动
+- [V] **实时刷新定为"暂时不做"**（用户明确拍板）：当前只有进页面+切筛选时拉取，停留期间是静态快照
+- [V] 构建：`compileDebugKotlin`/`lint`/`assembleRelease` 全 EXIT=0（53 warnings 全在 baseline 内）；用户 4 轮视觉验收：排名对齐✓ 无掉帧✓ 无闪现✓（第 4 轮尾部留白修复后未复测）
+- [V] 工作区：模块仓干净已推送；paddock 仓干净（HEAD `f489214` 未动）
 
 ### 测试/build 输出（真实退出码）
 ```
-./gradlew :app:assembleDebug :app:lint → BUILD SUCCESSFUL, EXIT=0（新 shell 复跑）
+./gradlew :app:compileDebugKotlin → BUILD SUCCESSFUL（4 轮每轮都跑）
+./gradlew :app:lint → BUILD SUCCESSFUL, EXIT=0（53 warnings baseline 内）
 ./gradlew :app:assembleRelease → BUILD SUCCESSFUL, EXIT=0
-cargo build --release → Finished EXIT=0（paddock）
-用户实测：登录→进入正常 [V]；UI 两轮 11 条反馈全部落地并装机 [V]
+adb install -r app-release.apk → Success（无线 adb，端口本会话从 41673 漂到 39345）
+服务器注入：users/laps/best_laps 205/13075/3280 → 清理后 1/10/2
 ```
 
 ## 3. 决策与理由
-- **`GET /v1/me` 而非登录响应带积分**——积分是动态查询，塞进登录响应会让两处口径耦合；统一从 /v1/me 取，服务端复用总榜 CTE（`GROUP BY user_id, gp_index` + min）保证个人积分与总榜永远一致。
-- **401 才登出、网络错误保留 token**（fetchMe needRelogin 语义）——把"token 失效"与"暂时离线"混为一谈会误登出。
-- **排行榜 Crossfade 数据驱动**（sealed `BoardState` 含数据本体为 target）——key 绑筛选条件会闪现两次（条件变→"加载中"→数据到）；数据到达才切 state，加载期间保留旧内容。
-- **表单校验本地复刻服务端规则**（`validateFormat` 逐字对齐 auth.rs 用户名空格/汉字规则）——错误文案两侧一致；注释标了规则出处，改规则要改两处（已知代价，用户接受）。
-- **忘记密码/退出登录走 OverlayDialog 常驻组合树**（`show || mounted` 双状态控制挂载）——退场动画需要组件驻留到 `onDismissFinished`。
-- **围场服务器显式保存按钮**（非防抖自动保存）——涉及"重启才生效"的配置给用户确定感；120dp 固定宽≈1/3 输入框宽。
-- 继承：注册流 v2 / token daemon 通道 / 头像 SigV4 / 全放行防伪 / order==2 挂圈 / 拦截器零浮点 / miuix preference 全盘照搬。
+- **测试数据锚点用 `reg_seq >= 1000`**（真实用户最大 3）——一条 DELETE 级联清 sessions/laps/best_laps；测试圈速硬下限 95s 慢于真实纪录，避免 `records.user_id ON DELETE SET NULL` 留无主脏纪录。
+- **头像直插 SQL 但上传走真实 API**（并发 8 经 SSH 隧道→VPS 8080）——argon2×205 太慢；头像链路（SigV4→Garage→落库）顺带压测，205/205 零失败。
+- **榜单行必须是 LazyColumn items 而非 Card+forEach**——205 行全量组合在数据到达帧撞上转场动画掉帧；连体卡视觉由行级 surfaceContainer 底色+首末行圆角拼接替代。
+- **两阶段切换：渲染数据（visibleBoard）≠ 筛选状态**——旧行显式 Animatable alpha 立即渐隐（与筛选卡伸缩并行）→ 完成后换 visibleBoard → 新行 animateItem 淡入。渐隐不用 animateItem 的移除淡出（换源帧才启动，撞布局动画尾巴=闪现）。
+- **animateItem 而非手动 Animatable 做行淡入**——snapTo(0f) 在 LaunchedEffect 协程里跑，新数据先以 alpha=1 渲染一帧才被拽回 0，那一帧就是闪现；animateItem 由框架在首帧前定初始 alpha。
+- **进入转场 500ms 结束后才渲染行**（delay(NAV_ENTER_SETTLE_MILLIS)）——miuix NavDriver `PROGRAMMATIC_DURATION_MILLIS=500` 契约值；数据请求与转场并行，只推迟进组合树，总等待不变。
+- **排名数字 `textAlign=Center` + 28dp 固定槽**——Compose Text 默认靠左，多位数排名挤向头像列。
+- 继承：/v1/me 全链路 / 注册流 v2 / token daemon / 全放行防伪 / order==2 挂圈 / 拦截器零浮点 / miuix preference 全盘照搬。
 
 ## 4. 失败的尝试 — 不要再试
 > 全部前向搬运，永不丢弃。完整历史见 `.handoffs/`。
 
-### 本轮新增（登录态恢复 + UI 反馈）
-- [X] **`fetchMe` 复用无鉴权 `getJson(url)`** → 不带 Authorization → `/v1/me` 恒 401 → ViewModel 判定 token 失效 `clearAuth()` → "登录成功"Toast 后一秒被踢回登录表单。修复：`getJson(url, token)` 显式参数。诊断指纹：`token saved to remote prefs` 日志正常但随后无 fetchMe WARN——漏发 header 的 401 在客户端看就是"合法拒绝"。
-- [X] **Crossfade key 绑筛选条件**（Triple(tab,track,version)）→ 条件变即切"加载中"、数据到再切内容，一次操作闪两次，无动画感。修复：sealed BoardState（数据本体在 state 里）数据到位才切。
-- [X] **TopAppBar `navigationIcon` 只画 Icon 不绑事件** → 返回键点了没反应。必须显式 `Modifier.clickable { navigator.pop() }`。
-- [X] **弹窗文字区太矮太小**（14sp 左对齐）→ 用户点名改居中粗体 17sp+垂直 padding。弹窗标题类文字的默认观感（小字正文）用户不接受。
-- [X] **Card 内手写内容贴底边**（说明文字 Row、保存按钮 Row 均踩过）→ miuix Card 无 contentPadding，preference 组件的 insideMargin 替你管边距，手写 Column/Row 必须自己带全四周 padding。
-- [X] **OverlaySpinnerPreference 换组件丢 startAction** → ArrowPreference→Spinner 迁移时漏带图标，用户点名"没让你去掉图标"。迁移 preference 组件时逐参数对照。
-- [X] **`clickable` import 包名**：正确是 `androidx.compose.foundation.clickable`（miuix 源码证实），`androidx.compose.ui.clickable` 不存在。Modifier 扩展的包名以编译器为准，别猜。
-- [X] **adb 无线端口固定假设** → 手机重开无线调试后端口变化（41433→41673），旧端口拒绝连接。自救：`adb mdns services` 看当前真实端口，选最新条目连。
+### 本轮新增（排行榜性能/动画 4 轮迭代）
+- [X] **生成圈速 `max(ms, 95000)` 钳位保底** → 正态采样 90% 低于下限全被压到同一毫秒 → 几百人并列 1:35.000、积分榜一片 1600。修复：分布整体定义在 [95s,125s]（三角分布）+同赛道撞值+1ms 错开。教训：保底要靠"分布在界内采样"，不能"先采样再砍"；造数脚本先跑重复值自检再入库（v2 首版 dups=99~171 被自检拦下）。
+- [X] **Card 内 forEach 渲染 205 行** → 数据到达帧一次性全量组合，撞 Crossfade 动画中途掉帧（用户："动画进行到一半就卡一下"）。修复：行改 LazyColumn items。
+- [X] **手动 Animatable + snapTo(0f) 做行淡入** → 数据同帧先以 alpha=1 渲染、协程下一帧才拽回 0 → 闪现且动画被打断（用户："会闪现，没有动画"）。修复：`Modifier.animateItem()`（框架首帧前定初始 alpha）。
+- [X] **换源直接读筛选状态（visibleBoard 未与筛选解耦）** → 旧行瞬消+新行瞬现，淡出/淡入同帧竞争（用户："切换还是闪现"）。修复：visibleBoard 独立状态+switchSeq 协程换源。
+- [X] **换源 delay(150ms) 排在筛选卡伸缩动画之后** → 伸缩刚结束的那一帧移除+插入同帧发生，仍闪现（用户："筛选条件伸缩完了之后排行榜闪一下"）。修复：渐隐立即启动（显式 alpha）与伸缩并行，换源发生在 alpha=0 空档。
+- [X] **Card→行级 items 丢了底部留白** → 榜单滑到底卡片贴屏幕底边（原 Card 在 Column spacedBy(12dp) 里的外距被拆掉）。修复：items 末尾补 Spacer(12.dp) item。
+- [X] **SQL 直插 VALUES 不带类型标注** → `INSERT...SELECT t.*` 报 `user_id is of type uuid but expression is of type text`。修复：`t.user_id::uuid` 显式 cast（本地脚本已同步修）。
+- [X] **adb 无线端口固定假设（再次）** → 端口又变（41673→39345），mdns 重扫连最新条目。每次装机先 `adb mdns services`。
 
-### 继承死路（全部 [X] 前向有效，详见 .handoffs/20260902003000-handoff.md §4）
-- 两进程共用代码引 `AlaMobileModule.logX` → NoClassDefFoundError 伪装"网络错误"（只准用 Logger）/ PaddockClient 单例只在游戏进程 init / externalFilesDir 跨进程不可见（token 走 daemon）/ CropImageActivity 主主题闪退+NoActionBar 白屏 / 改代码只跑 assembleDebug 装旧 release / sqlx HRTB 泛型闭包 / axum 0.8 `:param` 路由 panic / zsh `$UID` / VPS SSH `takotsubo@8.134.50.222 -p 4142`+docker sudo。
-- lap_hook 三版演化 + 指示灯信号链 + FPSIMD：圈完成等 order 2→0 回绕 / sectorOrder 1-based / HandleSectorsTimes 当过线单事件 / gate v1 "champ==NULL→放行" / trackToRace 当赛道名 / bestLapTimeInfo 当历史最佳 / raceModes 当判据 / 切片提交混 git rename / 拦截器浮点操作 / ABS v1-v5 / 指示灯 v1-v5 / proxy_shift 日志洪水 / IL2CPP dlopen / 后台线程调 Unity API / records 复合主键 NULL 维度 / Toast 双维度共用出口 / askama 单引号 / miuix SuperArrow / sqlx::migrate! 相对路径+query_as! 宏离线 / axum nest("/admin") 带斜杠 404 / Write 工具输出污染。
-- QQ bot webhook：bearer_auth 调 QQ API（要 `QQBot {token}`）/ 被动回复用事件外层 id（要用 `d.id`）/ member_openid 声明在 d 顶层（在 `d.author` 嵌套）/ 凭据未配置时信平台报错文案 / VPS 上 cargo build（OOM，本地 build+save/scp）/ WSL 密钥直用 /mnt/d / 诊断盲区靠猜（先加 payload 原文日志）。
+### 继承死路（全部 [X] 前向有效，详见 .handoffs/20260902182211-handoff.md §4）
+- fetchMe 无鉴权 getJson 漏发 Authorization → 401 自动登出 / Crossfade key 绑筛选条件闪两次 / TopAppBar navigationIcon 只画不绑事件 / 弹窗文字默认观感太矮小 / Card 内手写内容贴边 / OverlaySpinnerPreference 迁移丢参数 / `clickable` 包名是 foundation / adb 端口漂移。
+- 两进程共用代码引 `AlaMobileModule.logX` → NoClassDefFoundError 伪装"网络错误" / PaddockClient 单例只在游戏进程 init / externalFilesDir 跨进程不可见（token 走 daemon）/ CropImageActivity 主主题闪退+NoActionBar 白屏 / 改代码只跑 assembleDebug 装旧 release / sqlx HRTB / axum 0.8 `:param` panic / zsh `$UID` / VPS SSH `takotsubo@8.134.50.222 -p 4142`+docker sudo+compose 文件名是 docker-compose.vps.yml。
+- lap_hook 三版演化 + 指示灯信号链 + FPSIMD：圈完成等 order 2→0 回绕 / sectorOrder 1-based / gate v1 champ==NULL 放行 / trackToRace 当赛道名 / 拦截器浮点操作 / ABS v1-v5 / proxy_shift 日志洪水 / IL2CPP dlopen / 后台线程调 Unity API / records 复合主键 NULL 维度 / askama 单引号 / axum nest("/admin") 404 / Write 工具输出污染。
+- QQ bot webhook：bearer_auth 调 QQ API / 被动回复用 `d.id` 非 event id / member_openid 在 `d.author` / 凭据未配置时信平台报错 / VPS cargo build OOM（本地 build+scp）/ 诊断先加 payload 原文日志。
 
 ## 5. 已知坑
-- ⚠️ **群全量消息（不@）平台至今不推送** [V]——配置全开、@ 消息正常，唯独不@静默丢弃。处理代码已就位。堵住"注册不依赖 @"需求。需提工单或接受 @-only。
-- ⚠️ **bot 新回复文案（带车手序号）群内未复测** [?]——v2 建号逻辑代码验证过，但真实群内"发申请码→@回复带序号"全流程待跑。
-- ⚠️ **QQ 被动回复无真 @mention API** [V]——回复的 `@用户名` 只是文本前缀，群里显示为普通文字。
-- ⚠️ **Garage 22 字节测试对象残留** [V]——bucket `avatars` 里 `avatars/98f7fad3…`（已删用户的测试头像）无 shell/aws cli 清不掉；无害（按 user_id 命名，不会复用）。
-- ⚠️ **Toast 文案"蒙扎国家赛车场 的"多空格** [V]——parseToast 模板 `$track 的` 拼接，track 值可能带尾空格；纯文案瑕疵，用户尚未点名修。
-- ⚠️ **lint baseline 13 条失效** [V]——`/doctor` 逻辑建议下次重新生成（AndroidGradlePluginVersion 等已修复项还挂着）。
+- ⚠️ **群全量消息（不@）平台至今不推送** [V]——配置全开、@ 消息正常，不@静默丢弃。处理代码已就位，堵住"注册不依赖 @"。需提工单或接受 @-only。
+- ⚠️ **bot 新回复文案（带车手序号）群内未复测** [?]——v2 建号逻辑代码验证过，真实群内"发申请码→@回复带序号"全流程待跑。**v1 完成定义最后遗留项**。
+- ⚠️ **Garage 206 个测试/遗留头像对象** [V]——bucket `avatars` 里 `avatars/aaaaaaaa-…`（205 个本轮测试）+`avatars/98f7fad3…`（旧测试）无 shell/aws cli 清不掉；无害（按 user_id 命名不复用）。
+- ⚠️ **Toast 文案"蒙扎国家赛车场 的"多空格** [V]——parseToast 模板 `$track 的`，track 值可能带尾空格；纯文案瑕疵，用户未点名修。
+- ⚠️ **lint baseline 13 条失效** [V]——下次重新生成。
+- ⚠️ **排行榜无实时刷新**（用户拍板"暂时不做"）——只有进页面+切筛选时拉取；候选方案（下拉刷新/RESUME 刷新/轮询）已分析留给用户选。
 - ⚠️ 继承：双仓赛道中文名两份硬编码（契约源 PADDOCK_PLAN §5，`Shangai` 单 a）；继承 [?]：多指日志回传、16 赛道 12/16 未实机、门禁 champ==NULL 多语义、矩阵空格。
 
 ## 6. 下一步（有序）
-1. **群内复测 bot 新文案**：发 `@bot 申请围场通行证#码` → 预期回复"校验成功…您是全服第 x 位车手！请返回模块直接点击登录。"（v1 完成定义最后遗留项）
-2. **用户最终确认登录态恢复**：杀模块进程重进 → 用户信息连体卡应完整显示（用户名/车手 #ID/计时赛积分），本轮已装机但用户尚未明确反馈此项 OK。
-3. （可选清理）Toast 文案空格、lint baseline 重新生成、Garage 测试对象、payload 原文日志转 debug。
-4. 重构（用户此前定案"下个版本重构模块和服务端的一堆东西"）——范围待用户下次指定。
+1. **群内复测 bot 新文案**：发 `@bot 申请围场通行证#码` → 预期回复"校验成功…您是全服第 x 位车手！请返回模块直接点击登录。"（v1 完成定义最后遗留）
+2. **用户复测第 4 轮修复**：榜单滑到底部应有 12dp 底部留白（装机后未复测）。
+3. **重构**（用户定案"下个版本重构模块和服务端的一堆东西"）——范围待用户指定。
+4. （可选）排行榜实时刷新：用户已拍板暂不做，重启话题时从下拉刷新方案起。
+5. （可选清理）Toast 文案空格、lint baseline 重新生成、Garage 测试对象。
 
 ## 7. 留给用户的开放问题
 - 群消息不@推送：提工单还是接受 @-only？影响注册 UX。
-- 计时赛积分个人卡在无成绩时显示"暂无"，登录成功但 /v1/me 网络失败时也显示"暂无"——是否需要区分"加载失败"与"暂无成绩"？
-- 大奖赛/娱乐匹配占位卡（Toast"开发中"）后续真做时：赛季积分/胜场数据从哪来（服务端目前只有计时赛成绩）？
+- 计时赛积分卡"暂无"与"加载失败"是否需要区分显示？
+- 大奖赛/娱乐匹配占位卡真做时：赛季积分/胜场数据从哪来（服务端目前只有计时赛成绩）？
+- 重构范围：用户说"下个版本重构模块和服务端的一堆东西"，具体清单待定。
 - 继承：多指日志回传裁决、工具按钮重置入口、指示灯亮度调节等（未恶化不动）。
