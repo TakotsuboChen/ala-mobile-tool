@@ -26,6 +26,8 @@ import androidx.compose.material.icons.rounded.Leaderboard
 import androidx.compose.material.icons.rounded.Logout
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.SportsEsports
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -42,7 +44,9 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -60,6 +64,7 @@ import tools.alamobile.mod.ui.viewmodel.PaddockViewModel
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
@@ -378,6 +383,7 @@ private fun StatValue(value: String, modifier: Modifier = Modifier) {
 private fun VerifyCard(uiState: tools.alamobile.mod.ui.viewmodel.PaddockViewModel.UiState, actions: PaddockViewModel) {
     var loginName by remember { mutableStateOf(TextFieldValue(uiState.loginName)) }
     var loginPass by remember { mutableStateOf(TextFieldValue(uiState.loginPass)) }
+    var passVisible by remember { mutableStateOf(false) }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             TextField(
@@ -391,6 +397,17 @@ private fun VerifyCard(uiState: tools.alamobile.mod.ui.viewmodel.PaddockViewMode
                 onValueChange = { loginPass = it; actions.setLoginPass(it.text) },
                 label = "密码",
                 modifier = Modifier.fillMaxWidth(),
+                visualTransformation = if (passVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    // 显隐切换图标：IconButton 无背景，避免抢 TextField 尾部空间
+                    IconButton(onClick = { passVisible = !passVisible }) {
+                        Icon(
+                            imageVector = if (passVisible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                            contentDescription = if (passVisible) "隐藏密码" else "显示密码",
+                            tint = colorScheme.onBackground.copy(alpha = 0.6f),
+                        )
+                    }
+                },
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 TextButton(
@@ -442,6 +459,7 @@ private fun ResetPasswordDialog(
 ) {
     var resetCode by remember { mutableStateOf(TextFieldValue(uiState.resetCode)) }
     var resetPass by remember { mutableStateOf(TextFieldValue(uiState.resetPass)) }
+    var passVisible by remember { mutableStateOf(false) }
     OverlayDialog(
         show = uiState.showReset,
         onDismissRequest = onDismiss,
@@ -459,7 +477,7 @@ private fun ResetPasswordDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text(
-                    text = "在模块交流 QQ 群发送「重置密码 你的用户名」，助理回复重置码后回填：",
+                    text = "在模块交流 QQ 群发送「我需要重置密码」，助理按你的群身份自动匹配账号并回复重置码，回填此处：",
                     fontSize = 14.sp,
                 )
                 TextField(
@@ -473,6 +491,16 @@ private fun ResetPasswordDialog(
                     onValueChange = { resetPass = it; actions.setResetPass(it.text) },
                     label = "新密码",
                     modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = if (passVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { passVisible = !passVisible }) {
+                            Icon(
+                                imageVector = if (passVisible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                contentDescription = if (passVisible) "隐藏密码" else "显示密码",
+                                tint = colorScheme.onBackground.copy(alpha = 0.6f),
+                            )
+                        }
+                    },
                 )
                 Row(modifier = Modifier.fillMaxWidth()) {
                     TextButton(

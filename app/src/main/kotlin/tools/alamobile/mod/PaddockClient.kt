@@ -319,19 +319,18 @@ object PaddockClient {
     }
 
     /**
-     * 服务端 Toast 文案组装。level 映射（服务端字段 toast.level + track 中文名）。
-     * 四条件（去重后单条），模板按用户原文定案：
-     * "您已刷新[赛道名]的历史/版本的个人/全服最佳成绩"
+     * 服务端 Toast 文案组装。level 映射（服务端字段 toast.level）。
+     * 四条件（去重后单条），模板按用户定案（2026-09-04：不带赛道名）：
+     * "您已刷新…的个人/全服最佳成绩"
      */
     private fun parseToast(resp: String): String? {
         return try {
             val toast = JSONObject(resp).optJSONObject("toast") ?: return null
-            val track = toast.optString("track", "赛道")
             when (toast.optString("level")) {
-                "alltime_server" -> "您已刷新$track 的全服历史最佳成绩！"
-                "version_server" -> "您已刷新$track 的全服版本最佳成绩！"
-                "alltime_personal" -> "您已刷新$track 的个人历史最佳成绩！"
-                "version_personal" -> "您已刷新$track 的个人版本最佳成绩！"
+                "alltime_server" -> "您已刷新全服历史最佳成绩！"
+                "version_server" -> "您已刷新全服版本最佳成绩！"
+                "alltime_personal" -> "您已刷新个人历史最佳成绩！"
+                "version_personal" -> "您已刷新个人版本最佳成绩！"
                 else -> null
             }
         } catch (e: Throwable) {
