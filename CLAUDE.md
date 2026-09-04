@@ -19,7 +19,7 @@ License: Apache-2.0
 
 **Sister repository**: `../ala-mobile-paddock` (`https://github.com/TakotsuboChen/ala-mobile-paddock`) — paddock (围场) private-server backend (Rust axum + Postgres + Garage, Apache-2.0). **已上线** `https://paddock.takotsubo.cloud`（VPS 8.134.50.222，Docker Compose 三容器 app/postgres/garage，反代由 1Panel openresty 终结 443 → 127.0.0.1:8080；Caddy 已弃用于该栈）。管理端 `/admin`（凭据在 VPS `~/paddock/.env`）。QQ bot webhook `/qq/webhook`（凭据经管理端设置页落库 configs 表）。Development sessions always run in **this** repo; both sides are developed together in one session. The sole contract source is `docs/PADDOCK_PLAN.md` (API shapes, points formula, track display names) — any contract change must update **both** repos in the same session.
 
-Supported game version: **Ala Mobile 8.0.4 (versionCode 200146)**. IL2CPP method offsets are version-specific; the module gates all native hooks behind `VersionGate`.
+Supported game version: **Ala Mobile 8.0.6 (versionCode 200150)**（2026-09-04 起弃 8.0.4 支撑；共存版定制：应用名 "Ala Mobile Pro"、图标 #FF8000 橙）. IL2CPP method offsets are version-specific; the module gates all native hooks behind `VersionGate`.
 
 **Log pulling (实机日志拉取)**: game-side logs live at `/sdcard/Android/data/<游戏包>/files/ala_tool.log` (Java) + `ala_tool_native.log` (native), where `<游戏包>` is **either** package name above depending on which build the user runs. Device log file timestamps are the fastest way to tell which build produced a given log.
 
@@ -128,22 +128,22 @@ Reverse-engineering artifacts are generated from the local APK and should not be
 
 **游戏 APK 本地副本在项目内，不要去 /tmp 找临时解包目录（WSL 重启即丢），也不要 adb pull：**
 
-- `安装包/` — 各版本成品安装包（如 `Ala Mobile 8.0.4 Takotsubo 共存版.apk`）
+- `安装包/` — 各版本成品安装包（如 `Ala Mobile 8.0.6 Takotsubo 共存版.apk`）
 - `build/v<版本>-official/base.apk` + `build/v<版本>-official-native/split_config.arm64_v8a.apk` — 官方版分包，解 `lib/arm64-v8a/libil2cpp.so` 用后者
 - `build/` 下还有各历史版本的 base.apk / split_config.arm64_v8a.apk
 - global-metadata.dat 在 base.apk 的 `assets/bin/Data/Managed/Metadata/` 内
 
 Run Il2CppDumper (requires a local `Il2CppDumper` binary)——先从上面的项目内 APK 解出两个输入文件：
 ```bash
-mkdir -p il2cpp-dumps/v8.0.4
+mkdir -p il2cpp-dumps/v8.0.6
 Il2CppDumper <解出的 libil2cpp.so> \
              <解出的 global-metadata.dat> \
-             il2cpp-dumps/v8.0.4/
+             il2cpp-dumps/v8.0.6/
 ```
 
 Important output files:
-- `il2cpp-dumps/v8.0.4/dump.cs` — human-readable class/method/field dump.
-- `il2cpp-dumps/v8.0.4/offsets_sheet.csv` — curated table of target methods and fields used by the module.
+- `il2cpp-dumps/v8.0.6/dump.cs` — human-readable class/method/field dump.
+- `il2cpp-dumps/v8.0.6/offsets_sheet.csv` — curated table of target methods and fields used by the module. ⚠️ 字段偏移核对清单 = native 全部 `OFF_*` 常量而非本表（8.0.6 闪退教训）。
 
 Update `OffsetTable.kt` after every IL2CPP dump.
 
@@ -152,7 +152,7 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - Package root: `tools.alamobile.mod`
 - `AlaMobileModule` is the single `XposedModule` subclass and entry point. Register it in `src/main/resources/META-INF/xposed/java_init.list`.
 - Keep the native bridge surface small. Java passes only resolved offsets and feature toggles to `libala-core.so`.
-- All native IL2CPP hooks are gated by `VersionGate`: refuse to install if the game version is not exactly `8.0.4 (200146)`.
+- All native IL2CPP hooks are gated by `VersionGate`: refuse to install if the game version is not exactly `8.0.6 (200150)`.
 - Native hooks that intercept or override gameplay behavior (TC/ABS disable, future ESC tuning) must gate on the whitelist comparison `is_target_player_car` (`this == g_player_controller`), never on the `is_player_controller` field probe — the `playerControls` field (0x108) can be non-null on AI cars, and intercepting them breaks all AI drivers (verified: disabling TC once crippled the whole AI field).
 - Passthrough hooks (installed on methods shared by all cars/instances, e.g. proxy_shift_up/down) must stay log-free — any unconditional LOGI there floods the log (measured: 18810 lines in 21 min, fires even when the feature is off) and drowns diagnostic logs. Log only at install time or inside player-gated paths.
 - Overlay Views use raw Android Canvas (not Compose) because Compose cannot overlay reliably on a Unity SurfaceView.
@@ -206,4 +206,6 @@ Two areas are explicitly designated for human contribution during implementation
 - Do not commit the APK or any IL2CPP dump larger than GitHub's file size limit. Large files are excluded via `.gitignore`.
 - miuix is a Kotlin Multiplatform library; keep Compose code in `ConfigActivity` and do not use it for runtime overlays.
 - Before adding new native hooks, regenerate the IL2CPP dump and update `offsets_sheet.csv`/`OffsetTable.kt`.
+- **所有 IL2CPP/Unity 方法 RVA 的单一事实源是 `OffsetTable.kt`**：native 侧（`native/src/*.c`）禁止硬编码 `#define RVA_*` 或裸 RVA 常量——一律由 Java 侧从 OffsetTable 取值、经 JNI 参数注入（既有模式：`NativeBridge.init(...)` 的 offset 参数 / `hide_pedals_set_offsets`）。`unlock_hook.c` 里仅存的 3 个 fallback 数值是 `g_config` 异常时的应急兜底，注释必须标明对应版本，升版时同步更新。升版流程 = 跑 Il2CppDumper → 只改 `OffsetTable.kt`（+ offsets_sheet.csv）→ native 目录零 RVA 改动。
+- **游戏升版时，字段偏移核对清单 = native 里全部 `#define OFF_*` 常量，不是 offsets_sheet.csv**：sheet 只记录方法 RVA + 部分字段，lap_hook/pedal_hook 里还有一批 8.0.0 时代硬编码的中间跳转字段（如 odometerHandler.stGUI→stadistics 链），漏核一个就是跑圈中途 SIGSEGV（8.0.6 实证：odometerHandler 头部插入 centralMessagesContainer 致其后字段全 +8，stGUI 0xF8→0x100）。核对方法：对每个 OFF_ 常量在**新旧两版 dump.cs** 里找 `字段; // 0xXX` 注释逐一对拍，逐类全量 diff 不抽样。
 - Coexistence APK build: use the `coex-apk-builder` skill (`.claude/skills/coex-apk-builder/SKILL.md`). Two paths maintained: LSPosed (root) and NPatch local mode (non-root, majority users). NPatch flow: Claude provides coex APK → Takotsubo injects via NPatch → self-signs with fixed keystore → distributes to end users.

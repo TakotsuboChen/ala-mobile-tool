@@ -15,6 +15,32 @@ description: 制作 Ala Mobile 共存版 APK 的完整流水线 skill。覆盖 G
 - **保留功能**：Unity 引擎、IL2CPP 运行时、Addressables 资产、视频播放全部正常工作
 - **签名**：用项目自有 keystore 签名（v2/v3，targetSdk 35 强制）
 
+## 1a. 共存版品牌定制（8.0.6 起固化的配方，用户定案）
+
+除绕过校验外，共存版每版必须做以下两项定制：
+
+1. **应用名 → `Ala Mobile Pro`**：改 `res/values/strings.xml` 的 `<string name="app_name">`（游戏只有默认 values 一处定义）。改完后用 `aapt2 dump badging | grep application-label` 验证。
+2. **图标红 → `#FF8000` 亮橙**：`res/mipmap*/app_icon.png` + `app_icon_round.png` 共 12 个文件（6 密度 × 2 形状）。HSV 变换三步：**色相固定 30°（#FF8000 的色相）、饱和度 ×1.3（原红 s≈0.8，拉满才到纯橙，否则发棕）、明度 ×1.12**；饱和度 <0.25 的像素不动（保护白色 "ALA MOBILE" 文字与灰色底板）。⚠️ 只做色相偏移+压明度会得到屎棕色（v1 教训），必须拉饱和。成品主色实测 `#FF7F00`。处理脚本（Pillow）：
+
+```python
+import glob, colorsys
+from PIL import Image
+for f in glob.glob('res/mipmap*/app_icon*.png'):
+    img = Image.open(f).convert('RGBA'); px = img.load()
+    for y in range(img.size[1]):
+        for x in range(img.size[0]):
+            r, g, b, a = px[x, y]
+            if a == 0: continue
+            h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
+            if s < 0.25: continue
+            h = 30/360; s = min(1.0, s*1.3); v = min(1.0, v*1.12)
+            r, g, b = colorsys.hsv_to_rgb(h, s, v)
+            px[x, y] = (int(r*255), int(g*255), int(b*255), a)
+    img.save(f)
+```
+
+处理前先 `Read` 一张 xxxhdpi 原图目击原色，处理后同样目击确认（红→橙、无白字损伤）。
+
 ## 2. 背景：为什么需要共存版
 
 Ala Mobile 通过 Google Play 分发，使用 **pairip license check** + **Play Protect stamp** 双重校验：
@@ -283,6 +309,16 @@ apksigner sign \
 apksigner verify --print-certs coex-8.0.X-signed.apk
 # 应显示 Signer #1 certificate DN: CN=AlaMobileTool
 ```
+
+### 阶段 8a：推送裸包到手机（NPatch 流程用）
+
+共存版完成后**不直接安装**（用户要 NPatch 注入+自签），推到手机 Download：
+
+```bash
+adb push "<本地路径>/Ala Mobile 8.0.6 Takotsubo 共存版.apk" "/sdcard/Download/Ala Mobile 8.0.6 Takotsubo 共存版.apk"
+```
+
+⚠️ **目标必须写完整文件路径**——只给 `/sdcard/Download/` 时中文+空格文件名会解析失败报 `remote couldn't create file: Is a directory`（且输出仍显示 "1 file pushed" 假成功）。推完必须 `adb shell "md5sum '<手机路径>'"` 与本地 md5 对照。
 
 ### 阶段 9：安装与验证
 

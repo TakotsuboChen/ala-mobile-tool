@@ -21,7 +21,7 @@
 | 数据契约 | 圈时(ms) + gpIndex + versionCode（最小契约）[D] | 未来扩展再加字段 |
 | 版本键 | 游戏 6 位 versionCode（200146=8.0.4）[D] | 版本榜即该游戏版本榜 |
 | 登录态 | 90 天滑动 token [D] | 改密即失效兜底 |
-| 积分公式 | `score = round(1 + (N−rank)×99/(N−1))`，N=1 给 100 [D] | 每赛道×每版本独立；总榜跨版本累加 |
+| 积分公式 | `score = round((N−rank)×100/N)`：第一 100，每名次递减 100/N，虚位第 N+1 名 0；N=1 给 100（v39 定案。例：2 人 → 100/50/虚位0）[D] | 每赛道×每版本独立；总榜=各版本独立计分后累加（版本=独立赛季：两版本全赛道第一=3200） |
 | Toast | 四条件全启用，同帧取最高一条：全服历史 > 全服版本 > 个人历史 > 个人版本 [D] | 服务端响应决定 |
 | 弱网 | 本地待传队列自动重传 + 去重 [D] | 未登录圈缓存（时效 30 天）登录后补传 |
 | 密码找回 | bot 一次性码（群内 @bot "重置密码 用户名"）[D] | 管理端同时留人工重置入口为宜（计划内含） |
@@ -101,25 +101,36 @@ GET  /v1/leaderboard/points?version=      → 积分总榜/版本榜
 GET  /v1/leaderboard/track/{gp_index}?version= → 赛道榜（总榜不分版本）
 GET  /v1/me                      (Bearer) → {user_id, username, reg_seq, has_avatar, total_points}
     （2026-09-01 实现：模块重进后恢复登录态展示；total_points=计时赛总积分，与积分总榜同口径
-     （跨版本 best-of-best 每赛道积分求和，无成绩=0）；401=token 失效→模块自动登出）
+     （v39 起=各版本独立计分累加，无成绩=0）；401=token 失效→模块自动登出）
 ```
 
 错误码明确返回（401 掉登录态→模块进缓存补传路径）。
 
-### 注册流程（v2，2026-09-01 定案：bot 校验即建号）
+### 注册流程（v4，2026-09-04 定案：申请即设密 + 幂等恢复 + 建号时发最小空缺号）
 
 ```
-模块：输入用户名+密码 → POST register-request（服务端哈希密码+nextval 发号存 pending）
+模块：输入用户名+密码 → POST register-request（服务端哈希密码落 pending_regs）
      → 弹窗展示"申请围场通行证#码"（点击复制指令）→ 用户复制后发 CAMDA 群
-bot：群内匹配码 → 绑 member_openid → 建号事务（DELETE pending RETURNING → INSERT users）
-     → 回复"@用户名 校验成功，欢迎您加入 CAMDA，您是全服第 x 位车手！请返回模块直接点击登录。"
-模块：用户回 App 用同一账号密码 → POST login → has_avatar=false → 跳头像上传页
+bot：群内匹配码 → 建号事务（车手号=最小未占用正整数）→ 回复欢迎语（含车手号）
+     → 用户回 App 登录 → has_avatar=false → 跳头像上传页
 ```
 
-- 车手 ID（reg_seq）在**申请时**即发放：bot 回复需要序号；未完成注册的号作废
-  （顺序不乱，允许空缺——与"严格连续"的取舍已由用户定案）
+- **车手 ID（reg_seq）在 bot 建号时发放**（v3+ 变更）：`min(正整数 not in 已占用)`，
+  弃号立即回收；并发撞号由 reg_seq 唯一约束兜底（建号失败可重试）
+- **重复点"注册"幂等恢复**（v33+）：同名在途 + 密码一致 → 返回原 reg_code（200，
+  模块端弹窗自然重弹）；密码不一致 → 409（防用户名抢占攻击）
 - 密码在申请时一并设置（服务端哈希落 pending），bot 建号时直接使用——
   模块端无 verify 步骤、无校验码回填
+- **重置密码**：群内发「我需要重置密码」严格匹配 → bot 按群身份（member_openid）
+  反查在途 reg_code 重发；单聊不支持（user_openid/member_openid 两体系不互通）
+
+### 版本键（v36+）
+
+- 游戏 versionCode 作为成绩/积分的版本维度键：200146=8.0.4、**200150=8.0.6（当前）**
+- 上传 `POST /v1/laps` 按 `version_code` 分维度写 best_laps/records；积分版本榜按
+  `?version=` 过滤，总榜按版本独立计分累加（版本=独立赛季）——新游戏版本上线时数据链路零改动，只需：
+  ① 模块 OffsetTable.PADDOCK_VERSION_CODE 升新码 ② 服务端 version_display 加映射
+  ③ 管理端补录 KNOWN_VERSIONS/弹窗下拉加选项
 
 ## 5. 赛道中文名对照（key=场景名，逐字照抄 [V]）
 
