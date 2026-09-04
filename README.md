@@ -3,13 +3,13 @@
 <p align="center">
   <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/LSPosed%20API-102-green" alt="LSPosed API">
-  <img src="https://img.shields.io/badge/version-1.0.2-green" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.3-green" alt="Version">
   <img src="https://img.shields.io/badge/target-Ala%20Mobile-red" alt="Target">
 </p>
 
 <p align="center">
   <strong>Ala Mobile 的体验增强 LSPosed 模块</strong><br>
-  线性踏板操控 &middot; 原生 TC 控制 &middot; 音乐替换 &middot; V10 引擎声浪 &middot; 内购解锁
+  线性踏板操控 &middot; 原生 TC/ABS 控制 &middot; 围场计时赛排行榜 &middot; 音乐替换 &middot; V10 引擎声浪 &middot; 内购解锁
 </p>
 
 ---
@@ -113,9 +113,18 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 
 #### 计时赛有效圈速（Lap Timing）
 - Hook `odometerHandler.HandleSectorsTimes`（游戏圈段事件）与 `IRDSLevelLoadVariables.Awake`，纯透传只读，不写任何游戏字段
-- 有效圈判定直接采信游戏原生 `validLap` 位（切弯/逆行判定的最终产物），会话最快有效圈在过圈瞬间写入日志（`LAPbest` / `LAPdone` / `LAPinv`），无需 UI
+- 有效圈判定直接采信游戏原生 `validLap` 位（切弯/逆行判定的最终产物），会话最快有效圈在过圈瞬间写入日志（`LAPbest` / `LAPdone` / `LAPinv`）
+- 圈完成事件经单槽 JNI 缓冲暴露给 Java 层，是**围场圈速上传**的数据源
 - 赛道自动识别：经 `SceneManagerHelper` + `CommonUtilities.GetGPIndex` 探测场景 buildIndex（`LAPscene` 行），16 条 GP 赛道映射见 `docs/TRACK_IDENTIFICATION.md`（4 条已实机交叉验证）
 - 会话门禁：仅计时赛记录（`ChampionshipManager.isTimeAttack`），正赛 / 比赛周练习等其他会话自动静默（`LAPgate`）
+
+#### 围场互联（Paddock）
+- **计时赛在线排行榜**：总榜（积分制）+ 分赛道榜（圈速制），模块 App 围场页直连
+- **积分规则**：`round((N−rank)×100/N)`——第一名 100 分、每名次递减 100/N；每赛道 × 每游戏版本独立排名计分，总榜为各版本积分之和（版本 = 独立赛季）
+- **通行证账号**：模块内申请即设密 → QQ 群发送校验指令完成建号 → 直接登录；密码重置经群内口令 + 重置码完成
+- **圈速自动上传**：有效圈过线瞬间经 native 单槽缓冲 → 1Hz 轮询上传，仅计时赛会话生效；服务端 Toast 四条件判定（全服/版本/赛道/个人最佳）
+- **个人资料**：圆形头像（1:1 裁剪上传）、车手 ID、计时赛总积分；登录态跨进程持久（Remote Preferences daemon 通道），重装不丢
+- **服务器可配置**：默认官方围场服务器，设置页可切自建服务器
 
 #### AI 车隔离
 - 通过 `IRDSPlayerControls.Update()` 捕获玩家车 controller（该组件只挂在玩家车 GameObject 上）
@@ -136,7 +145,7 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 #### 游戏版本检测
 - 概览页标题上方显示官版/共存版版本检测胶囊（每次启动自动检测）
 - 用 `<queries>` 声明两个游戏包名，`getPackageInfo` 静默查询，无需运行时权限
-- 已适配（8.0.4）显示绿色胶囊，未适配显示红色胶囊，未安装显示黄色胶囊
+- 已适配（8.0.6）显示绿色胶囊，未适配显示红色胶囊，未安装显示黄色胶囊
 - 下滑收缩时胶囊即时隐藏，上滑恢复后延迟渐显，避免与居中小标题重叠
 
 #### 现代 UI
@@ -152,7 +161,7 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 
 #### 版本门控
 - `VersionGate` 精准校验包名（原版 + 共存版）、`versionName` 和 `versionCode`
-- 非 8.0.4（200146）版本拒绝加载 Native Hook，避免 IL2CPP 偏移不匹配导致崩溃
+- 非 8.0.6（200150）版本拒绝加载 Native Hook，避免 IL2CPP 偏移不匹配导致崩溃
 
 #### 用户协议（EULA）
 - 强制确认弹窗，按版本号持久化（当前 v2），条款更新重新弹窗
@@ -182,7 +191,8 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 ### 🚧 开发中
 
 - **自动 DRS**：已完成 `drsToggle()` 拦截，telemetry 赛道数据解析待实现
-- **手动换挡**：`DoGearShifting` Hook 导致起步失败，需重新实现
+- **手动换挡**：`DoGearShifting` Hook 曾致起步失败暂时禁用，待重新实现
+- **大奖赛/娱乐匹配**：围场页占位入口，服务端赛程功能待实现
 
 ---
 
@@ -191,7 +201,7 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 ### 前提条件
 
 - 一部已 Root 的 Android 手机，安装了 **LSPosed**（或兼容分支）框架
-- 已安装 **Ala Mobile 8.0.4**（versionCode 200146）
+- 已安装 **Ala Mobile 8.0.6**（versionCode 200150）
 
 ### 步骤
 
@@ -245,6 +255,21 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 | 杂项 | 替换主菜单音乐 | 更换为 Hans Zimmer - F1（默认开启） |
 | | 替换开场动画背景音 | 更改为 V10 引擎声浪（默认关闭） |
 
+### 围场页（模块设置界面第 3 页）
+
+打开模块 App 后底栏第 3 个 tab（概览 / 配置 / 围场 / 设置）：
+
+| 功能项 | 说明 |
+|---|---|
+| 通行证核验 | 未登录：用户名 + 密码表单，注册/登录并排；注册后按弹窗指令到 QQ 群发送校验消息完成建号 |
+| 用户信息卡 | 已登录：头像、用户名、车手 ID、计时赛总积分 |
+| 计时赛排行榜 | 积分总榜 / 分赛道圈速榜，按游戏版本筛选，行 = 排名 + 头像 + 用户名 + 圈速 |
+| 头像设置 | 相册选图 + 1:1 圆形裁剪上传 |
+| 大奖赛 / 娱乐匹配 | 占位入口（赛程功能开发中） |
+| 退出登录 | 二次确认弹窗 |
+
+> 围场服务器默认使用官方服务器（`https://paddock.takotsubo.cloud`），自建服务端见 [ala-mobile-paddock](https://github.com/TakotsuboChen/ala-mobile-paddock) 仓库；设置页可切换自定义服务器地址。
+
 ### 设置页
 
 | 功能项 | 说明 |
@@ -262,9 +287,9 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 
 | 版本 | versionCode | 架构 |
 |---|---|---|
-| 8.0.4 | 200146 | arm64-v8a |
+| 8.0.6 | 200150 | arm64-v8a |
 
-> 已做版本门控，其他版本不会生效。IL2CPP 方法地址随版本变化，非匹配版本无法加载 Native Hook。
+> 已做版本门控，其他版本不会生效。IL2CPP 方法地址随版本变化，非匹配版本无法加载 Native Hook。8.0.4（200146）支持已于 2026-09-04 起弃用（1.0.2 及更早版本仍可用 8.0.4）。
 
 ---
 
@@ -272,7 +297,6 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 
 - 自动 DRS 仅完成 `drsToggle()` 拦截，赛道数据自动判断尚未实现
 - 手动换挡因 `DoGearShifting` Hook 导致起步失败，**已暂时禁用**，待重新实现
-- ~~ABS 原生 Hook（`HandleABS`）被编译器内联~~ → 已解决：carController hook + per-wheel `usesABS=false` 双重门控
 - **弯道「顿挫」通常来自游戏内置的刹车辅助**，与模块无关，请在游戏设置中关闭辅助功能；使用模块 ABS 自定义档时，也可通过干预强度档位与最大制动压力滑条缓解
 - 共存版（重打包改包名）需配合双 ClassLoader 守卫，当前版本已修复
 
@@ -296,15 +320,19 @@ Ala Mobile Tool (LSPosed 模块 APK)
 ├── ConfigProvider          # 跨进程配置 IPC（ContentProvider）
 ├── ConfigReceiver          # 配置广播接收器
 ├── BillingHook             # Java 层内购解锁（Xposed Hook）
+├── PaddockClient           # 围场 API 客户端（HTTPS，无新依赖）
+├── PaddockUploader         # 圈速上传（1Hz 轮询 native 单槽缓冲）
 ├── LsposedStatus           # 激活状态判定（frameworkName 区分框架 + Non-root 弹窗确认）
 ├── EulaManager             # 用户协议管理
 ├── VersionGate             # 版本门控
 └── libala-core.so          # ShadowHook 原生引擎（arm64-v8a）
-    ├── pedal_hook          # 油门/刹车/换挡 + writer 线程
+    ├── pedal_hook          # 油门/刹车/换挡 + writer 线程 + TC/ABS 控制
     ├── drs_hook            # DRS 拦截
     ├── unlock_hook         # BillingManager 解锁（主路径）
     ├── music_hook          # 主菜单音乐静音 + 心跳检测
-    └── intro_hook          # 开场 V10 引擎声：静音 introSound + one-shot 信号
+    ├── intro_hook          # 开场 V10 引擎声：静音 introSound + one-shot 信号
+    ├── hide_pedals_hook    # 隐藏游戏原生油门/刹车按键（IRDSUIMobileControls）
+    └── lap_hook            # 计时赛有效圈监听 + 赛道识别（围场上传数据源）
 ```
 
 **技术栈：**
@@ -338,7 +366,11 @@ tools/run-il2cpp-dumper.sh
 ## 路线图
 
 - [ ] 自动 DRS：赛道 telemetry 解析 + 自动开关
-- [ ] 手动换挡：重新实现 `DoGearShifting` Hook
+- [ ] 手动换挡：重新实现 `DoGearShifting` Hook（曾致起步失败，当前禁用待重写）
+- [ ] 大奖赛/娱乐匹配：围场服务端赛程体系
+- [x] 围场互联：计时赛排行榜 + 通行证账号 + 圈速上传 + 头像（v1.0.3）
+- [x] 计时赛有效圈速监听：原生 validLap 采信 + 16 赛道自动识别（v1.0.3）
+- [x] 适配 Ala Mobile 8.0.6（v1.0.3；8.0.4 支持弃用）
 - [x] 原生 ABS 控制：开关 + 干预强度档位 + 最大制动压力（carController hook + per-wheel usesABS 双重门控 + 刹车请求饱和重映射）
 - [x] 工具按钮位置记忆（默认启用，无开关）
 - [x] TC/ABS 介入指示灯（游戏原生介入信号 + 25Hz 同步闪烁，默认启用）
@@ -366,6 +398,9 @@ tools/run-il2cpp-dumper.sh
 
 <details>
 <summary>展开查看</summary>
+
+**v1.0.3**（2026-09-04，正式版，versionCode 103300）
+> 围场互联大版本。新增围场（Paddock）在线功能：QQ 群校验注册的通行证账号体系、计时赛在线排行榜（积分总榜 + 分赛道圈速榜，积分 `round((N−rank)×100/N)`、游戏版本 = 独立赛季）、计时赛有效圈自动上传（服务端判定全服/版本/赛道/个人最佳并弹 Toast）、圆形头像裁剪上传、登录态跨进程持久化；配套新增计时赛有效圈速监听 lap_hook（采信游戏原生 validLap 判定、16 条 GP 赛道自动识别、仅计时赛会话生效）与隐藏游戏原生油门/刹车按键开关。全面适配 Ala Mobile 8.0.6（200150，8.0.4 支持弃用）：OffsetTable 37 个 RVA 全量更新、修复跑圈 SIGSEGV。体验增强：TC/ABS 介入指示灯（游戏原生介入信号 + 25Hz 同频闪烁）、工具按钮位置记忆、最大制动压力饱和重映射。修复多指触摸踏板跳满、隐藏踏板开关单向阀缺陷、ABS 档位浮点寄存器污染回归。
 
 **v1.0.2**（2026-08-29，正式版，versionCode 102300）
 > 制动控制大版本。新增 ABS 防抱死制动系统调节（干预强度五档：关闭 ABS/低/中/高/最高，修改干预制动偏置，缓解游戏 ABS 全段过度保护）与最大制动压力旋钮（50-100% 等比缩放制动扭矩上限，关 ABS 下也生效，缓解"关 ABS 秒锁死"）；TC 档位升级为削减强度五档 + 介入时机四档（(ε, minSPD) 成对覆写含起步低速门，修复只调阈值时起步段无感）；新增隐藏游戏原生油门/刹车按键开关；踏板响应曲线切线算法升级为曲率能量最小化凸优化（单点弯形状误差 −40%）；配置页新增页面级手势方向锁（横滑切页与竖滚互斥）。修复踏板/换挡控件半透明边框缝隙、多指触摸干扰踏板数值、关闭 TC 误伤 AI 车、日志洪水刷爆日志文件；新增踏板触摸诊断日志，导出仅保留最近 24h 条目。

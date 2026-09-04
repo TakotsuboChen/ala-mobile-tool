@@ -2,5 +2,5 @@ minApiVersion=101
 targetApiVersion=102
 staticScope=true
 autoHotReload=true
-version=1.0.2
-versionCode=102300
+version=1.0.3
+versionCode=103300
