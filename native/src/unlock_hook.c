@@ -654,8 +654,8 @@ bool unlock_force_now(void) {
     // 解析 get_Instance 地址
     uintptr_t get_instance_offset = g_config.billing_manager_get_instance_offset;
     if (get_instance_offset == 0) {
-        get_instance_offset = 0x1872C98; // Ala Mobile 8.0.4 (200146)
-        LOGW("unlock_force_now: get_instance_offset was 0, using fallback 0x1872C98");
+        get_instance_offset = 0x1873BBC; // Ala Mobile 8.0.6 (200150)
+        LOGW("unlock_force_now: get_instance_offset was 0, using fallback 0x1873BBC");
     }
     uintptr_t base = get_module_base("libil2cpp.so");
     if (base == 0) {
@@ -676,8 +676,8 @@ bool unlock_force_now(void) {
     // SetUnlocked 内部 if (!IsUnlocked) 决定是否走完整逻辑。与 hook_awake 同理。
     uintptr_t set_unlocked_offset = g_config.billing_manager_set_unlocked_offset;
     if (set_unlocked_offset == 0) {
-        set_unlocked_offset = 0x1874780; // Ala Mobile 8.0.4 (200146)
-        LOGW("unlock_force_now: set_unlocked_offset was 0, using fallback 0x1874780");
+        set_unlocked_offset = 0x18756A4; // Ala Mobile 8.0.6 (200150)
+        LOGW("unlock_force_now: set_unlocked_offset was 0, using fallback 0x18756A4");
     }
     set_unlocked_func_t set_unlocked = (set_unlocked_func_t)(base + set_unlocked_offset);
     LOGI("unlock_force_now: calling SetUnlocked(true) on BillingManager %p", instance);
@@ -705,8 +705,8 @@ bool unlock_force_now(void) {
     // 也调 OnAlreadyOwned 辅助
     uintptr_t on_already_owned_offset = g_config.billing_manager_on_already_owned_offset;
     if (on_already_owned_offset == 0) {
-        on_already_owned_offset = 0x18744F4; // Ala Mobile 8.0.4 (200146)
-        LOGW("unlock_force_now: on_already_owned_offset was 0, using fallback 0x18744F4");
+        on_already_owned_offset = 0x1875418; // Ala Mobile 8.0.6 (200150)
+        LOGW("unlock_force_now: on_already_owned_offset was 0, using fallback 0x1875418");
     }
     on_already_owned_func_t on_already_owned = (on_already_owned_func_t)(base + on_already_owned_offset);
     LOGI("unlock_force_now: OnAlreadyOwned at %p", on_already_owned);

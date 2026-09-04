@@ -427,7 +427,9 @@ object PaddockClient {
     fun fetchPointsBoard(version: Int?): List<PointsEntry> {
         return try {
             val q = if (version != null) "?version=$version" else ""
+            Logger.log(Log.INFO, TAG, "fetchPointsBoard: GET $serverBase/v1/leaderboard/points$q")
             val (code, resp) = getJson("$serverBase/v1/leaderboard/points$q")
+            Logger.log(Log.INFO, TAG, "fetchPointsBoard: HTTP $code, ${resp.length} bytes")
             if (code != 200) return emptyList()
             val arr = org.json.JSONArray(JSONObject(resp).optJSONArray("entries")?.toString() ?: "[]")
             (0 until arr.length()).mapNotNull { i ->
@@ -444,7 +446,9 @@ object PaddockClient {
     fun fetchTrackBoard(gpIndex: Int, version: Int?): TrackBoard? {
         return try {
             val q = if (version != null) "?version=$version" else ""
+            Logger.log(Log.INFO, TAG, "fetchTrackBoard: GET track/$gpIndex$q")
             val (code, resp) = getJson("$serverBase/v1/leaderboard/track/$gpIndex$q")
+            Logger.log(Log.INFO, TAG, "fetchTrackBoard: HTTP $code, ${resp.length} bytes")
             if (code != 200) return null
             val j = JSONObject(resp)
             val arr = org.json.JSONArray(j.optJSONArray("entries")?.toString() ?: "[]")

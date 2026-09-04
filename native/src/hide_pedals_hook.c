@@ -13,15 +13,16 @@
 #define LOGW(...) NLOGW(__VA_ARGS__)
 #define LOGE(...) NLOGE(__VA_ARGS__)
 
-// Unity / IL2CPP method RVA constants (Ala Mobile 8.0.4, versionCode 200146)
-#define RVA_IRDS_UI_MOBILE_CONTROLS_GET_INSTANCE 0x174D268L
-#define RVA_GAME_OBJECT_SET_ACTIVE      0x329D704L
-#define RVA_GAME_OBJECT_GET_ACTIVE_SELF 0x329D748L
-#define RVA_GAME_OBJECT_GET_TRANSFORM   0x329D5C8L
-#define RVA_COMPONENT_GET_GAME_OBJECT   0x329E3B0L
-#define RVA_TRANSFORM_GET_CHILD         0x32ABCBCL
-#define RVA_TRANSFORM_GET_CHILD_COUNT   0x32AB654L
-#define RVA_OBJECT_GET_NAME             0x32A1838L
+// Unity / IL2CPP method RVA constants — 全部由 Java 侧 OffsetTable 注入
+// （hide_pedals_set_offsets），native 侧不再硬编码。见 CLAUDE.md 约定。
+static uintptr_t rva_irds_ui_mobile_controls_get_instance;
+static uintptr_t rva_game_object_set_active;
+static uintptr_t rva_game_object_get_active_self;
+static uintptr_t rva_game_object_get_transform;
+static uintptr_t rva_component_get_game_object;
+static uintptr_t rva_transform_get_child;
+static uintptr_t rva_transform_get_child_count;
+static uintptr_t rva_object_get_name;
 
 // IL2CPP memory layout
 #define OFFSET_IMC_MOBILE_CONTROLS_LAYOUTS 0x20
@@ -159,6 +160,24 @@ static bool il2cpp_string_equals_ascii(void *il2cpp_str, const char *ascii) {
     return true;
 }
 
+void hide_pedals_set_offsets(unsigned long long get_instance,
+                             unsigned long long go_set_active,
+                             unsigned long long go_get_active_self,
+                             unsigned long long go_get_transform,
+                             unsigned long long component_get_game_object,
+                             unsigned long long transform_get_child,
+                             unsigned long long transform_get_child_count,
+                             unsigned long long object_get_name) {
+    rva_irds_ui_mobile_controls_get_instance = (uintptr_t) get_instance;
+    rva_game_object_set_active = (uintptr_t) go_set_active;
+    rva_game_object_get_active_self = (uintptr_t) go_get_active_self;
+    rva_game_object_get_transform = (uintptr_t) go_get_transform;
+    rva_component_get_game_object = (uintptr_t) component_get_game_object;
+    rva_transform_get_child = (uintptr_t) transform_get_child;
+    rva_transform_get_child_count = (uintptr_t) transform_get_child_count;
+    rva_object_get_name = (uintptr_t) object_get_name;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Resolve Unity methods + IL2CPP runtime API
 // ═══════════════════════════════════════════════════════════════════════════
@@ -166,14 +185,14 @@ static bool resolve_unity_methods(void) {
     if (g_go_set_active != NULL) return true;
     uintptr_t base = get_module_base("libil2cpp.so");
     if (base == 0) return false;
-    g_get_irds_ui_instance = (get_irds_ui_instance_t)(base + RVA_IRDS_UI_MOBILE_CONTROLS_GET_INSTANCE);
-    g_go_get_transform = (go_get_transform_t)(base + RVA_GAME_OBJECT_GET_TRANSFORM);
-    g_component_get_game_object = (component_get_game_object_t)(base + RVA_COMPONENT_GET_GAME_OBJECT);
-    g_object_get_name = (object_get_name_t)(base + RVA_OBJECT_GET_NAME);
-    g_transform_get_child_count = (transform_get_child_count_t)(base + RVA_TRANSFORM_GET_CHILD_COUNT);
-    g_transform_get_child = (transform_get_child_t)(base + RVA_TRANSFORM_GET_CHILD);
-    g_go_set_active = (go_set_active_t)(base + RVA_GAME_OBJECT_SET_ACTIVE);
-    g_go_get_active_self = (go_get_active_self_t)(base + RVA_GAME_OBJECT_GET_ACTIVE_SELF);
+    g_get_irds_ui_instance = (get_irds_ui_instance_t)(base + rva_irds_ui_mobile_controls_get_instance);
+    g_go_get_transform = (go_get_transform_t)(base + rva_game_object_get_transform);
+    g_component_get_game_object = (component_get_game_object_t)(base + rva_component_get_game_object);
+    g_object_get_name = (object_get_name_t)(base + rva_object_get_name);
+    g_transform_get_child_count = (transform_get_child_count_t)(base + rva_transform_get_child_count);
+    g_transform_get_child = (transform_get_child_t)(base + rva_transform_get_child);
+    g_go_set_active = (go_set_active_t)(base + rva_game_object_set_active);
+    g_go_get_active_self = (go_get_active_self_t)(base + rva_game_object_get_active_self);
     LOGI("hide_pedals: Unity methods resolved (base=0x%" PRIxPTR ")", base);
     return true;
 }

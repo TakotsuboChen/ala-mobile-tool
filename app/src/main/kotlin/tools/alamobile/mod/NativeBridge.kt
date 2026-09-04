@@ -378,9 +378,20 @@ object NativeBridge {
      * 启动 native 后台轮询线程，每 2 秒遍历 IRDSUIMobileControls 布局 GameObject
      * 子物体，按名字匹配 "Throttle"/"Brake" 并 SetActive(false)，跳过 "Clutch"。
      * enabled=false 时启动线程但不执行隐藏。
+     * RVA 全部由 OffsetTable 注入（见 CLAUDE.md：native 不得硬编码 RVA）。
      */
     @JvmStatic
-    external fun initHidePedals(enabled: Boolean)
+    external fun initHidePedals(
+        enabled: Boolean,
+        getInstanceOffset: Long,
+        goSetActiveOffset: Long,
+        goGetActiveSelfOffset: Long,
+        goGetTransformOffset: Long,
+        componentGetGameObjectOffset: Long,
+        transformGetChildOffset: Long,
+        transformGetChildCountOffset: Long,
+        objectGetNameOffset: Long
+    )
 
     /**
      * 实时切换"隐藏游戏原生油门/刹车按钮"开关。

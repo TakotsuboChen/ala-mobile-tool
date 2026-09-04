@@ -417,10 +417,25 @@ Java_tools_alamobile_mod_NativeBridge_setLogEnabled(JNIEnv *env, jclass clazz, j
 }
 
 // 初始化"隐藏游戏原生油门/刹车按钮"功能——启动 native 后台轮询线程。
+// RVA 由 Java 侧 OffsetTable 注入（见 CLAUDE.md：所有 IL2CPP/Unity RVA 必须收进 OffsetTable）。
 JNIEXPORT void JNICALL
-Java_tools_alamobile_mod_NativeBridge_initHidePedals(JNIEnv *env, jclass clazz, jboolean enabled) {
+Java_tools_alamobile_mod_NativeBridge_initHidePedals(JNIEnv *env, jclass clazz, jboolean enabled,
+                                                     jlong get_instance, jlong go_set_active,
+                                                     jlong go_get_active_self, jlong go_get_transform,
+                                                     jlong component_get_game_object,
+                                                     jlong transform_get_child,
+                                                     jlong transform_get_child_count,
+                                                     jlong object_get_name) {
     (void) env;
     (void) clazz;
+    hide_pedals_set_offsets((unsigned long long) get_instance,
+                            (unsigned long long) go_set_active,
+                            (unsigned long long) go_get_active_self,
+                            (unsigned long long) go_get_transform,
+                            (unsigned long long) component_get_game_object,
+                            (unsigned long long) transform_get_child,
+                            (unsigned long long) transform_get_child_count,
+                            (unsigned long long) object_get_name);
     hide_pedals_init((bool) enabled);
 }
 

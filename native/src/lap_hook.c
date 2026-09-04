@@ -66,12 +66,12 @@
 
 // ── 实例字段偏移（8.0.4 dump.cs 实证，类布局跨 8.0.x 不变）──
 #define OFF_LLV_TRACK_TO_RACE         0xB8    // IRDSLevelLoadVariables.trackToRace (string)
-#define OFF_ODOMETER_ST_GUI           0xF8    // odometerHandler.stGUI (IRDSManager)
-#define OFF_ODOMETER_TARGET_SPEED     0xE8    // odometerHandler.targetSpeed (IRDSCarControllInput)
-#define OFF_ODOMETER_CHAMP_MANAGER    0x4D8   // odometerHandler.champManager (ChampionshipManager)
+#define OFF_ODOMETER_ST_GUI           0x100   // odometerHandler.stGUI (IRDSManager) — 8.0.6: centralMessagesContainer(0x30) 插入致后续全 +8
+#define OFF_ODOMETER_TARGET_SPEED     0xF0    // odometerHandler.targetSpeed (IRDSCarControllInput) — 8.0.6 +8
+#define OFF_ODOMETER_CHAMP_MANAGER    0x4E0   // odometerHandler.champManager (ChampionshipManager) — 8.0.6 +8
 #define OFF_CHAMP_IS_TIME_ATTACK      0x20    // ChampionshipManager.isTimeAttack (bool)
-#define OFF_ODOMETER_IS_QUALI         0x2A0   // odometerHandler.isQuali (bool)
-#define OFF_ODOMETER_TA_TIMES         0x2E0   // odometerHandler.timeAttackTimes (List<float>)
+#define OFF_ODOMETER_IS_QUALI         0x2A8   // odometerHandler.isQuali (bool) — 8.0.6 +8
+#define OFF_ODOMETER_TA_TIMES         0x2E8   // odometerHandler.timeAttackTimes (List<float>) — 8.0.6 +8
 #define OFF_LLV_RACE_MODES            0x158   // IRDSLevelLoadVariables.raceModes (enum int)
 #define OFF_LIST_SIZE                 0x18    // IL2CPP List<T>.size (int32)
 #define OFF_MANAGER_STADISTICS        0x68    // IRDSManager.stadistics (IRDSStatistics)

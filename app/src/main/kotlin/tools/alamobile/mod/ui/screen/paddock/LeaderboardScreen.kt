@@ -96,8 +96,11 @@ fun LeaderboardScreen() {
     var tabIndex by remember { mutableIntStateOf(0) }
     // 赛道榜参数（gp_index 0..15，与 TRACK_NAMES 索引一致；默认第一个=阿尔伯特公园）
     var selectedTrack by remember { mutableIntStateOf(0) }
-    var selectedVersion by remember { mutableIntStateOf(0) }  // 0=总榜 1=8.0.4(200146)
-    val VERSION_CODES = arrayOf(200146)
+    // 0=所有版本 1=8.0.6(当前) 2=8.0.4(历史)
+    var selectedVersion by remember { mutableIntStateOf(0) }
+    // 纯版本码映射表（下标 = spinner 序号-1）；哨兵"所有版本"由 selectedVersion==0 判断，
+    // 勿把 0 混进数组——曾致选 8.0.6 发 version=0（服务端空榜）选 8.0.4 发 8.0.6 的错位 bug
+    val VERSION_CODES = arrayOf(tools.alamobile.mod.offsets.OffsetTable.PADDOCK_VERSION_CODE, 200146)
 
     var points by remember { mutableStateOf<List<PaddockClient.PointsEntry>>(emptyList()) }
     var trackBoard by remember { mutableStateOf<PaddockClient.TrackBoard?>(null) }
@@ -447,7 +450,7 @@ private fun TrackSpinner(selected: Int, onPick: (Int) -> Unit) {
 
 @Composable
 private fun VersionSpinner(selected: Int, onPick: (Int) -> Unit) {
-    val items = remember { listOf(DropdownItem(text = "全部"), DropdownItem(text = "8.0.4")) }
+    val items = remember { listOf(DropdownItem(text = "全部"), DropdownItem(text = "8.0.6"), DropdownItem(text = "8.0.4")) }
     OverlaySpinnerPreference(
         items = items,
         selectedIndex = selected,

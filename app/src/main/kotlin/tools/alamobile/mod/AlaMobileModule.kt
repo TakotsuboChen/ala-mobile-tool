@@ -16,6 +16,7 @@ import tools.alamobile.mod.config.ModConfig
 import tools.alamobile.mod.hook.BillingHook
 import tools.alamobile.mod.overlay.OverlayManager
 import tools.alamobile.mod.util.Logger
+import tools.alamobile.mod.offsets.OffsetTable
 import tools.alamobile.mod.util.isSupportedVersion
 import java.io.File
 
@@ -492,7 +493,17 @@ class AlaMobileModule : XposedModule() {
                     // 线程每 2 秒遍历 IRDSUIMobileControls 布局子物体，
                     // 按 GameObject 名匹配 "Throttle"/"Brake" 并 SetActive(false)。
                     try {
-                        NativeBridge.initHidePedals(hideGamePedals)
+                        NativeBridge.initHidePedals(
+                            hideGamePedals,
+                            OffsetTable.IRDS_UI_MOBILE_CONTROLS_GET_INSTANCE,
+                            OffsetTable.UNITY_GAME_OBJECT_SET_ACTIVE,
+                            OffsetTable.UNITY_GAME_OBJECT_GET_ACTIVE_SELF,
+                            OffsetTable.UNITY_GAME_OBJECT_GET_TRANSFORM,
+                            OffsetTable.UNITY_COMPONENT_GET_GAME_OBJECT,
+                            OffsetTable.UNITY_TRANSFORM_GET_CHILD,
+                            OffsetTable.UNITY_TRANSFORM_GET_CHILD_COUNT,
+                            OffsetTable.UNITY_OBJECT_GET_NAME
+                        )
                         logX(Log.INFO, TAG, "hideGamePedals initialized, enabled=$hideGamePedals")
                     } catch (e: Throwable) {
                         logX(Log.ERROR, TAG, "initHidePedals failed: ${e.message}")
@@ -517,7 +528,7 @@ class AlaMobileModule : XposedModule() {
                         try {
                             val cfg = ModConfig.readFromTargetProcess(ctx)
                             val serverOverride = cfg.paddockServer.takeIf { it.isNotBlank() }
-                            PaddockUploader.start(ctx, serverOverride, 200146)
+                            PaddockUploader.start(ctx, serverOverride, tools.alamobile.mod.offsets.OffsetTable.PADDOCK_VERSION_CODE)
                             logX(Log.INFO, TAG, "PaddockUploader started (server=${serverOverride ?: "default"})")
                             if (PaddockClient.hasToken()) {
                                 logX(Log.INFO, TAG, "PaddockUploader: token present (auth=${if (PaddockClient.pendingCount() > 0) "restored, queue pending" else "ok"})")

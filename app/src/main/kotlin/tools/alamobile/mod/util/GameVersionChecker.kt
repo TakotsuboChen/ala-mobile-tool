@@ -10,8 +10,8 @@ const val OFFICIAL_PKG = "com.Vince.AlamobileFormula"
 const val COEXISTENCE_PKG = "com.Takotsubo.AlamobileFormula"
 
 // 适配的版本（与 VersionGate 中 SUPPORTED_VERSION_NAME / SUPPORTED_VERSION_CODE 一致）。
-private const val ADAPTED_VERSION_NAME = "8.0.4"
-private const val ADAPTED_VERSION_CODE = 200146L
+private const val ADAPTED_VERSION_NAME = "8.0.6"
+private const val ADAPTED_VERSION_CODE = 200150L
 
 /**
  * 单个游戏的版本检测结果。
