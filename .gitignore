@@ -40,3 +40,6 @@ Thumbs.db
 # Reference repos (cloned upstream sources for reading, not committed)
 references/
 .claude/worktrees/
+
+# Windows NTFS download-mark metadata (WSL mount artifacts)
+*:Zone.Identifier
