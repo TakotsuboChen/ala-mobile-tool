@@ -63,6 +63,13 @@ object PaddockUploader {
     /** 主线程：读 native 单槽 → 有新事件则丢给 IO 线程上传（Toast 回主线程弹）。 */
     private fun pollOnce() {
         if (!NativeBridge.isAvailable) return
+        // token 缺失时周期性重试恢复：注册可能发生在游戏启动之后（最常见时序），
+        // 或 NPatch 用户登录时 service 未绑定、daemon 里 key 后到（日志实证
+        // "remote token read: null (key missing)"）。loadAuth 只读本地/remote
+        // prefs，分钟级频率开销可忽略；恢复成功即恢复上传+补传队列。
+        if (!PaddockClient.hasToken()) {
+            PaddockClient.retryRestoreAuth()
+        }
         val seq = IntArray(1)
         val gp = IntArray(1)
         val ms = IntArray(1)
@@ -78,6 +85,14 @@ object PaddockUploader {
         val gpIdx = gp[0]
         val lapMs = ms[0]
         val lapSeq = seq[0]
+        if (!PaddockClient.hasToken()) {
+            // token 仍缺失：入本地待传队列（30 天），日志可见——此前此路径
+            // 完全静默，用户"跑了圈没记录"却无从排查（两份用户日志实证）。
+            AlaMobileModule.logX(
+                Log.WARN, TAG,
+                "lap $lapMs ms (gp=$gpIdx): no token, queued locally (${PaddockClient.pendingCount()} pending)"
+            )
+        }
         io.execute {
             val toast = try {
                 PaddockClient.uploadLap(gpIdx, lapMs)

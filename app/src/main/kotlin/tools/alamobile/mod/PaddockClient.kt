@@ -36,6 +36,7 @@ object PaddockClient {
     private const val QUEUE_FILE = "paddock_pending_laps.json"
     private const val AUTH_FILE = "paddock_auth.json"
     private const val QUEUE_TTL_MS = 30L * 24 * 3600 * 1000
+    private const val RETRY_RESTORE_INTERVAL_MS = 60_000L
     private const val CONNECT_TIMEOUT = 8000
     private const val READ_TIMEOUT = 10_000
 
@@ -46,6 +47,10 @@ object PaddockClient {
     @Volatile private var serverBase: String = DEFAULT_SERVER
     @Volatile private var authToken: String? = null
     @Volatile private var lastUploadAt: Long = 0
+    @Volatile private var lastRestoreAttemptMs: Long = 0
+
+    /** 队列补传等后台小任务的单线程池（retryRestoreAuth 从主线程投递用） */
+    private val ioExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "paddock-drain") }
 
     /** 游戏版本号（versionCode），模块初始化时从 VersionGate 注入 */
     @Volatile var versionCode: Int = 0
@@ -96,6 +101,29 @@ object PaddockClient {
                 }
             }
         }
+        // 第三级回落（NPatch 本地模式专用）：Remote Preferences 在 NPatch 下是
+        // 空壳——loader 的 requestRemotePreferences 返回 Bundle.EMPTY，模块 App
+        // 经管理器 binder 写入的 NPatchRemoteStore 与游戏进程本地 fallback store
+        // 是两个物理文件（用户 A/B 日志实证：41 次重试全 null）。config 有
+        // ConfigProvider 兜底，token 此前没有——补上同款通道：游戏进程 call
+        // content://tools.alamobile.mod.config 的 read_token，Provider 自动拉起
+        // 模块进程读它 filesDir 里的 auth 文件（saveAuth 本地文件路径）。
+        if (authToken.isNullOrBlank() && remoteTokenReader != null) {
+            // remoteTokenReader 非空 = 游戏进程（模块进程自己直读本地文件无需此路）
+            try {
+                val uri = android.net.Uri.parse("content://${tools.alamobile.mod.config.ConfigProvider.AUTHORITY}")
+                val result = appContext?.contentResolver?.call(uri, tools.alamobile.mod.config.ConfigProvider.READ_TOKEN_METHOD, null, null)
+                val t = result?.getString(tools.alamobile.mod.config.ConfigProvider.KEY_TOKEN)?.takeIf { it.isNotEmpty() }
+                if (t != null) {
+                    authToken = t
+                    Logger.log(Log.INFO, TAG, "auth restored via ConfigProvider (NPatch local mode)")
+                } else {
+                    Logger.log(Log.WARN, TAG, "loadAuth: ConfigProvider token null (not logged in on module app, or provider unreachable)")
+                }
+            } catch (e: Throwable) {
+                Logger.log(Log.WARN, TAG, "ConfigProvider token read failed: ${e.message?.take(80)}")
+            }
+        }
     }
 
     /**
@@ -114,10 +142,21 @@ object PaddockClient {
         } catch (e: Throwable) {
             Logger.log(Log.WARN, TAG, "saveAuth failed: ${e.message}")
         }
-        // 双写 daemon（LSPosed Remote Preferences）：service 未绑定时静默跳过
-        //（本地文件仍在，下次 ConfigActivity 启动时 flush 逻辑兜底——见 App.onServiceBind）
+        // 双写 daemon（LSPosed Remote Preferences）。service 未绑定时主动尝试
+        // NPatch 绑定兜底（NPatch 无 daemon 异步推送，登录页是 bindNpatchRemoteService
+        // 在模块进程里最晚的触发时机——App.onCreate 时 NPatch 管理器可能还没就绪，
+        // 用户此时已点登录，正是重试窗口）。仍失败才降级"只写本地"。
+        // 此前静默降级的后果（用户日志实证）：daemon 里永远没有 token key，
+        // 游戏进程 "remote token read: null (key missing)"，圈全进本地队列出不去。
         try {
-            val service = App.xposedService
+            var service = App.xposedService
+            if (service == null) {
+                try {
+                    val ctx = appContext
+                    if (ctx != null) App.bindNpatchRemoteService(ctx)
+                } catch (_: Throwable) {}
+                service = App.xposedService
+            }
             if (service != null) {
                 service.getRemotePreferences(App.PREF_GROUP)
                     .edit()
@@ -125,7 +164,7 @@ object PaddockClient {
                     .apply()
                 Logger.log(Log.INFO, TAG, "token saved to remote prefs")
             } else {
-                Logger.log(Log.WARN, TAG, "xposedService not bound, token saved locally only")
+                Logger.log(Log.WARN, TAG, "xposedService not bound, token saved locally only (will flush on service bind / paddock page entry)")
             }
         } catch (e: Throwable) {
             Logger.log(Log.WARN, TAG, "remote token save failed: ${e.message}")
@@ -149,6 +188,37 @@ object PaddockClient {
     }
 
     fun hasToken(): Boolean = !authToken.isNullOrBlank()
+
+    /**
+     * 游戏进程侧 token 缺失时的周期性重试恢复（PaddockUploader 1Hz 轮询里调用）。
+     *
+     * 覆盖两个实证时序坑：
+     * 1. 注册/登录发生在游戏启动之后——启动时 loadAuth 拿不到 token；
+     * 2. NPatch 用户登录时 service 未绑定（"token saved locally only"），
+     *    daemon Remote Preferences 的 key 晚到（甚至要等下次打开模块 App 才写入）。
+     *
+     * loadAuth 只读本地文件/daemon prefs，主线程安全（无网络）；恢复成功后的
+     * 队列补传丢给 IO 线程（drainQueue 是 HTTPS 调用，严禁主线程——NetworkOnMainThreadException）。
+     * 60s 限流：remote prefs 读取便宜，但也不必每秒做。
+     */
+    fun retryRestoreAuth() {
+        val now = System.currentTimeMillis()
+        if (now - lastRestoreAttemptMs < RETRY_RESTORE_INTERVAL_MS) return
+        lastRestoreAttemptMs = now
+        val hadToken = !authToken.isNullOrBlank()
+        loadAuth()
+        if (!hadToken && !authToken.isNullOrBlank()) {
+            Logger.log(Log.INFO, TAG, "token restored on retry, draining pending queue (${pendingCount()})")
+            val t = authToken ?: return
+            ioExecutor.execute {
+                try {
+                    drainQueue(t, 10)
+                } catch (e: Throwable) {
+                    Logger.log(Log.WARN, TAG, "retry drainQueue: ${e.message}")
+                }
+            }
+        }
+    }
 
     /**
      * 拉取个人资料（GET /v1/me，Bearer）。用途：模块进程重进后恢复登录态展示
@@ -286,6 +356,10 @@ object PaddockClient {
         val token = authToken
         if (token == null) {
             enqueue(gpIndex, lapMs)
+            Logger.log(
+                Log.WARN, TAG,
+                "uploadLap: no token, queued locally (gp=$gpIndex, ${pendingCount()} pending)"
+            )
             return null
         }
         return try {
@@ -410,6 +484,31 @@ object PaddockClient {
 
     /** 待传条数（诊断/调试用） */
     fun pendingCount(): Int = readQueue().length()
+
+    /**
+     * 围场页进入时的队列补传入口（模块进程，UI 已有 token 才调得到这里）。
+     * 有待传条数时 drain 并打日志；0 条时静默。drainQueue 是 HTTPS 调用，
+     * 统一丢 IO 线程池——ViewModel 协程在 withContext(IO) 之后已回到主线程，
+     * 这里若同步调 drainQueue 会 NetworkOnMainThreadException（已分发版实证）。
+     * 与游戏进程上传路径并发安全（不同进程各读各的队列文件，天然隔离）。
+     */
+    fun drainPendingQueueOnEntry() {
+        try {
+            val token = authToken ?: return
+            if (pendingCount() == 0) return
+            Logger.log(Log.INFO, TAG, "paddock page entry: draining ${pendingCount()} pending laps")
+            ioExecutor.execute {
+                try {
+                    val ok = drainQueue(token, 20)
+                    Logger.log(Log.INFO, TAG, "paddock page entry: drained $ok laps")
+                } catch (e: Throwable) {
+                    Logger.log(Log.WARN, TAG, "drainPendingQueueOnEntry drain: ${e.message}")
+                }
+            }
+        } catch (e: Throwable) {
+            Logger.log(Log.WARN, TAG, "drainPendingQueueOnEntry: ${e.message}")
+        }
+    }
 
     // ── HTTP ────────────────────────────────────────────────
 

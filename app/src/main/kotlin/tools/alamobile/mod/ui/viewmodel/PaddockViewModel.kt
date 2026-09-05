@@ -65,6 +65,10 @@ class PaddockViewModel(application: android.app.Application) : AndroidViewModel(
                     PaddockClient.clearAuth()
                     _uiState.update { UiState() }
                 }
+                // 补传本地待传队列：队列此前只有 uploadLap 成功一条 drain 路径，
+                // "先跑圈后登录/NPatch token 未进 daemon"的圈永远出不去（用户日志
+                // 实证）。围场页是用户唯一必到的恢复入口，进页即补传（IO 线程）。
+                PaddockClient.drainPendingQueueOnEntry()
             }
         }
     }

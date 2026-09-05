@@ -24,13 +24,16 @@ class ConfigProvider : ContentProvider() {
     companion object {
         const val AUTHORITY = "tools.alamobile.mod.config"
         const val READ_METHOD = "read_config"
+        const val READ_TOKEN_METHOD = "read_token"
         const val PUSH_GAME_LOG_METHOD = "push_game_log"
         const val READ_GAME_LOG_METHOD = "read_game_log"
         const val KEY_JSON = "json"
+        const val KEY_TOKEN = "paddock_token"
         const val KEY_JAVA_LOG = "java_log"
         const val KEY_NATIVE_LOG = "native_log"
 
         private const val FILE_NAME = "ala_tool_config.json"
+        private const val AUTH_FILE_NAME = "paddock_auth.json"
         private const val GAME_JAVA_LOG_FILE = "game_java.log"
         private const val GAME_NATIVE_LOG_FILE = "game_native.log"
 
@@ -106,6 +109,26 @@ class ConfigProvider : ContentProvider() {
                 return Bundle().apply {
                     putString(KEY_JSON, json)
                 }
+            }
+            READ_TOKEN_METHOD -> {
+                // 读 paddock auth 文件里的 token。NPatch 本地模式下 Remote Preferences
+                // 是空壳（loader 的 requestRemotePreferences 返回 Bundle.EMPTY，模块 App
+                // 经管理器写入的 daemon db 与游戏进程本地 fallback store 是两个物理
+                // 文件），token 唯一可达通道 = ConfigProvider（游戏进程 call 时系统
+                // 自动拉起模块进程，exported=true 已验证可用）。
+                // ⚠️ 目录必须与 PaddockClient.saveAuth 的 getDir() 一致：
+                // getExternalFilesDir(null)（/sdcard/Android/data/<pkg>/files/），
+                // 不能用 filesDir——两处不同，读 filesDir 永远 null（用户日志实证）。
+                val token = try {
+                    val extDir = providerContext.getExternalFilesDir(null)
+                    val f = if (extDir != null) File(extDir, AUTH_FILE_NAME)
+                            else File(providerContext.filesDir, AUTH_FILE_NAME)
+                    if (f.exists()) {
+                        org.json.JSONObject(f.readText()).optString("token", "").takeIf { it.isNotEmpty() }
+                    } else null
+                } catch (_: Throwable) { null }
+                android.util.Log.i("AlaMobileTool", "ConfigProvider.readToken: ${if (token != null) "len=${token.length}" else "null"}")
+                return Bundle().apply { putString(KEY_TOKEN, token) }
             }
             PUSH_GAME_LOG_METHOD -> {
                 // 游戏进程推送日志内容到模块进程缓存
