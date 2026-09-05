@@ -1,68 +1,64 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-09-04T23:56:42+08:00 · Git HEAD: `13fa6f8`（模块仓；paddock 仓 `0ba46f2`）
+生成时间: 2026-09-05T13:40:08+08:00 · Git HEAD: `83db4a0`（模块仓；paddock 仓 `0251dae`）
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: 模块仓 `main` @ `13fa6f8`（2026-09-04）；paddock 仓 `main` @ `0ba46f2`（tag `v1.0.0`）
-- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `13fa6f8`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA；不一致以 git 实际输出为准
+- 锚点: 模块仓 `main` @ `83db4a0`（2026-09-05）；paddock 仓 `main` @ `0251dae`
+- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `83db4a0`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA；不一致以 git 实际输出为准
 - 待重探的 [?]: 见下方标记
-- 先读: `docs/PADDOCK_PLAN.md`（契约源）+ paddock 仓 `HANDOFF.md` + paddock 仓 `CHANGELOG.md`「版本约定」
+- 先读: `docs/PADDOCK_PLAN.md`（积分公式 v40 已更新）+ paddock 仓 `CHANGELOG.md`
 
 ## 1. 当前目标
-**v1.0.3 正式版发布 + 服务端 SemVer 收敛**：模块 v1.0.3（围场互联大版本）已发布上线；paddock 服务端从部署序号 vN 收敛到 SemVer 1.0.0 并重新部署。两者均完成并验证。
+**围场"用户跑圈没记录"三根因修复 + 服务端积分 off-by-one 修正**：v1.0.4 Alpha 1（104100）已构建、装机、分发用户；部分用户反馈上传恢复，更多用户待观察。paddock 服务端已带 v1.0.1（积分修正）上线，验算吻合。
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] 模块 v1.0.3 发布全链路完成：commit `13fa6f8`（RELEASE_NOTES/build.gradle.kts 103300/module.prop/README）+ tag `v1.0.3` 已 push；CI run 33888396463 conclusion=success（build+sync-lsposed 双绿）
-- [V] 源 Release 验证：`gh release view v1.0.3` → body=手工 Notes、asset `Ala.Mobile.Tool.v1.0.3.apk`、prerelease=false
-- [V] 镜像仓验证：`gh release view 103300-1.0.3 --repo Xposed-Modules-Repo/tools.alamobile.mod` → body=手工 Notes、prerelease=false；镜像 README grep 到 1.0.3 徽章/8.0.6/围场路线图项
-- [V] paddock 版本体系收敛：Cargo.toml version=1.0.0、`/v1/health` 返回 `{"status":"ok","version":"1.0.0"}`（env!("CARGO_PKG_VERSION") 编译期注入）、deploy compose 镜像行 `paddock-api:1.0.0`、CHANGELOG.md（Keep a Changelog，1.0.0≈线上v39）、LICENSE 补本体
-- [V] paddock 重新部署上线：本地 build→gzip 5.9MB→scp→VPS load→compose 切 tag→up；curl 三接口实测 health v1.0.0 / 积分榜（Takotsubo 700）/ 8.0.6 摩纳哥赛道榜全部正常
-- [V] paddock 仓提交推送：`62d0b94`（chore(release) v1.0.0）→ `0ba46f2`（README 重写）→ tag `v1.0.0` 已 push；工作区 clean
-- [V] 模块仓 README 本会话更新（已随 13fa6f8 入库）：围场功能块+第3页配置表（底栏顺序=概览/配置/围场/设置，MainScreen.kt:205-208 核实）、架构图补 PaddockClient/Uploader/hide_pedals_hook/lap_hook、版本历史 1.0.3 条目、游戏版本全切 8.0.6
-- [V] lint 门禁：全新 shell `./gradlew :app:lint` → EXIT=0（52 warnings 4 hints 均既有；baseline 13 条失效提示非阻塞，handoff 继承项）
-- 工作区: 两仓均 clean，全部已推送
+- [V] 服务端积分公式 off-by-one 修复：`(N−rank)×100/N` 与定案例句"2 人→100/50/虚位0"矛盾（off-by-one，全体偏低 100/N），改为 `(N+1−rank)×100/N`，三处 SQL（总榜/版本榜/`/v1/me`）统一；部署后 curl 验算：Takotsubo 总榜 650/摩纳哥 50、爱弥斯 200、health=1.0.1，全部与用户期望吻合
+- [V] 连带修出 `/v1/me` 积分口径 bug：窗口函数 CTE 内 `WHERE user_id` 致 `n_in_track` 恒 1、每赛道白给 100 分（用户见 700 vs 总榜 600）；过滤移到外层
+- [V] 围场上传链三根因修复（v1.0.4 Alpha 1, 104100）：① NPatch 下 Remote Preferences 是空壳——`references/NPatch/patch-loader/.../LSPLoader.java:484` `requestRemotePreferences` 返回 `Bundle.EMPTY`，游戏进程读到的是本地 fallback store 物理文件 ≠ 模块App经管理器写的 daemon db → 加 ConfigProvider `read_token` 第三级回落；② `saveAuth` 写 `getExternalFilesDir` 但 provider 初版读 `filesDir`——目录不一致已修正；③ 入队零日志 + 队列补传只挂"上传成功"一条路径 → 补日志 + 60s 限流重试恢复 + 恢复即 drain + 进围场页自动补传
+- [V] 用户反馈：几个人成绩上传变正常（A/B 之外的实证），更多用户待观察
+- [V] `./gradlew :app:lint` → EXIT=0（"0 errors, 53 warnings, 4 hints"；baseline 13 条失效提示为继承非阻塞）
+- [V] 用户 C（lzfbb，1.0.3 版）案例闭环：游戏进程 token 死后无自愈，11:35/11:38 墨尔本 1:13.306 未入库（best_laps gp=0 停在 1:14.205@11:27:34）；模块App侧 token 正常（/v1/me 200）——断点只在游戏进程，v1.0.4 即解药
+- [V] 日志导出器发现新 bug（未修）：java 文件不新鲜时整体回落旧缓存（`LogExporter.kt` `javaUpdated && nativeUpdated` 才算 fresh），导致 2777 进程的 java 日志全缺——诊断时 java/native 段时间线会错位
+- 工作区: 两仓均 clean，全部已推送（模块仓 `c5a34d1` 修复 + `83db4a0` CLAUDE.md；paddock 仓 `0251dae`）
 
 ### 测试/build 输出（真实退出码）
 ```
-模块仓: ./gradlew :app:lint → EXIT=0（"Lint found 52 warnings, 4 hints"）
-paddock: cargo check（全新 shell）→ EXIT=0（2 既有 warning）
-paddock 线上: curl /v1/health → {"status":"ok","version":"1.0.0"}；积分榜/赛道榜 JSON 正常
-CI: gh run watch 33888396463 → conclusion=success
+模块仓: ./gradlew :app:lint → EXIT=0（0 errors, 53 warnings, 4 hints）
+服务端验算: 部署后 curl points?version=200150 → 爱弥斯200/我150; 总榜 → 我650; health → {"status":"ok","version":"1.0.1"}
+分发 APK: D:\Downloads\QQ\Ala Mobile Tool v1.0.4 Alpha 1.apk（md5 c70b295…的后续修正版, 12:xx 重建）
 ```
 
 ## 3. 决策与理由
-- **服务端版本=SemVer，部署序号vN 废弃**（用户定案）[V]：v1~v39 是人肉部署批次混用三义（部署批次/方案序号/镜像tag），收敛为 Cargo.toml 单一事实源 + git tag + 镜像 tag 三处同源；映射起点 **1.0.0 ≈ 线上 v39**。历史文档 vNN 记法保留不改（指方案定案），CHANGELOG「版本约定」有说明。
-- **`/v1/health` 从 "ok" 改 JSON** [V]：加 version 字段让线上可核版本；改前 grep 确认模块端零依赖此端点，零风险。
-- **Release Notes 用户定稿 5 处修改** [V]：摘要加欢迎语；Breaking 改"请务必将游戏更新至 8.0.6！"（删"或继续使用 v1.0.2"）；删"游戏版本即独立赛季"尾注；"小米/红米 MIUI 设备"；**整节删除 Known Issues**。用户理由：换挡早已禁用无可用入口，"没有的东西不要放上去"——Release Notes 只写用户可见的东西。
-- **Release Notes 剔除两条修复** [V]（我判定+用户默许）：ABS 浮点污染回归、围场上传链路修复——bug 只存在于 1.0.2..1.0.3 之间的提交中，坏版本从未到达用户。
-- **覆盖链取最新**（用户要求）[V]：注册流v2（verify已删）/排行榜行级items/制动压力v6饱和重映射/服务器设置=OverlaySpinner/ABS档位=正常工作——五条链全部以 HEAD 状态为准。
-- **paddock README 重写**（用户选中等完整版）[V]：原"定案速记"~3600字开发日志性质 → 压缩为6条运维速记，全文外移 PADDOCK_PLAN；补 Quick Start/环境变量表/发版流程。
-- **路线图禁删暂缓条目**（用户纠正，已入记忆 roadmap-no-delete-paused-items）[V]："手动换挡"三处恢复并补状态上下文；整理 TODO 类内容只做事实更新，想删先问。
-- **围场页位置表述**（用户纠正两次）[V]：模块 App 底栏第 3 个 tab（概览/配置/围场/设置），不是"游戏内第 4 页"——页序以 MainScreen.kt 枚举为准，不抄文档旧表述。
-- 继承：积分公式 v39 / 版本独立赛季 / 字段核对清单=OFF_* 全集 / RVA 单一事实源=OffsetTable / 规则防覆盖 / 排行榜行级 items / token daemon / order==2 挂圈 / 拦截器零浮点。
+- **版本号红线入全局 CLAUDE.md**（用户严令）[V]：同日两次越权（模块擅自 1.0.3→1.0.4 Alpha 1 且定错 103310；服务端擅自 1.0.0→1.0.1）——"上线修复/装机"指令不含授权升版，必须先问"版本号定多少"。已写入 `~/.claude/CLAUDE.md` 全局段 + 项目记忆 version-number-requires-approval + 全局 MEMORY 索引
+- **服务端 1.0.1 现状追认**（用户"现在就算了"）[V]：Cargo.toml/compose/CHANGELOG 三处已同步 0251dae，不回滚；tag `v1.0.1` 未打
+- **NPatch token 通道选 ConfigProvider 而非修 daemon 读取** [V]：config 已验证可用同款通道（游戏进程 call 时系统自动拉起模块进程）；修 NPatch loader 超出项目边界。否决：继续加重试（daemon 通道物理断裂，重试无用）
+- **积分公式语义以例句为准** [V]：`(N+1−rank)×100/N`（第一100/递减100/N/虚位0/N=1自然100）；v39 数学式与例句矛盾时 SQL 抄了错的那半——契约文档已标注 v40 定案与矛盾来源
+- 继承：积分公式 v40 / 版本独立赛季 / 字段核对清单=OFF_* 全集 / RVA 单一事实源=OffsetTable / 规则防覆盖 / token 三级回落 / order==2 挂圈 / 拦截器零浮点
 
 ## 4. 失败的尝试 — 不要再试
-- **Release Notes 凭 commit message 直写** [V]——步骤3B代码验证发现多处需对拍 HEAD（如制动压力键名实为 brake_scale/0xF0 重映射）。每个 feat/fix 必须 grep/读文件确认真实存在。
-- **文档旧表述照抄不核实** [X→V]：「围场第4页」从上会话 CLAUDE.md 一路传播到 agent 报告再到我笔下，实际底栏第 3 页（MainScreen.kt:205-208）。文档里的位置/序号类表述必须对代码核实。
-- **scp 用错用户** [X]：`root@8.134.50.222` Permission denied——正确是 `takotsubo@` + `~/.ssh_paddock/id_rsa` + `-p 4142 -o IdentitiesOnly=yes`（记忆 paddock-deploy-chain-local-build 有完整命令，先查记忆再连）。
-- **VPS 上 compose 镜像行与仓内不同步** [V]：仓内死值 v1、线上实际 v39——部署时 sed 的目标值要以 VPS `grep` 实际输出为准，不能假设仓内状态。
-- 继承（前向有效，详见 .handoffs/20260904233000-handoff.md §4）：IL2CPP dump 用 Windows dotnet / 后台任务 cwd 漂移 / mdns 端口漂移 / miuix 无 onSurfaceVariant / serde Option 不兜空串 / askama 模板禁调函数 / 图标只偏色相会发棕 / adb push 必须完整文件路径 / 规则覆盖=读路径回落预设非部署所致 / fetchMe 漏 token / lap_hook 全套 / IL2CPP 扫描三坑。
+- **NPatch 下靠 Remote Preferences 传 token** [X]——loader 返回空壳 Bundle，游戏进程本地 fallback store 与模块App经管理器写的 daemon db 是两个物理文件，41 次重试全 null。不要再往这条路上加重试。
+- **ConfigProvider 读 `filesDir`** [X]——saveAuth 写 `getExternalFilesDir`，两目录不同，provider 永远返回 null（"token null" 日志实证）。已修正，勿再改回。
+- **诊断时把"导出日志缺段"当"代码没执行"** [V]——LogExporter java 段回落旧缓存 + native 2MB 轮转，双重盲区。看日志先核对 java/native 段时间窗是否覆盖目标进程时段，再下结论。
+- **SQL 窗口函数 CTE 内先 WHERE 再 rank** [X]——`n_in_track` 恒 1，排名失去意义（`/v1/me` 700 分假象）。窗口必须基于全量数据计算后再过滤。
+- **未经同意改版本号**（两仓各一次）[V]——用户决策域，"上线/装机"≠"授权升版"。全局红线已入 `~/.claude/CLAUDE.md`。
+- 继承（前向有效，见 `.handoffs/20260905124700-handoff.md` §4）：Release Notes 凭 commit message 直写不核实 / scp 用错用户 root@ / VPS compose 镜像行以实际 grep 为准 / IL2CPP dump 用 Windows dotnet / mdns 端口漂移 / serde Option 不兜空串 / askama 模板禁调函数 / adb push 必须完整路径 / lap_hook 全套 / IL2CPP 扫描三坑。
 
 ## 5. 已知坑
-- ⚠️ **8.0.4 官版用户会收到 unsupported** [V]——门禁已切 8.0.6 单版本（v1.0.3 Breaking Changes 已告知用户升游戏或留 v1.0.2）。
-- ⚠️ **lint baseline 13 条失效** [?]（继承）——lint 报 baseline not found 提示，下次重新生成。
-- ⚠️ **paddock 版本三处同步无校验** [?]——Cargo.toml/compose镜像行/git tag 靠人工同步，防 drift 可给 deploy.sh 加一致性校验（deploy.sh 本身也未实施，见 §6）。
-- ⚠️ **镜像仓 README 同步以内容指纹验证** [V]——sync job 只在 build 成功后跑一次，同步失败旧文件仍在，泛泛检查查不出，要 grep 本次变更特征。
-- ⚠️ 继承：排行榜无实时刷新（用户拍板暂不做）/ 管理端网页验证未做 / 群内 bot 复测未做（重置口令严格匹配/带码注册车手号）/ 双仓赛道中文名两份硬编码（Shangai 单 a）/ Garage 206 测试对象。
+- ⚠️ **LogExporter java/native 段可各自回落不同时期缓存** [?]——修复方案未定（应改为"每个文件独立判断新旧"），下次诊断用户日志前先看段时间窗
+- ⚠️ **NPatch 管理器 binder 时序** [?]——登录瞬间 bindNpatchRemoteService 可能失败（管理器未就绪），saveAuth 降级本地；靠 ConfigProvider 回落兜底但前提是模块App的 auth 文件已写
+- ⚠️ **lint baseline 13 条失效** [?]（继承）——下次重新生成
+- ⚠️ **paddock 版本三处同步无校验** [?]（继承）——deploy.sh 固化仍未做
+- ⚠️ **镜像仓 README 同步以内容指纹验证** [V]（继承）
+- ⚠️ 继承：排行榜无实时刷新 / 管理端网页验证未做 / 群内 bot 复测未做 / 双仓赛道中文名两份硬编码 / Garage 206 测试对象
 
 ## 6. 下一步（有序）
-1. **用户复验**（继承）：重开模块 App——围场主页积分、排行榜 8.0.6 筛选（摩纳哥 1:08.964）、1.0.3 APK 装机跑圈；管理端成绩页四筛选+跳页。
-2. **群内 bot 复测**（继承）：重置口令严格匹配、裸关键词静默、带码注册车手号=最小空缺。
-3. （可选）`deploy/deploy.sh` 固化 paddock 部署链（用户已认可提议）+ 版本三处一致性校验。
-4. （可选继承）lint baseline 重生成 / 重构范围清单（用户提过"下个版本重构一堆东西"，待指定）。
+1. **继续收集用户反馈**：v1.0.4 Alpha 1 分发范围扩大后，若仍有"没记录"，要日志并先核对 java/native 段时间窗（§4 第三条）；重点看 `auth restored via ConfigProvider` 是否出现
+2. （可选）修 LogExporter 缓存回落 bug（按文件独立判断新旧）
+3. （可选继承）`deploy/deploy.sh` 固化 paddock 部署链 + 版本三处一致性校验 / lint baseline 重生成
+4. v1.0.4 正式发布（版本号/tag/Release Notes）**待用户定版**——遵守版本号红线
 
 ## 7. 留给用户的开放问题
-- 重构范围清单待定（模块+服务端）。
-- 播报主动消息额度（约 4 条/月/群）：接受 / 申请认证？
-- 官版 8.0.4 用户兼容策略：单版本门禁已实装，未来是否做按版本分 OffsetTable？
+- v1.0.4 正式版版本号与发布时机（Alpha 结束条件：多少用户反馈正常算稳定？）
+- LogExporter 修复优先级（影响诊断效率，不影响功能）
+- 爱弥斯反馈的具体现象仍未澄清（她的数据实际全部正常入库）
