@@ -122,6 +122,21 @@ object LogExporter {
         val sb = StringBuilder()
         var foundAny = false
 
+        // 0. 崩溃记录（filesDir/ala_tool_crash.log）——放最前，诊断价值最高。
+        // CrashCatcher 无条件落盘（不受日志开关控制），可能记录到 logEnabled=false
+        // 时段的崩溃，不能走 filterRecent（时间窗外也必须保留），全量带出。
+        val crashLog = File(context.filesDir, "ala_tool_crash.log")
+        if (crashLog.exists() && crashLog.length() > 0) {
+            sb.append("=== 模块进程崩溃记录 ===\n")
+            try {
+                sb.append(crashLog.readText())
+            } catch (e: Throwable) {
+                sb.append("[读取失败: ${e.message}]\n")
+            }
+            sb.append('\n')
+            foundAny = true
+        }
+
         // 1. 模块进程日志（filesDir/ala_tool.log）
         val moduleLog = File(context.filesDir, MODULE_LOG_FILE)
         if (moduleLog.exists()) {

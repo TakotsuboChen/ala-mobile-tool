@@ -199,6 +199,10 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
         } else {
             // 模块进程：初始化 Logger（用 filesDir 写日志文件）
             tools.alamobile.mod.util.Logger.init(this, isModuleProcess = true)
+            // 崩溃自捕：未捕获异常堆栈落盘 filesDir/ala_tool_crash.log，用户
+            // 下次导出日志即含崩溃段（用户日志实证 2026-09-05：闪退时自导
+            // 日志无任何堆栈，小白用户无法抓 logcat crash buffer）。
+            tools.alamobile.mod.util.CrashCatcher.install(this)
             try {
                 val settings = ModConfig.read(this)
                 tools.alamobile.mod.util.Logger.setEnabled(settings.logEnabled)
