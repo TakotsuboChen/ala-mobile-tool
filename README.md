@@ -107,9 +107,10 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 - 游戏运行时改配置：广播即时推送，Overlay 重建生效
 
 #### 日志系统
-- 「启用日志」开关（默认关闭），`logEnabled` 统一门控 Java 层 `Logger` 与 native 层 `native_log` 两侧
+- 日志始终记录（无开关；2MB 滚动上限控制存储），Java 层 `Logger` 与 native 层 `native_log` 两侧无条件写文件
 - 模块进程与游戏进程日志写入统一文件，设置页一键导出并分享（FileProvider + ShareSheet），导出仅含最近 24h 条目
 - 游戏→模块日志经定向广播（`setComponent`）推送，规避包可见性与 IntentFirewall 限制
+- 崩溃自捕：模块进程未捕获异常 + 游戏进程 native 信号崩溃自动落盘堆栈/PC 现场，随日志导出带出，无需 adb
 
 #### 计时赛有效圈速（Lap Timing）
 - Hook `odometerHandler.HandleSectorsTimes`（游戏圈段事件）与 `IRDSLevelLoadVariables.Awake`，纯透传只读，不写任何游戏字段
@@ -275,8 +276,7 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 | 功能项 | 说明 |
 |---|---|
 | 模块更新通道 | 稳定版（仅正式 Release）或预览版（含 Pre-release） |
-| 启用日志 | 开关日志记录（logEnabled 统一门控 Java/native 文件输出，默认关闭） |
-| 导出并分享日志 | 合并模块与游戏进程日志，经 FileProvider 分享 |
+| 导出并分享日志 | 合并模块与游戏进程日志（含崩溃记录），经 FileProvider 分享（日志始终记录，无开关） |
 | 清除激活标记 | 删除 Non-root 确认标记与旧版激活残留（filesDir，pm clear 可清）；不碰 EULA 同意状态；清除后本次会话状态不变，下次冷启动重新检测 |
 | 清除跳过更新标记 | 恢复被跳过版本的自动弹窗提示 |
 | 用户协议 | 重新查看并确认用户协议 |
