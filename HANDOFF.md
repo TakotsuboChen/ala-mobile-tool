@@ -1,65 +1,68 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-09-06T15:30:00+08:00 · Git HEAD: `74f4f8a`（模块仓；paddock 仓 `1dbe7a2`）
+生成时间: 2026-09-06T20:22:00+08:00 · Git HEAD: `f4e50f8`（模块仓；paddock 仓 `1dbe7a2` 无改动）
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: 模块仓 `main` @ `74f4f8a`（2026-09-06）；paddock 仓 `main` @ `1dbe7a2`
-- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `74f4f8a`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA；不一致以 git 实际输出为准
+- 锚点: 模块仓 `main` @ `f4e50f8`（2026-09-06）；paddock 仓 `main` @ `1dbe7a2`
+- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `f4e50f8`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA；不一致以 git 实际输出为准
 - 待重探的 [?]: 见下方标记
-- 先读: `docs/PADDOCK_PLAN.md`（契约源头）+ 本文件 §4 @ 语法五轮实测矩阵
+- 先读: 本文件 §2 日志证据表（游戏闪退的时间线结论都在这）
 
 ## 1. 当前目标
-**赛道正名/国旗 + QQ bot @车手 + 管理端输入框**——已全部完成、上线部署、群内实测通过（`/handoff 可以了` = 用户确认 @ 效果达标）。无在途排查。
+**游戏进程闪退排查**（≠模块 App 闪退，是另一个问题）——本会话完成：日志证据分析锁定崩溃窗口 + 游戏进程 native CrashCatcher 落地 + 日志强制开启。**现在等目标设备用户复现闪退反馈 crash 现场数据**（不是等 Takotsubo 本人——新装机版分发给了用户）。
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **迪拜赛车场正名**：原"亚斯码头赛道"是误命名（游戏场景 Dubai/Emirates GP，TRACK_IDENTIFICATION.md 本来就对）。改了模块 `TRACK_NAMES` 末项 + 服务端 `track_display_name` + PADDOCK_PLAN §5 三处
-- [V] **服务端赛道名国旗**：16 项全加国旗前缀（模块侧本就有），单一源头函数 10 个调用点全链路生效；**qq_bot 播报专用紧凑版** `track_display_name_compact` 剥旗后空格（模块 UI 保留空格——用户明确要求分层）
-- [V] **{{at_me}} @车手**：五轮实测矩阵定案（见 §4），最终方案 = `<qqbot-at-user id="member_openid" />` + markdown 通道，群内实测真实 @ 成功（用户原话"可以了"）。openid 缺失回落 `@「用户名」`，双缺失空串
-- [V] **管理端添加成绩三输入框去预填 0**：`lapInputs()` 添加路径渲染空值+placeholder，编辑路径不受影响
-- [V] **paddock 已部署上线**：镜像 `paddock-api:1.0.1`（版本号红线：仓库现版本原样构建，未升版）；health `{"status":"ok","version":"1.0.1"}`；公网验证 `gp15 = 🇦🇪 迪拜赛车场`；部署链四轮（本地 build→save|gzip→scp 4142→load→up）
-- [V] **模块 APK 已装机**：无线 adb（mdns 重发现 42197 端口）安装 release 成功，装机 `versionName=1.0.4 Alpha 1 / versionCode=104100`（未升版）
-- [V] `./gradlew :app:lint` → EXIT=0；`cargo check` → EXIT=0
-- 工作区: 两仓均 clean 全部已推送。模块仓 `74f4f8a`（正名）；paddock 仓 `f17f9ee`(正名+国旗)+`bcd875b`(at_me+播报紧凑+芯片)+`3bf1f87`(输入框)+`fd45772`(README)+`1dbe7a2`(Cargo.lock 补漏)
+- [V] **日志证据分析定案崩溃窗口**（用户日志 `ala_tool_log_20260906_021353.txt`，17082 行，两代进程交错）：native 段 pid 序列 22237→14213→31690 = 两次无声死亡（01:49 / 02:13）。四次 `LAPsession[awake]`（= 进赛道场景加载）**2 死 2 活**：01:49:26（22237）死、01:51:13（14213）活、02:05:31（14213）活、02:13:35（14213）死。两次死亡都停在 LLV.Awake 打印后、pedal `baseline captured` 之前——**场景加载窗口竞态，~50% 复现率**。日志零堆栈零 FATAL = native SIGSEGV 指纹
+- [V] **嫌疑排序**（推断，待 crash 堆栈定案）：① pedal_hook 输入写线程悬空写（唯一持续写游戏内存的组件，场景重载旧 carController 销毁窗口）② lap_hook awake 链（纯只读，且两次死亡时 LAPsession[awake] 行完整打出=日志段已走完）③ 游戏自身 bug（无法排除）
+- [V] **crash_hook.c 落地**（新增 `native/src/crash_hook.c/.h`）：六信号 sigaction handler → 落盘 `/sdcard/Android/data/<游戏包>/files/ala_tool_crash_native.log`（PC/LR 相对段基址偏移 + x0-x3/sp/fault_addr）；`sigaltstack`+`SA_ONSTACK` 覆盖栈溢出型；全 async-signal-safe；链式转发旧 handler；`NativeBridge.init` 内安装（hook 之前）
+- [V] **日志强制开启**：logEnabled 全链路删除（Logger/native_log 两层门控 + ModConfig 字段 + UI 开关 + ConfigReceiver 同步 + JNI 桥 setLogEnabled）。旧 JSON 残留 `log_enabled` key 被静默忽略，零迁移
+- [V] **导出链闭环**：pushGameLogs 带上 crash 文件 → LogReceiver 新增 "nativecrash" 通道 → LogExporter「游戏进程崩溃记录」段（不走 24h 过滤）
+- [V] **已装机用户设备**：mdns 重发现 38357 端口 → install Success → 装机 `versionName=1.0.4 Alpha 1 / versionCode=104100`（未升版）
+- [V] `./gradlew :app:lint` → BUILD SUCCESSFUL（0 errors）；native ninja ala-core → 编译通过；`./gradlew :app:assembleRelease` → BUILD SUCCESSFUL
+- 工作区: 干净全推送。`8d3c701`(工作切片) → `f4e50f8`(CLAUDE.md/README 持久文档)
 
 ### 测试/build 输出（真实退出码）
 ```
-./gradlew :app:lint → EXIT=0
-cargo check → EXIT=0（paddock-api）
-curl https://paddock.takotsubo.cloud/v1/leaderboard/track/15 → track_name='🇦🇪 迪拜赛车场'
-群内实测播报 → @ 真实提及成功（用户确认）
+./gradlew :app:lint → BUILD SUCCESSFUL
+ninja ala-core (SDK cmake 3.22.1) → libala-core.so 链接成功，crash_hook.c 无警告
+./gradlew :app:assembleRelease → BUILD SUCCESSFUL
+adb install -r → Success；dumpsys → versionName=1.0.4 Alpha 1 versionCode=104100
 ```
 
 ## 3. 决策与理由
-- **国旗空格分层** [V]：模块 UI 与契约函数带空格（`🇦🇪 迪拜赛车场`），仅 qq_bot 播报剥空格（`track_display_name_compact`）。用户原话"模块里面要保留国旗和文字之间的空格，只有服务端播报不保留"。紧凑函数在 qq_bot 本地实现而非改契约函数加参数——展示层变体留在唯一关心它的消费点
-- **@ 语法=新标签+markdown 通道** [V]：text-chain 规范的 `<qqbot-at-user id=".."/>` 只在 msg_type=2 被解析；send_message 检测内容含 `<qqbot-at-user` 即整体切 markdown（与 content 字段互斥）。无标签消息保持 msg_type=0 零行为变化
-- **@ 标签带 openid 回落链** [V]：`at_user(openid, username)`——openid 优先（真实提及），缺失退化纯文本 @「用户名」，双缺失空串。四处查询均带 `member_openid` 列
-- **失败文案清 {{at_me}} 残留** [V]：`fail_type_reply` replace 空串（同 {{qq_name}} 既有模式）
-- 继承：CrashCatcher 只装模块进程 / 积分公式 v40 / token 三级回落 / order==2 挂圈 / 版本号红线（全局 CLAUDE.md）
+- **crash 文件独立落盘不进 ala_tool_native.log** [V]：崩溃可能发生在日志写入路径上（磁盘满/锁），同文件互相污染；与模块进程 Java CrashCatcher 的独立文件策略同构
+- **PC 偏移而非完整 backtrace** [V]：`pc = libil2cpp.so 段基址 + 偏移` 对拍 OffsetTable RVA 即知死在哪个被 hook 函数里，解析成本比 unwind 低一个量级；本次嫌疑（pedal 写线程/hook 回调）都在 OffsetTable 管辖内
+- **日志强制开启（用户明确指令）** [V]：排查闪退发现关日志=丢现场（本次日志若非用户碰巧开着，连时间线都拿不到），2MB 滚动上限足够控制存储
+- **两个特性合一个 commit** [V]：LogExporter/ConfigReceiver 双特性共改，hunk 级拆分风险大于收益
+- 继承：CrashCatcher(Java) 只装模块进程 / 积分公式 v40 / token 三级回落 / order==2 挂圈 / 版本号红线
 
 ## 4. 失败的尝试 — 不要再试
-- **`<@openid>` 旧格式发 @** [X]——markdown/纯文本两通道均被平台静默转义为裸 openid 文本（群内实测）。旧频道格式已弃用，勿再用
-- **`<qqbot-at-user>` 标签走纯文本通道（msg_type=0）** [X]——文本通道不解析 XML 标签，原样打印（群内实测）
-- **compact 剥空格只消费一个旗码点** [X]——国旗=两个区域指示符（🇦🇪=U+1F1E6+U+1F1EA），逐码点处理吃掉半旗（`🇪 迪拜赛车场` 实证）；二次修复时又忘了把旗码点拼回输出（裸文字实证）。最终版=成对判定两码点都在 U+1F1E6..1F1FF 且 `format!("{a}{b}{rest}")` 拼回。⚠️ 任何处理 flag 序列的代码都要成对码点判定
-- **宣称"QQ 官方群 bot 完全不支持 @"** [X]——是错误结论（当时据 paotuan.io 骰机器人文档 + 两轮失败推断），`<qqbot-at-user>`+markdown 实测可行。教训：第三方机器人文档的"平台限制"可能是该 bot 自身的通道选择问题，不能直接外推为平台能力边界
-- 继承（前向有效，见 `.handoffs/20260906130000-handoff.md` §4）：靠自导日志定位模块 App 闪退 [X] / 把用户口头崩溃入口当排查目标 [V] / NPatch 靠 Remote Preferences 传 token [X] / ConfigProvider 读 filesDir [X] / SQL 窗口函数 CTE 内先 WHERE 再 rank [X] / 未经同意改版本号 [V] / Release Notes 凭 commit message 直写 / scp ssh 端口参数（ssh=-p 小写，scp=-P 大写，本次又踩）/ VPS 禁 cargo build / IL2CPP dump 用 Windows dotnet / mdns 端口漂移 / serde Option 不兜空串 / askama 禁调函数 / lap_hook 全套 / IL2CPP 扫描三坑
+- **SettingsPagerMiuix 删 SwitchPreference 时把 `ArrowPreference(` 行一起删掉** [V]——删 UI 块时 old_string 覆盖了下一组件的开括号行，编译报 @Composable 语法错；修复=补回开括号行。教训：删嵌套 UI 块时 old/new 都要保留下一个兄弟组件的起始行
+- **Write 工具路径参数写坏（路径里混了 `"..."`）** [V]——报 EACCES mkdir 失败，一次即可察觉
+- **native_log_init 删定义时留了悬空函数体开头** [V]——只删了上半段注释了下半段还在，clang "function definition is not allowed here"；顺带确认 native_log_init 无调用者后连声明一起删干净
+- **Java UncaughtExceptionHandler 覆盖不了游戏进程闪退** [V]——native SIGSEGV 不产生 Java 异常，且 CrashCatcher(Java) 只装模块进程；这正是 crash_hook 信号级方案存在的原因
+- **grep 崩溃指纹（FATAL/SIGSEGV/backtrace）在自导日志中零命中是常态** [V]——游戏进程 native 崩溃不经过任何 Java 层，无声死亡+pid 跳变才是指纹；别因 grep 无命中就下结论"没有崩溃"
+- 继承（前向有效，见 `.handoffs/20260906170000-handoff.md` §4）：`<@openid>` 旧格式发 @ [X] / `<qqbot-at-user>` 走纯文本通道 [X] / 国旗 compact 逐码点剥空格 [X]（成对码点判定）/ "QQ 群 bot 完全不支持 @" [X] / 靠自导日志定位模块 App 闪退 [X]（同本会话教训）/ NPatch 靠 Remote Preferences 传 token [X] / ConfigProvider 读 filesDir [X] / SQL CTE 内先 WHERE 再 rank [X] / 未经同意改版本号 [V] / Release Notes 凭 commit message 直写 / scp -P 大写 / VPS 禁 cargo build / IL2CPP dump 用 Windows dotnet / mdns 端口漂移 / serde Option 不兜空串 / askama 禁调函数 / lap_hook 全套 / IL2CPP 扫描三坑
 
 ## 5. 已知坑
-- ⚠️ **avatarCache 无界** [?]（继承，未修）——`LeaderboardScreen.kt:289` 无 LRU 上限，榜单增长下去迟早 OOM；即使不是闪退元凶也建议加并发/容量上限
-- ⚠️ **模块 App 闪退排查未结案** [?]（继承）——CrashCatcher 已在 1.0.4 Alpha 1 分发版里，等用户复现闪退导出日志定案；若 CrashCatcher 段为空→坐实 MIUI 系统杀
+- ⚠️ **游戏闪退真凶未定案** [?]——crash_hook 已随 1.0.4 Alpha 1 装机，等用户复现导出日志；crash 文件第一段 pc 偏移对拍 `OffsetTable.kt` 即定案。若「游戏进程崩溃记录」段为空→crash 链本身失效（优先查 sigaltstack/SA_ONSTACK 与 Unity 自有 handler 的兼容性）
+- ⚠️ **模块 App 闪退排查未结案** [?]（继承）——Java CrashCatcher 在 1.0.4 Alpha 1 分发版里，等用户复现导出日志；若模块崩溃段为空→坐实 MIUI 系统杀
+- ⚠️ **crash_hook 的 SA_ONSTACK 备用栈 64KB 静态分配** [?]——handler 内 snprintf+maps 解析栈深未实测；若 crash 文件出现半截报告→栈不够，加大 g_sigstack_mem
+- ⚠️ **两代 crash 机制对同一进程无重叠** [V]（设计如此）——Java CrashCatcher=模块进程未捕获异常，crash_hook=游戏进程 native 信号；但游戏进程的 Java 未捕获异常（理论存在）无覆盖
+- ⚠️ **avatarCache 无界** [?]（继承，未修）——`LeaderboardScreen.kt:289` 无 LRU 上限
 - ⚠️ **LogExporter java/native 段可各自回落不同时期缓存** [?]（继承，未修）
 - ⚠️ **该设备 ConfigProvider `Unknown authority`** [?]（继承，未修）——影响 token 第三级回落
-- ⚠️ **markdown 通道的主动播报若遇 304036 无权限会整条失败** [?]——当前群实测通过说明权限够，但换 bot/权限变更时留意；降级方案=纯文本 @「用户名」（git 历史 bcd875b 可考）
-- ⚠️ **qqbot-at-user 标签是文档级而非实测级支持** [?]——成功实测仅此一个群一个 bot；跨群/跨 bot 行为未验证
-- ⚠️ 继承：NPatch 管理器 binder 时序 / lint baseline 13 条失效 / paddock 版本三处同步无校验（deploy.sh 固化未做）/ 排行榜无实时刷新 / 管理端网页验证未做 / 双仓赛道中文名两份硬编码（本次已同步，未来改仍需两边同改）/ Garage 206 测试对象
+- ⚠️ **lint baseline 13 条失效** [V]（本会话 lint 输出实证）——`13 errors/warnings were listed in the baseline but not found`；重生成时机待定
+- ⚠️ 继承：NPatch 管理器 binder 时序 / paddock 版本三处同步无校验 / 排行榜无实时刷新 / 管理端网页验证未做 / 双仓赛道中文名两份硬编码 / Garage 206 测试对象
 
 ## 6. 下一步（有序）
-1. v1.0.4 正式发布（版本号/tag/Release Notes）**待用户定版**——遵守版本号红线；CrashCatcher 已随 Alpha 1 分发
-2. 等用户复现模块 App 闪退后导出日志（CrashCatcher 第一段即堆栈），据此定案修复
-3. （可选）avatarCache 加 LRU/并发上限防御性加固
-4. （可选继承）LogExporter 缓存回落修复 / deploy.sh 固化 / lint baseline 重生成
+1. **等用户反馈**：复现游戏闪退 → 导出日志 → 「游戏进程崩溃记录」段拿 pc 偏移 → 对拍 OffsetTable 定案
+2. 定案后修元凶（嫌疑排序见 §2）；修复验证需用户多轮复现（原 50% 复现率反而是优势）
+3. （可选）lint baseline 重生成（13 条已失效）/ avatarCache LRU 加固 / LogExporter 缓存回落修复
+4. v1.0.4 正式发布待用户定版（版本号红线；两项诊断基建已随 Alpha 1 分发）
 
 ## 7. 留给用户的开放问题
+- 闪退用户反馈何时能拿到（crash 现场定案的唯一依赖）
+- crash_hook 若在真机上抓不到（崩溃记录段为空），是否加 tombstone 提示引导用户抓 logcat
 - v1.0.4 正式版版本号与发布时机
-- 闪退用户日志何时能拿到
-- @「用户名」回落样式是否需要调整（当前 `@「名字」`）
