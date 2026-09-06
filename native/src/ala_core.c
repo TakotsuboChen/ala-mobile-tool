@@ -10,6 +10,7 @@
 #include "intro_hook.h"
 #include "hide_pedals_hook.h"
 #include "lap_hook.h"
+#include "crash_hook.h"
 
 #define LOG_TAG "AlaMobileTool"
 #define LOGI(...) NLOGI(__VA_ARGS__)
@@ -95,6 +96,10 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
     if (!pedal_install_hooks(&pedal_cfg)) {
         LOGE("Failed to install pedal hooks");
     }
+
+    // 游戏进程崩溃自捕：信号级 handler 落盘 ala_tool_crash_native.log。
+    // 尽早安装（hook 装之前），场景加载竞态崩溃发生在 init 之后不久。
+    crash_catcher_install();
 
     if (!drs_install_hooks(&drs_cfg)) {
         LOGE("Failed to install DRS hooks");
@@ -405,15 +410,6 @@ Java_tools_alamobile_mod_NativeBridge_isIntroStarted(JNIEnv *env, jclass clazz) 
     (void) env;
     (void) clazz;
     return intro_is_started() ? JNI_TRUE : JNI_FALSE;
-}
-
-// 设置 native 层日志开关（logcat 始终打，文件写入受此控制）。
-JNIEXPORT void JNICALL
-Java_tools_alamobile_mod_NativeBridge_setLogEnabled(JNIEnv *env, jclass clazz, jboolean enabled) {
-    (void) env;
-    (void) clazz;
-    native_log_set_enabled(enabled ? 1 : 0);
-    NLOGI("native log enabled=%d", enabled ? 1 : 0);
 }
 
 // 初始化"隐藏游戏原生油门/刹车按钮"功能——启动 native 后台轮询线程。

@@ -18,7 +18,7 @@ object BillingHook {
     private const val TAG = "BillingHook"
 
     fun install(xposedInterface: XposedInterface, packageLoadedParam: XposedModuleInterface.PackageLoadedParam) {
-        // 辅助：通过 Logger 写 logcat + 文件（受 logEnabled 控制），
+        // 辅助：通过 Logger 写 logcat + 文件（无条件开启），
         // 同时保留 xposedInterface.log() 写 NPatch 日志目录。
         fun log(priority: Int, msg: String) {
             Logger.log(priority, TAG, msg)

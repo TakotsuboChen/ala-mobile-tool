@@ -520,7 +520,7 @@ static void proxy_player_controls_update(void *this) {
 
 // IRDSCarControllInput::TractionFilter(float accel) — TC 入口。
 // TC 诊断插桩：玩家车白名单分支内限频调用（每 25 次 ≈ 0.5s 一条，LOGI 走
-// native_log_print——logcat 恒打 + logEnabled 门控文件写入）。读回运行时
+// native_log_print——logcat 恒打 + 文件写入）。读回运行时
 // TCLSlip/TCLminSPD（写前值，可观测游戏侧复位行为）+ 各驱动轮 σ/α/maxSlip/
 // maxAngle 与 W、削减比值。标定完成后可整段移除。
 static void tc_diag_log(void *this, float filtered_out, float accel_in,

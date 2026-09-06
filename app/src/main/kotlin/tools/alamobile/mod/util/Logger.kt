@@ -9,7 +9,7 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 统一日志工具：logcat 始终输出，文件写入受 [enabled] 开关控制。
+ * 统一日志工具：logcat + 文件写入无条件开启。
  *
  * **两个进程各自写各自的日志文件**：
  * - 模块进程（ConfigActivity）：`filesDir/ala_tool.log`
@@ -17,8 +17,9 @@ import java.util.Locale
  *
  * 导出时由 [LogExporter] 通过 `createPackageContext` 合并两个文件。
  *
- * logcat 不受 [enabled] 控制——adb 调试时始终能看到日志。
- * 文件写入受 [enabled] 控制——`logEnabled=false` 时不写文件，避免占存储。
+ * 历史说明：曾有 logEnabled 开关控制文件写入（2026-09-06 移除）。排查游戏进程
+ * 闪退时发现关日志 = 丢现场，且用户不会主动开日志——诊断数据必须默认全量，
+ * 2MB 滚动上限已足够控制存储占用。
  *
  * 线程安全：[writeToFile] 用 synchronized 保护，多线程并发写不会交错。
  * 文件滚动：超 [MAX_LOG_SIZE]（2MB）时截断保留后半部分，防无限增长。
@@ -30,7 +31,6 @@ object Logger {
     private const val MAX_LOG_SIZE = 2 * 1024 * 1024L  // 2MB
 
     private var logDir: File? = null
-    private var enabled: Boolean = false
     private val mutex = Object()
 
     private val timestampFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
@@ -49,21 +49,14 @@ object Logger {
         }
     }
 
-    fun setEnabled(enabled: Boolean) {
-        synchronized(mutex) { this.enabled = enabled }
-    }
-
-    fun isEnabled(): Boolean = synchronized(mutex) { enabled }
-
     /**
-     * 核心日志方法：同时打 logcat +（如果 enabled）写文件。
+     * 核心日志方法：同时打 logcat + 写文件。
      *
      * 保留 [AlaMobileModule.logX] 的签名兼容性：
      * `logX(priority, tag, msg)` → `Logger.log(priority, tag, msg)`。
      */
     fun log(priority: Int, tag: String, msg: String) {
         android.util.Log.println(priority, tag, msg)
-        if (!isEnabled()) return
         writeToFile(priority, tag, msg)
     }
 

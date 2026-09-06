@@ -270,7 +270,7 @@ object NativeBridge {
      *   （16 条 GP 赛道自动识别）。
      * - odometerHandler.HandleSectorsTimes：游戏自己的圈段事件（显式
      *   validLap + totalLapTime），维护会话最快有效圈。
-     * 全部结果写入 native 日志（logEnabled 门控文件输出）。
+     * 全部结果写入 native 日志（无条件写文件）。
      */
     @JvmStatic
     external fun initLap(
@@ -346,14 +346,6 @@ object NativeBridge {
     // 查询开场动画是否已开始（one-shot：返回并清零）
     @JvmStatic
     external fun isIntroStarted(): Boolean
-
-    /**
-     * 设置 native 层日志开关。
-     * logcat 始终输出，文件写入受此开关控制。
-     * 配置变更时由 ConfigReceiver / AlaMobileModule 调用。
-     */
-    @JvmStatic
-    external fun setLogEnabled(enabled: Boolean)
 
     /**
      * 主动触发一次强制解锁，不依赖 hook 触发时机。

@@ -10,9 +10,6 @@
 #include <time.h>
 #include <unistd.h>
 
-// 日志开关（1=写文件+logcat，0=只 logcat）
-static volatile int g_log_enabled = 0;
-
 // 日志文件路径缓存
 static char g_log_path[256] = {0};
 static pthread_mutex_t g_log_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -20,17 +17,8 @@ static pthread_mutex_t g_log_mutex = PTHREAD_MUTEX_INITIALIZER;
 // 文件滚动阈值：2MB
 #define MAX_LOG_SIZE (2 * 1024 * 1024)
 
-void native_log_init(int enabled) {
-    g_log_enabled = enabled ? 1 : 0;
-}
-
-void native_log_set_enabled(int enabled) {
-    g_log_enabled = enabled ? 1 : 0;
-}
-
-int native_log_is_enabled(void) {
-    return g_log_enabled;
-}
+// 历史说明：曾有 g_log_enabled 开关控制文件写入（2026-09-06 移除——与 Java
+// 层 logEnabled 同批强制开启，排查闪退时关日志=丢现场）。
 
 /**
  * 从 /proc/self/cmdline 推导包名，拼日志文件路径：
@@ -99,9 +87,6 @@ void native_log_print(int prio, const char *tag, const char *fmt, ...) {
 
     // logcat 始终打
     __android_log_print(prio, tag, "%s", buf);
-
-    // 文件只在 enabled 时写
-    if (!g_log_enabled) return;
 
     resolve_log_path();
     if (g_log_path[0] == '\0') return;

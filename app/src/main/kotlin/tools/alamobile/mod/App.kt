@@ -205,7 +205,6 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
             tools.alamobile.mod.util.CrashCatcher.install(this)
             try {
                 val settings = ModConfig.read(this)
-                tools.alamobile.mod.util.Logger.setEnabled(settings.logEnabled)
                 // 围场客户端初始化（登录页 saveAuth/loadAuth 需要 appContext——
                 // 不 init 时 saveAuth 的 authFile() 直接抛"not initialized"，
                 // 本地 token 文件永远写不出来，曾导致"登录成功但游戏进程拿不到 token"）

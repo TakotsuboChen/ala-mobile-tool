@@ -71,7 +71,6 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
                 brakeCurve = s.brakeCurve,
                 throttleCurvePoints = s.throttleCurvePoints,
                 brakeCurvePoints = s.brakeCurvePoints,
-                logEnabled = s.logEnabled,
                 paddockServer = s.paddockServer,
             )
         }
@@ -108,7 +107,6 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
             brakeCurve = s.brakeCurve,
             throttleCurvePoints = s.throttleCurvePoints,
             brakeCurvePoints = s.brakeCurvePoints,
-            logEnabled = s.logEnabled,
             paddockServer = s.paddockServer,
         )
     }
@@ -159,13 +157,6 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
     fun setBrakeCurve(v: ModConfig.PedalCurve) { _uiState.value = _uiState.value.copy(brakeCurve = v); scheduleSave() }
     fun setThrottleCurvePoints(v: List<ModConfig.CurvePoint>) { _uiState.value = _uiState.value.copy(throttleCurvePoints = v); scheduleSave() }
     fun setBrakeCurvePoints(v: List<ModConfig.CurvePoint>) { _uiState.value = _uiState.value.copy(brakeCurvePoints = v); scheduleSave() }
-    fun setLogEnabled(v: Boolean) {
-        _uiState.value = _uiState.value.copy(logEnabled = v)
-        // 立即生效模块进程的 Logger，不必等 App 重启重新读配置
-        tools.alamobile.mod.util.Logger.setEnabled(v)
-        scheduleSave()
-    }
-
     /** 围场服务器地址覆盖（S4）。空串 = 恢复内置默认。下次游戏进程启动生效。 */
     fun setPaddockServer(v: String) {
         _uiState.value = _uiState.value.copy(paddockServer = v.trim())
@@ -217,7 +208,6 @@ data class ConfigUiState(
     val brakeCurve: ModConfig.PedalCurve,
     val throttleCurvePoints: List<ModConfig.CurvePoint>,
     val brakeCurvePoints: List<ModConfig.CurvePoint>,
-    val logEnabled: Boolean,
     // 围场服务器地址覆盖（空 = PaddockClient 内置默认）。
     val paddockServer: String,
 ) {
@@ -255,7 +245,6 @@ data class ConfigUiState(
         brakeCurve = brakeCurve,
         throttleCurvePoints = throttleCurvePoints,
         brakeCurvePoints = brakeCurvePoints,
-        logEnabled = logEnabled,
         paddockServer = paddockServer,
     )
 }

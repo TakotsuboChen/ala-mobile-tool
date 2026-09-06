@@ -23,7 +23,6 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Update
-import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -66,7 +65,6 @@ import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.OverlaySpinnerPreference
-import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -178,22 +176,8 @@ fun SettingsPagerMiuix(
                             )
                         }
 
-                        // ── 组 2: 日志 ──
+                        // ── 组 2: 日志（日志已强制开启，无开关；仅保留导出入口）──
                         Card(modifier = Modifier.fillMaxWidth()) {
-                            SwitchPreference(
-                                title = "启用日志",
-                                summary = "记录模块运行日志以便排查问题",
-                                startAction = {
-                                    Icon(
-                                        Icons.Rounded.Warning,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = null,
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                checked = uiState.logEnabled,
-                                onCheckedChange = actions::setLogEnabled
-                            )
                             ArrowPreference(
                                 title = "导出并分享日志",
                                 summary = "导出当前日志文件并分享",

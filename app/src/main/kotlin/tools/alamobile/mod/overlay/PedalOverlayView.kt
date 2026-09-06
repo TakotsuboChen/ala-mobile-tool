@@ -149,7 +149,7 @@ class PedalOverlayView(
     // 防止其他手指的触摸事件干扰踏板值。详见 onTouchEvent。
     private var activePointerId = MotionEvent.INVALID_POINTER_ID
 
-    // ── 触摸诊断日志（多指漂移排查，logEnabled 门控，写入导出日志）──
+    // ── 触摸诊断日志（多指漂移排查，无条件写入导出日志）──
     // MOVE 节流状态（实例级，DUAL 两 view 各自节流）：最近一次 MOVE 日志的
     // 归一 t 与时间戳。滑动按行程采样（>2%），静止时 500ms 心跳——心跳能
     // 揭示"手指没动值在变"的竞态。
@@ -301,10 +301,9 @@ class PedalOverlayView(
         return super.onTouchEvent(event)
     }
 
-    // 触摸诊断日志 helper（logEnabled 门控，只省字符串构造，logcat 由
-    // Logger 内部决定）：低频事件（DOWN/POINTER_*/UP/CANCEL）全打。
+    // 触摸诊断日志 helper（无条件写入导出日志）：低频事件
+    //（DOWN/POINTER_*/UP/CANCEL）全打。
     private fun logEvent(event: MotionEvent, action: String, extra: String) {
-        if (!Logger.isEnabled()) return
         Logger.i("pedal[$role] $action activeId=$activePointerId ptrCount=${event.pointerCount} $extra")
     }
 
@@ -403,7 +402,6 @@ class PedalOverlayView(
     // 记录 rawY → relY → t → raw/mapped 值的完整换算链，配合 DOWN 的
     // 布局对比日志可定位漂移发生在哪一环。
     private fun diagMaybeLogMove(event: MotionEvent, pointerIndex: Int, relativeY: Float, viewHeight: Float) {
-        if (!Logger.isEnabled()) return
         val t = if (viewHeight > 0f) relativeY / viewHeight else 0f
         val now = SystemClock.uptimeMillis()
         if (abs(t - diagLastT) <= 0.02f && now - diagLastLogMs < 500L) return

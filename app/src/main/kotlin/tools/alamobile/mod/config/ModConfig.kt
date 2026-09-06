@@ -143,7 +143,6 @@ object ModConfig {
     )
 
     // Debug/logging
-    const val KEY_LOG_ENABLED = "log_enabled"
     const val KEY_PADDOCK_SERVER = "paddock_server"
 
     /**
@@ -561,7 +560,6 @@ object ModConfig {
         // width/height 字段对 ToolButtonView 无意义（控件固定 96dp），保留只为
         // 架构统一。运行时 applySavedPosition() 只用 leftPx()/topPx()，不读 width/height。
         val TOOL_BUTTON_POSITION = OverlayPosition(0.03f, 0.04f, 0.12f, 0.12f)
-        const val LOG_ENABLED = false
         /** 围场服务器默认（与 PaddockClient.DEFAULT_SERVER 一致；空串 = 不覆盖） */
         const val PADDOCK_SERVER = ""
     }
@@ -692,7 +690,6 @@ object ModConfig {
                 // 工具按钮位置：当前不持久化（不写 write），但读路径保留——读出
                 // JSON 里可能含这个 key（未来若开持久化），无 key 时落 Defaults。
                 toolButtonPosition = readOverlayPosition(json, KEY_TOOL_POSITION, Defaults.TOOL_BUTTON_POSITION),
-                logEnabled = json.optBoolean(KEY_LOG_ENABLED, Defaults.LOG_ENABLED),
                 paddockServer = json.optString(KEY_PADDOCK_SERVER, Defaults.PADDOCK_SERVER)
             )
         } catch (e: Throwable) {
@@ -752,7 +749,6 @@ object ModConfig {
             // saveOverlayPosition 写游戏 externalFilesDir），ConfigActivity
             // 不管 position。广播 JSON 不含 position，ConfigReceiver 收到
             // 后合并——保留游戏进程已有的 position，只更新这里的非 position 字段。
-            put(KEY_LOG_ENABLED, settings.logEnabled)
             put(KEY_PADDOCK_SERVER, settings.paddockServer)
         }.toString(2)
 
@@ -1038,7 +1034,6 @@ object ModConfig {
                 brakePosition = readOverlayPosition(j, KEY_BRAKE_POSITION, Defaults.BRAKE_POSITION),
                 singlePedalPosition = readOverlayPosition(j, KEY_SINGLE_PEDAL_POSITION, Defaults.SINGLE_PEDAL_POSITION),
                 toolButtonPosition = readOverlayPosition(j, KEY_TOOL_POSITION, Defaults.TOOL_BUTTON_POSITION),
-                logEnabled = j.optBoolean(KEY_LOG_ENABLED, Defaults.LOG_ENABLED),
                 paddockServer = j.optString(KEY_PADDOCK_SERVER, Defaults.PADDOCK_SERVER)
             )
         } catch (e: Throwable) {
@@ -1259,7 +1254,6 @@ object ModConfig {
             brakePosition = Defaults.BRAKE_POSITION,
             singlePedalPosition = Defaults.SINGLE_PEDAL_POSITION,
             toolButtonPosition = Defaults.TOOL_BUTTON_POSITION,
-            logEnabled = Defaults.LOG_ENABLED,
             paddockServer = Defaults.PADDOCK_SERVER
         )
     }
@@ -1315,7 +1309,6 @@ object ModConfig {
         val toolButtonPosition: OverlayPosition = Defaults.TOOL_BUTTON_POSITION,
         // TC/ABS 介入指示灯开关（默认开启，纯视觉）。
         val enableTcAbsIndicator: Boolean = Defaults.ENABLE_TC_ABS_INDICATOR,
-        val logEnabled: Boolean = Defaults.LOG_ENABLED,
         // 围场服务器地址覆盖（S4）。空 = 用 PaddockClient 内置默认。
         // 仅 ConfigActivity 设置页可改；游戏进程读取链路经 ConfigReceiver 广播 JSON。
         val paddockServer: String = Defaults.PADDOCK_SERVER

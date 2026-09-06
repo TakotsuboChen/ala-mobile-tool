@@ -15,7 +15,7 @@
 #include "shadowhook.h"
 
 #define LOG_TAG "AlaMobileTool"
-// 宏重定向到 native_log（同时打 logcat + 写文件，受 logEnabled 控制）。
+// 宏重定向到 native_log（同时打 logcat + 写文件）。
 #define LOGI(...) NLOGI(__VA_ARGS__)
 #define LOGD(...) NLOGD(__VA_ARGS__)
 #define LOGE(...) NLOGE(__VA_ARGS__)

@@ -28,7 +28,7 @@ class LogReceiver : BroadcastReceiver() {
 
     companion object {
         const val ACTION_PUSH_GAME_LOG = "tools.alamobile.mod.PUSH_GAME_LOG"
-        const val EXTRA_LOG_TYPE = "log_type"        // "java" | "native"
+        const val EXTRA_LOG_TYPE = "log_type"        // "java" | "native" | "nativecrash"
         const val EXTRA_CHUNK_INDEX = "chunk_index"
         const val EXTRA_CHUNK_TOTAL = "chunk_total"
         const val EXTRA_SESSION_ID = "session_id"
@@ -36,6 +36,7 @@ class LogReceiver : BroadcastReceiver() {
 
         private const val GAME_JAVA_LOG_FILE = "game_java.log"
         private const val GAME_NATIVE_LOG_FILE = "game_native.log"
+        private const val GAME_NATIVE_CRASH_FILE = "game_native_crash.log"
         private const val TAG = "AlaMobileTool"
 
         /**
@@ -69,12 +70,12 @@ class LogReceiver : BroadcastReceiver() {
         /**
          * 游戏进程调用：把完整日志分片推到模块进程。
          *
-         * Java 和 native 各自独立分链发送，互不影响。
+         * Java / native / native crash 各自独立分链发送，互不影响。
          * 每段日志按 [CHUNK_SIZE] 分片，每片一条广播，携带 (type, index, total, sessionId, data)。
          *
          * @return true 所有分片广播发送成功
          */
-        fun send(context: Context, javaLog: String, nativeLog: String): Boolean {
+        fun send(context: Context, javaLog: String, nativeLog: String, nativeCrashLog: String = ""): Boolean {
             val sessionId = System.currentTimeMillis().toString()
             var success = true
             if (javaLog.isNotEmpty()) {
@@ -82,6 +83,9 @@ class LogReceiver : BroadcastReceiver() {
             }
             if (nativeLog.isNotEmpty()) {
                 success = sendChunked(context, "native", nativeLog, sessionId) && success
+            }
+            if (nativeCrashLog.isNotEmpty()) {
+                success = sendChunked(context, "nativecrash", nativeCrashLog, sessionId) && success
             }
             return success
         }
@@ -166,7 +170,11 @@ class LogReceiver : BroadcastReceiver() {
         // 全部到齐 → 拼接写入文件
         if (session.received >= session.total) {
             val fullLog = session.chunks.joinToString("") { it ?: "" }
-            val fileName = if (type == "java") GAME_JAVA_LOG_FILE else GAME_NATIVE_LOG_FILE
+            val fileName = when (type) {
+                "java" -> GAME_JAVA_LOG_FILE
+                "nativecrash" -> GAME_NATIVE_CRASH_FILE
+                else -> GAME_NATIVE_LOG_FILE
+            }
             try {
                 File(context.cacheDir, fileName).writeText(fullLog)
                 Log.i(TAG, "LogReceiver: assembled $type log ${fullLog.length} bytes → $fileName")

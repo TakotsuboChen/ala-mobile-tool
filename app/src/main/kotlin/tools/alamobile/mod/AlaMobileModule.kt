@@ -34,7 +34,7 @@ class AlaMobileModule : XposedModule() {
             private set
 
         /**
-         * 统一日志入口：logcat 始终输出 + Logger 文件写入（受 logEnabled 控制）。
+         * 统一日志入口：logcat 输出 + Logger 文件写入（无条件开启）。
          * 同时保留 xposedInterface.log() 路径写 NPatch 日志目录（NPatch 导出时会带）。
          */
         fun logX(priority: Int, tag: String, msg: String) {
@@ -303,15 +303,10 @@ class AlaMobileModule : XposedModule() {
         } else Triple(1.0f, -1f, 1.0f)
 
         // 初始化 Logger：游戏进程用 externalFilesDir 写日志文件。
-        // logEnabled 开关控制文件写入，logcat 始终输出。
-        val enableLog = settings?.logEnabled ?: false
+        // 日志无条件开启（2026-09-06 移除 logEnabled 开关——排查闪退时关日志=丢现场）。
         val loggerCtx = context ?: getAppContext()
         if (loggerCtx != null) {
             Logger.init(loggerCtx, isModuleProcess = false)
-            Logger.setEnabled(enableLog)
-        }
-        if (NativeBridge.isAvailable) {
-            NativeBridge.setLogEnabled(enableLog)
         }
         // ⚠️ enableUnlock 兜底：settings==null（context 还没可用，NPatch 下 onPackageReady
         // 早期常 context=null）时默认 true，不默认 false。

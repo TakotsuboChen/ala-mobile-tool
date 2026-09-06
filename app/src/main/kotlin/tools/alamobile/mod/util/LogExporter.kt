@@ -123,8 +123,8 @@ object LogExporter {
         var foundAny = false
 
         // 0. 崩溃记录（filesDir/ala_tool_crash.log）——放最前，诊断价值最高。
-        // CrashCatcher 无条件落盘（不受日志开关控制），可能记录到 logEnabled=false
-        // 时段的崩溃，不能走 filterRecent（时间窗外也必须保留），全量带出。
+        // CrashCatcher 无条件落盘，可能记录到旧版本 logEnabled=false 时段的
+        // 崩溃，不能走 filterRecent（时间窗外也必须保留），全量带出。
         val crashLog = File(context.filesDir, "ala_tool_crash.log")
         if (crashLog.exists() && crashLog.length() > 0) {
             sb.append("=== 模块进程崩溃记录 ===\n")
@@ -199,14 +199,35 @@ object LogExporter {
             foundAny = true
         }
 
+        // 游戏进程 native 崩溃记录（ala_tool_crash_native.log）——CrashCatcher
+        // native 侧信号级落盘，与 Java crash 段同策略：不走 filterRecent，
+        // 时间窗外也必须保留，全量带出。读取顺序：缓存（推送链）→ 直接路径。
+        var nativeCrashLog: String? = null
+        val cachedNativeCrash = File(context.cacheDir, "game_native_crash.log")
+        if (cachedNativeCrash.exists()) {
+            nativeCrashLog = try { cachedNativeCrash.readText() } catch (_: Throwable) { null }
+        }
+        if (nativeCrashLog == null) {
+            for (pkg in GAME_PACKAGES) {
+                val f = File("/sdcard/Android/data/$pkg/files/ala_tool_crash_native.log")
+                if (f.exists() && f.length() > 0) {
+                    nativeCrashLog = try { f.readText() } catch (_: Throwable) { null }
+                    if (nativeCrashLog != null) break
+                }
+            }
+        }
+        if (nativeCrashLog != null && nativeCrashLog!!.isNotBlank()) {
+            sb.append("=== 游戏进程崩溃记录 ===\n").append(nativeCrashLog).append('\n')
+            foundAny = true
+        }
+
         if (!foundAny) {
             // 所有策略都失败：生成提示信息而非返回 null
             android.util.Log.w("AlaMobileTool", "LogExporter: all strategies failed, generating hint")
             sb.append("未找到日志文件。\n\n")
             sb.append("可能原因：\n")
-            sb.append("1. 日志开关未打开（设置 → 启用日志）\n")
-            sb.append("2. 游戏未运行过（日志在游戏运行时产生）\n")
-            sb.append("3. LSPosed 模式下跨进程读取受限\n\n")
+            sb.append("1. 游戏未运行过（日志在游戏运行时产生）\n")
+            sb.append("2. LSPosed 模式下跨进程读取受限\n\n")
             sb.append("日志文件位置（可用 root 文件管理器或 adb pull 读取）：\n")
             for (pkg in GAME_PACKAGES) {
                 sb.append("  /sdcard/Android/data/$pkg/files/ala_tool.log\n")

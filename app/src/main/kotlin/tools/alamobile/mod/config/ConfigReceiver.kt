@@ -162,14 +162,6 @@ class ConfigReceiver : BroadcastReceiver() {
                 Log.i(TAG, "ConfigReceiver: setHidePedalsEnabled=$hideGamePedals")
             }
 
-            // 实时同步日志开关——logEnabled 控制文件写入，logcat 始终输出。
-            val logEnabled = incoming.optBoolean("log_enabled", false)
-            tools.alamobile.mod.util.Logger.setEnabled(logEnabled)
-            if (tools.alamobile.mod.NativeBridge.isAvailable) {
-                tools.alamobile.mod.NativeBridge.setLogEnabled(logEnabled)
-            }
-            Log.i(TAG, "ConfigReceiver: logEnabled=$logEnabled")
-
             // TC/ABS 介入指示灯开关——无需 native 同步（开关只控制 Java 层
             // TcAbsIndicatorView 的创建），OverlayManager.notifyConfigChanged
             // 重建时读最新 JSON 创建/移除 view。
@@ -195,9 +187,13 @@ class ConfigReceiver : BroadcastReceiver() {
                 val nativeLogFile = java.io.File(extDir, "ala_tool_native.log")
                 val javaLog = if (javaLogFile.exists()) javaLogFile.readText() else ""
                 val nativeLog = if (nativeLogFile.exists()) nativeLogFile.readText() else ""
-                if (javaLog.isNotEmpty() || nativeLog.isNotEmpty()) {
-                    val pushed = LogReceiver.send(context, javaLog, nativeLog)
-                    Log.i(TAG, "ConfigReceiver: pushed game logs via broadcast (java=${javaLog.length} native=${nativeLog.length} success=$pushed)")
+                // native 崩溃自捕文件（crash_hook.c 落盘）——闪退后用户重启游戏
+                // 推送配置时即可带走，不用等导出时跨进程读。
+                val nativeCrashFile = java.io.File(extDir, "ala_tool_crash_native.log")
+                val nativeCrashLog = if (nativeCrashFile.exists()) nativeCrashFile.readText() else ""
+                if (javaLog.isNotEmpty() || nativeLog.isNotEmpty() || nativeCrashLog.isNotEmpty()) {
+                    val pushed = LogReceiver.send(context, javaLog, nativeLog, nativeCrashLog)
+                    Log.i(TAG, "ConfigReceiver: pushed game logs via broadcast (java=${javaLog.length} native=${nativeLog.length} nativeCrash=${nativeCrashLog.length} success=$pushed)")
                 }
             }
         } catch (e: Throwable) {
