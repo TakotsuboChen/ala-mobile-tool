@@ -151,7 +151,7 @@ bot：群内匹配码 → 建号事务（车手号=最小未占用正整数）�
 | Monza | 🇮🇹 蒙扎国家赛车场 |
 | Suzuka | 🇯🇵 铃鹿赛道 |
 | Interlagos | 🇧🇷 英特拉格斯赛道 |
-| Dubai | 🇦🇪 亚斯码头赛道 |
+| Dubai | 🇦🇪 迪拜赛车场 |
 
 （用户原表 `Shanghai` 已修正为场景真名 `Shangai`——单 a，实机 LAPscene 实证，勿纠正。）
 
