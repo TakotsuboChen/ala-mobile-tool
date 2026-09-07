@@ -66,6 +66,7 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
+import top.yukonga.miuix.kmp.basic.PullToRefresh
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
@@ -105,6 +106,8 @@ fun PaddockPagerMiuix(
     val clipboard = LocalClipboardManager.current
     val navigator = LocalNavigator.current
     val context = LocalContext.current
+    // 下拉刷新（miuix PullToRefresh hoisted 模式）：true → 转圈，refresh 完成回调里收起
+    var isRefreshing by remember { mutableStateOf(false) }
 
     // 一次性提示事件 → Toast
     LaunchedEffect(Unit) {
@@ -125,22 +128,33 @@ fun PaddockPagerMiuix(
         contentWindowInsets = WindowInsets.systemBars.add(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal),
     ) { innerPadding ->
         Box(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .scrollEndHaptic()
-                    .overScrollVertical()
-                    .nestedScroll(scrollBehavior.nestedScrollConnection)
-                    .padding(horizontal = 12.dp),
+            PullToRefresh(
+                isRefreshing = isRefreshing,
+                onRefresh = {
+                    isRefreshing = true
+                    actions.refresh { isRefreshing = false }
+                },
                 contentPadding = innerPadding,
-                overscrollEffect = null,
+                refreshTexts = REFRESH_TEXTS,
+                topAppBarScrollBehavior = scrollBehavior,
             ) {
-                item {
-                    Column(
-                        modifier = Modifier.padding(vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        PaddockContent(uiState, actions, clipboard, navigator)
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .scrollEndHaptic()
+                        .overScrollVertical()
+                        .nestedScroll(scrollBehavior.nestedScrollConnection)
+                        .padding(horizontal = 12.dp),
+                    contentPadding = innerPadding,
+                    overscrollEffect = null,
+                ) {
+                    item {
+                        Column(
+                            modifier = Modifier.padding(vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            PaddockContent(uiState, actions, clipboard, navigator)
+                        }
                     }
                 }
             }
@@ -170,15 +184,14 @@ private fun PaddockContent(
 
     if (uiState.loggedIn) {
         // ── 已登录：用户信息连体卡 + 功能入口 ──
-        // 头像：登录后有 userId 时异步拉取（无头像/失败保持 Person 图标）
-        var avatar by remember(uiState.userId) { mutableStateOf<android.graphics.Bitmap?>(null) }
-        LaunchedEffect(uiState.userId) {
-            if (uiState.userId.isNotEmpty()) {
-                avatar = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    PaddockClient.fetchAvatar("/v1/avatar/${uiState.userId}")?.let { bytes ->
-                        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                    }
-                }
+        // 头像：走 PaddockClient 三级缓存（内存 Lru→磁盘→网络）。URL 是 /v1/me
+        // 下发的版本化地址（?v=avatar_version）——换头像即换 URL，缓存自动失效。
+        // key 绑 avatarUrl：URL 不变（积分刷新等重组）不重复加载。
+        val myAvatarUrl = uiState.avatarUrl.takeIf { it.isNotEmpty() }
+        var avatar by remember(myAvatarUrl) { mutableStateOf(myAvatarUrl?.let { PaddockClient.fetchAvatarFromCache(it) }) }
+        LaunchedEffect(myAvatarUrl) {
+            if (myAvatarUrl != null && avatar == null) {
+                avatar = withContext(kotlinx.coroutines.Dispatchers.IO) { PaddockClient.fetchAvatar(myAvatarUrl) }
             }
         }
 

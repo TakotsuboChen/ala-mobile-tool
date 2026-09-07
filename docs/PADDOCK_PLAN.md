@@ -94,14 +94,17 @@ POST /v1/auth/reset-by-code     {reset_code,new_password} → 204 | 404 码无�
 POST /v1/me/avatar              (Bearer, body=JPEG/PNG ≤2MB) → {uploaded, url}（Garage 存储）
 GET  /v1/me/avatar              (Bearer) → {uploaded, url}（查自己是否有头像）
 GET  /v1/avatar/{user_id}       → 200 图片字节 | 404 无头像（公开端点）
+    （2026-09-06：users.avatar_version=上传 epoch millis，榜单/ /v1/me 的 avatar_url
+     带 ?v=<version>——客户端磁盘缓存失效开关；响应带 Cache-Control: immutable）
 POST /v1/laps                   {gp_index, lap_ms, version_code} (Bearer)
                                                     → {personal: bool, server: bool,
                                                        toast: null|{level, track}}
 GET  /v1/leaderboard/points?version=      → 积分总榜/版本榜
 GET  /v1/leaderboard/track/{gp_index}?version= → 赛道榜（总榜不分版本）
-GET  /v1/me                      (Bearer) → {user_id, username, reg_seq, has_avatar, total_points}
+GET  /v1/me                      (Bearer) → {user_id, username, reg_seq, has_avatar, avatar_url, total_points}
     （2026-09-01 实现：模块重进后恢复登录态展示；total_points=计时赛总积分，与积分总榜同口径
-     （v39 起=各版本独立计分累加，无成绩=0）；401=token 失效→模块自动登出）
+     （v39 起=各版本独立计分累加，无成绩=0）；401=token 失效→模块自动登出；
+     2026-09-06 加 avatar_url=版本化头像 URL（无头像=缺省））
 ```
 
 错误码明确返回（401 掉登录态→模块进缓存补传路径）。

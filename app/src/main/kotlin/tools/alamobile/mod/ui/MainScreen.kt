@@ -140,7 +140,7 @@ fun MainScreen(
                         when (page) {
                             0 -> OverviewPager(navController, bottomInnerPadding, isCurrentPage)
                             1 -> ConfigurePager(navController, bottomInnerPadding, isCurrentPage)
-                            2 -> tools.alamobile.mod.ui.screen.paddock.PaddockPager(bottomInnerPadding)
+                            2 -> tools.alamobile.mod.ui.screen.paddock.PaddockPager(isCurrentPage, bottomInnerPadding)
                             3 -> SettingsPager(bottomInnerPadding)
                         }
                     }

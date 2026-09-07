@@ -29,6 +29,8 @@ class PaddockViewModel(application: android.app.Application) : AndroidViewModel(
         val userId: String = "",          // 服务端 user_id（头像 URL 用）
         val regSeq: Long = 0,            // 车手 ID（服务端 login 响应 reg_seq）
         val totalPoints: Long = 0,        // 计时赛总积分（GET /v1/me，登录响应为 0 待刷新）
+        /** 版本化头像 URL（/v1/me 下发，?v=avatar_version）；空串=无头像。个人卡缓存失效靠它。 */
+        val avatarUrl: String = "",
         val needsAvatar: Boolean = false, // 注册后首次登录 → 引导上传头像
         val loading: Boolean = false,
         // 登录表单（注册共用：新流程注册=用户名+密码+弹窗复制指令，登录=同名同密直登）
@@ -49,7 +51,19 @@ class PaddockViewModel(application: android.app.Application) : AndroidViewModel(
         // 重进模块恢复登录态：token 在内存/daemon 里但 username/regSeq/积分只有服务端知道。
         // 401（token 失效）→ 清登录态回到核验表单；网络问题 → 保留 token，保持基础卡片。
         if (_uiState.value.loggedIn) {
-            viewModelScope.launch {
+            refresh()
+        }
+    }
+
+    /**
+     * 手动刷新（进入围场页/下拉刷新共用入口）：拉 /v1/me 恢复/更新 username/积分/
+     * 版本化头像 URL + 补传本地待传队列。401 → 自动登出；网络问题 → 保留现状。
+     * 重复触发安全（每次都是一次轻量 GET，不做去重——进页+下拉连点是合理诉求）。
+     * @param onDone 刷新流程结束回调（无论成败，下拉刷新指示器收起用）；可 null。
+     */
+    fun refresh(onDone: (() -> Unit)? = null) {
+        viewModelScope.launch {
+            try {
                 val me = withContext(Dispatchers.IO) { PaddockClient.fetchMe() }
                 if (me.ok) {
                     _uiState.update {
@@ -59,6 +73,7 @@ class PaddockViewModel(application: android.app.Application) : AndroidViewModel(
                             regSeq = me.regSeq,
                             totalPoints = me.totalPoints,
                             needsAvatar = !me.hasAvatar,
+                            avatarUrl = me.avatarUrl,
                         )
                     }
                 } else if (me.needRelogin) {
@@ -69,6 +84,8 @@ class PaddockViewModel(application: android.app.Application) : AndroidViewModel(
                 // "先跑圈后登录/NPatch token 未进 daemon"的圈永远出不去（用户日志
                 // 实证）。围场页是用户唯一必到的恢复入口，进页即补传（IO 线程）。
                 PaddockClient.drainPendingQueueOnEntry()
+            } finally {
+                onDone?.invoke()
             }
         }
     }
@@ -138,26 +155,8 @@ class PaddockViewModel(application: android.app.Application) : AndroidViewModel(
         }
     }
 
-    /** 重拉 /v1/me 刷新 username/积分/头像状态（401 时自动登出）。 */
-    private fun refreshMe() {
-        viewModelScope.launch {
-            val me = withContext(Dispatchers.IO) { PaddockClient.fetchMe() }
-            if (me.ok) {
-                _uiState.update {
-                    it.copy(
-                        username = me.username,
-                        userId = me.userId,
-                        regSeq = me.regSeq,
-                        totalPoints = me.totalPoints,
-                        needsAvatar = !me.hasAvatar,
-                    )
-                }
-            } else if (me.needRelogin) {
-                PaddockClient.clearAuth()
-                _uiState.update { UiState() }
-            }
-        }
-    }
+    /** 重拉 /v1/me 刷新 username/积分/头像状态（401 时自动登出）。与进页刷新同实现。 */
+    private fun refreshMe() = refresh()
 
     /**
      * 注册：用户名+密码 → 服务端生成 pending 会话（哈希密码+发号）→ 弹窗展示申请指令。

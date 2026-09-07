@@ -1,6 +1,8 @@
 package tools.alamobile.mod
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -42,6 +44,9 @@ object PaddockClient {
 
     /** 待传队列上限——防刷圈异常时无限膨胀 */
     private const val QUEUE_MAX = 200
+
+    /** 头像磁盘缓存总量上限（裁剪后 JPEG 普遍 20~80KB，5MB ≈ 百人级榜单全量） */
+    private const val AVATAR_DISK_MAX_BYTES = 5L * 1024 * 1024
 
     @Volatile private var appContext: Context? = null
     @Volatile private var serverBase: String = DEFAULT_SERVER
@@ -234,6 +239,8 @@ object PaddockClient {
         val username: String = "",
         val regSeq: Long = 0,
         val hasAvatar: Boolean = false,
+        /** 服务端下发的版本化头像 URL（?v=）；旧版服务端无此字段为空串 */
+        val avatarUrl: String = "",
         val totalPoints: Long = 0,
     )
 
@@ -244,12 +251,16 @@ object PaddockClient {
             when {
                 code == 200 -> {
                     val j = JSONObject(resp)
+                    // 版本化头像 URL 记录到内存：个人卡/磁盘缓存失效全靠它
+                    val avatarUrl = j.optString("avatar_url")
+                    setMyAvatarUrl(avatarUrl.takeIf { it.isNotEmpty() })
                     MeResult(
                         ok = true,
                         userId = j.optString("user_id"),
                         username = j.optString("username"),
                         regSeq = j.optLong("reg_seq"),
                         hasAvatar = j.optBoolean("has_avatar"),
+                        avatarUrl = avatarUrl,
                         totalPoints = j.optLong("total_points"),
                     )
                 }
@@ -591,26 +602,122 @@ object PaddockClient {
     }
 
     /**
-     * 下载头像（公开端点）。avatarUrl 可以是绝对 URL 或服务端返回的相对路径
-     * （/v1/avatar/{id}）——相对路径拼 serverBase。返回图片字节或 null。阻塞 IO。
+     * 下载头像（公开端点，带三级缓存）。avatarUrl 可以是绝对 URL 或服务端返回的相对路径
+     * （/v1/avatar/{id}?v=…）——相对路径拼 serverBase。返回图片字节或 null。阻塞 IO。
+     *
+     * 缓存层级（2026-09-06 定案，VPS 流量出口优化）：
+     * 1. 内存 LruCache（位图，UI 直接可用）
+     * 2. 磁盘 cacheDir/paddock_avatars/（**降采样后的 JPEG**，冷启动免下载）
+     * 3. 网络（仅缓存全 miss 时）
+     * 磁盘存降采样位图而非原图字节：服务端存的是上传原图（实测单张最大 ~1MB），
+     * 原字节缓存 5MB 上限在满编榜单下必触发 trim 自删 → 重启后大面积 miss →
+     * 全量重下死循环（实机日志实证）。降采样后单张 ~20KB，67 人全量 <1.5MB，
+     * trim 永不触发。缓存失效完全靠 URL 版本号（服务端 avatar_version，上传即变）。
      */
-    fun fetchAvatar(avatarUrl: String): ByteArray? {
+    fun fetchAvatar(avatarUrl: String, cacheKey: String = avatarUrl): Bitmap? {
+        memAvatarCache.get(cacheKey)?.let { return it }
         val url = if (avatarUrl.startsWith("http")) avatarUrl else "$serverBase$avatarUrl"
-        return try {
+        // 磁盘命中 → 回填内存（文件本身已是降采样 JPEG，直接解码）
+        val diskFile = avatarDiskFile(cacheKey)
+        if (diskFile.isFile) {
+            try {
+                BitmapFactory.decodeFile(diskFile.absolutePath)?.let {
+                    Logger.log(Log.INFO, TAG, "fetchAvatar: disk HIT $cacheKey")
+                    memAvatarCache.put(cacheKey, it)
+                    return it
+                }
+                // 解码失败 = 文件损坏，删除后走网络
+                diskFile.delete()
+            } catch (_: Throwable) {
+                // 读失败同理
+            }
+        }
+        Logger.log(Log.INFO, TAG, "fetchAvatar: MISS, downloading $cacheKey")
+        // 网络 → 解码降采样 → 压缩落盘 → 回填内存
+        val bmp = try {
             val conn = (URL(url).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 connectTimeout = CONNECT_TIMEOUT
                 readTimeout = READ_TIMEOUT
             }
-            try {
+            val decoded = try {
                 if (conn.responseCode != 200) return null
-                conn.inputStream.use { it.readBytes() }
+                conn.inputStream.use { decodeAvatarScaled(it.readBytes()) }
             } finally {
                 conn.disconnect()
             }
+            decoded ?: return null
         } catch (e: Throwable) {
-            null
+            Logger.log(Log.WARN, TAG, "fetchAvatar failed: ${e.message}")
+            return null
         }
+        try {
+            val tmp = File(diskFile.parentFile, diskFile.name + ".tmp")
+            tmp.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+            tmp.renameTo(diskFile)  // 原子替换：并发下载同 URL 也不会出现半截文件
+            trimAvatarDiskCache()
+        } catch (e: Throwable) {
+            Logger.log(Log.WARN, TAG, "avatar disk cache write failed: ${e.message}")
+        }
+        memAvatarCache.put(cacheKey, bmp)
+        return bmp
+    }
+
+    /** 头像磁盘缓存文件（URL 哈希做文件名，避开 / ? 等非法字符）。 */
+    private fun avatarDiskFile(cacheKey: String): File {
+        val ctx = appContext ?: error("PaddockClient not initialized")
+        val dir = File(ctx.cacheDir, "paddock_avatars")
+        if (!dir.isDirectory) dir.mkdirs()
+        return File(dir, Integer.toHexString(cacheKey.hashCode()) + ".img")
+    }
+
+    /**
+     * 磁盘缓存总量上限（超限按 lastModified 删最旧）。不按 URL 集合精确失效——
+     * 换头像后旧 ?v= 文件会残留至此自然淘汰，逻辑简单且不会误删其他榜单条件下
+     * 仍有效的缓存（URL 集合随 tab/筛选变化，按集合清理必误删）。
+     */
+    private fun trimAvatarDiskCache() {
+        try {
+            val ctx = appContext ?: return
+            val dir = File(ctx.cacheDir, "paddock_avatars")
+            val files = dir.listFiles()?.filter { it.name.endsWith(".img") } ?: return
+            var total = files.sumOf { it.length() }
+            if (total <= AVATAR_DISK_MAX_BYTES) return
+            for (f in files.sortedBy { it.lastModified() }) {
+                if (total <= AVATAR_DISK_MAX_BYTES) break
+                val len = f.length()
+                if (f.delete()) total -= len
+            }
+        } catch (_: Throwable) {
+        }
+    }
+
+    @Volatile private var myAvatarUrlField: String? = null
+
+    /** fetchMe 成功后记录服务端下发的版本化 avatar_url（个人卡/磁盘缓存共用）。 */
+    fun setMyAvatarUrl(url: String?) {
+        myAvatarUrlField = url
+    }
+
+    private val memAvatarCache = object : android.util.LruCache<String, Bitmap>(256) {
+        override fun sizeOf(key: String, value: Bitmap): Int = 1  // 按张数计（≤256 张），解码已降采样
+    }
+
+    /** 仅查内存缓存（UI 首帧同步路径用，绝不阻塞）；miss 返回 null 走异步加载。 */
+    fun fetchAvatarFromCache(cacheKey: String): Bitmap? = memAvatarCache.get(cacheKey)
+
+    /** 头像解码降采样（36~56dp 显示尺寸；512px 全尺寸 ×N 张的内存/GC 压力不可接受）。 */
+    private fun decodeAvatarScaled(bytes: ByteArray): Bitmap? = try {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        var sample = 1
+        while (bounds.outWidth / (sample * 2) >= 144) sample *= 2
+        BitmapFactory.decodeByteArray(
+            bytes, 0, bytes.size,
+            BitmapFactory.Options().apply { inSampleSize = sample },
+        )
+    } catch (e: Throwable) {
+        null
     }
 
     private fun getJson(url: String, token: String? = null): Pair<Int, String> {

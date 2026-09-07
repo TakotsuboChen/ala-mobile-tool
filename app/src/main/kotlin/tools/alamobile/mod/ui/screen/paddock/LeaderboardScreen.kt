@@ -1,7 +1,5 @@
 package tools.alamobile.mod.ui.screen.paddock
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -62,6 +60,7 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
+import top.yukonga.miuix.kmp.basic.PullToRefresh
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
@@ -70,7 +69,6 @@ import top.yukonga.miuix.kmp.preference.OverlaySpinnerPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 计时赛排行榜二级页（围场 → 计时赛排行榜 push 进来）。
@@ -120,6 +118,10 @@ fun LeaderboardScreen() {
     var visibleBoard by remember { mutableStateOf(0 to 0) }  // (tabIndex, track) 实际显示的榜单
     var switchSeq by remember { mutableIntStateOf(0) }       // 切换序号，驱动淡出→换数据协程
     val boardAlpha = remember { Animatable(1f) }
+    // 下拉刷新序号：自增迫使数据协程重跑（LaunchedEffect key 含它，相同筛选条件也能重拉）
+    var refreshSeq by remember { mutableIntStateOf(0) }
+    // 下拉刷新指示器（miuix PullToRefresh hoisted 状态）
+    var isRefreshing by remember { mutableStateOf(false) }
 
     LaunchedEffect(switchSeq) {
         if (switchSeq == 0) return@LaunchedEffect
@@ -128,7 +130,7 @@ fun LeaderboardScreen() {
         boardAlpha.snapTo(1f)  // 新行由 animateItem fadeIn 从 0 起；显式 alpha 复位为 1
     }
 
-    LaunchedEffect(tabIndex, selectedTrack, selectedVersion) {
+    LaunchedEffect(tabIndex, selectedTrack, selectedVersion, refreshSeq) {
         val v = if (selectedVersion == 0) null else VERSION_CODES.getOrNull(selectedVersion - 1)
         if (tabIndex == 0) {
             points = withContext(Dispatchers.IO) { PaddockClient.fetchPointsBoard(v) }
@@ -136,6 +138,7 @@ fun LeaderboardScreen() {
             trackBoard = withContext(Dispatchers.IO) { PaddockClient.fetchTrackBoard(selectedTrack, v) }
         }
         everLoaded = true
+        isRefreshing = false  // 数据到位 → 收起下拉指示器
         // 无在途切换（首次加载）→ 直接显示；有在途切换 → 等淡出协程换源
         if (switchSeq == 0) {
             visibleBoard = tabIndex to selectedTrack
@@ -166,6 +169,18 @@ fun LeaderboardScreen() {
         contentWindowInsets = WindowInsets.systemBars.add(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal),
     ) { innerPadding ->
         Box(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
+            PullToRefresh(
+                isRefreshing = isRefreshing,
+                onRefresh = {
+                    isRefreshing = true
+                    // 与切筛选同一套两阶段时序：旧行淡出 → refreshSeq 驱动重拉 → 新行淡入
+                    switchSeq++
+                    refreshSeq++
+                },
+                contentPadding = innerPadding,
+                refreshTexts = REFRESH_TEXTS,
+                topAppBarScrollBehavior = scrollBehavior,
+            ) {
             // 榜单行直接作为外层 LazyColumn 的 items：数据到达帧只组合可见行，
             // 不会像"Card + 全量 forEach"那样一次性组合几百行导致掉帧。
             // 连体卡视觉 = 每行自带 surfaceContainer 背景 + 首末行圆角拼接。
@@ -267,6 +282,7 @@ fun LeaderboardScreen() {
                     item(key = "footer-space") { Spacer(Modifier.height(12.dp)) }
                 }
             }
+            }
         }
     }
 }
@@ -282,37 +298,20 @@ private fun boardRowShape(index: Int, size: Int): Shape = when {
 /** 页面进入转场时长（miuix NavDriverSpec.PROGRAMMATIC_DURATION_MILLIS，契约值勿随意改）。 */
 private const val NAV_ENTER_SETTLE_MILLIS = 500L
 
+/** 下拉刷新四状态文案（顺序=miuix RefreshState：下拉中/松手刷新/刷新中/完成），围场页共用。 */
+internal val REFRESH_TEXTS = listOf("下拉刷新", "松手刷新", "刷新中…", "刷新完成")
+
 /** 榜单切换旧行淡出时长：与 animateItem fadeOutSpec 一致，保证淡出播完才换源。 */
 private const val BOARD_FADE_OUT_MILLIS = 150L
 
-/** 头像内存缓存（屏幕级即可：榜单页进出重建，天然淘汰）。key = avatar_url。 */
-private val avatarCache = ConcurrentHashMap<String, Bitmap>()
-
-/** 头像显示尺寸 36dp → 像素约 72~108px；解码降采样到 2 的幂采样率，避免 512px 全尺寸位图 ×N 张的内存/GC 压力。 */
-private fun decodeAvatarScaled(bytes: ByteArray): Bitmap? {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-    var sample = 1
-    while (bounds.outWidth / (sample * 2) >= 144) sample *= 2
-    return BitmapFactory.decodeByteArray(
-        bytes, 0, bytes.size,
-        BitmapFactory.Options().apply { inSampleSize = sample },
-    )
-}
-
-/** 榜单行头像：有 URL 异步取（缓存），无 URL/失败显示 Person 占位。 */
+/** 榜单行头像：有 URL 异步取（PaddockClient 三级缓存：内存 Lru→磁盘→网络），无 URL/失败显示 Person 占位。 */
 @Composable
 private fun AvatarOrPlaceholder(avatarUrl: String?) {
-    var bmp by remember(avatarUrl) { mutableStateOf(avatarUrl?.let { avatarCache[it] }) }
+    var bmp by remember(avatarUrl) { mutableStateOf(avatarUrl?.let { PaddockClient.fetchAvatarFromCache(it) }) }
     LaunchedEffect(avatarUrl) {
         if (avatarUrl != null && bmp == null) {
-            val b = withContext(Dispatchers.IO) {
-                PaddockClient.fetchAvatar(avatarUrl)?.let { decodeAvatarScaled(it) }
-            }
-            if (b != null) {
-                avatarCache[avatarUrl] = b
-                bmp = b
-            }
+            val b = withContext(Dispatchers.IO) { PaddockClient.fetchAvatar(avatarUrl) }
+            if (b != null) bmp = b
         }
     }
     if (bmp != null) {
