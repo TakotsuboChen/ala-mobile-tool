@@ -58,6 +58,15 @@ object OffsetTable {
     const val IRDS_CAR_CONTROLL_INPUT_TRACTION_FILTER: Long = 0x1A673FCL
     const val IRDS_CAR_CONTROLL_INPUT_HANDLE_ABS: Long = 0x1A67970L
 
+    // IRDSWheel.RoadForce 内 ABS 滑移管理写入指令地址（str s0, [x19, #0x3EC]）。
+    // 指令级拦截作为 TC/ABS 指示灯的 ABS 介入信号——只有滑移超阈帧才流经
+    // 此处（未超阈 b.le 直接绕过），命中 = 游戏正在施加滑移管理。
+    // 8.0.6 实测：RoadForce RVA 0x1A7DB3C + 函数内 0x480 = 0x1A7DFBC
+    //（8.0.4 为 0x1A7B35C + 0x480 = 0x1A7B7DC，方法体未变仅整体平移 +0x27E0）。
+    // ⚠️ 升版必核：反汇编新版 RoadForce，确认介入写点仍为 RVA+0x480 处的
+    // str s0,[x19,#0x3EC] 且位于 b.le 绕过段之后（对拍 build/abs_scan 反汇编）。
+    const val IRDS_WHEEL_ROADFORCE_ABS_WRITE: Long = 0x1A7DFBCL
+
     // IRDSDrivetrain instance fields
     // Unchanged from 8.0.0
     const val IRDS_DRIVETRAIN_CURRENT_GEAR_FIELD: Long = 0xC0L

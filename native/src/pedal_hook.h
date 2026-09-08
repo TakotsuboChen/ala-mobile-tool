@@ -103,6 +103,11 @@ typedef struct {
     uintptr_t traction_filter_offset;
     uintptr_t handle_abs_offset;
 
+    // IRDSWheel.RoadForce 内 ABS 滑移管理写入指令地址（指示灯拦截点，见
+    // OffsetTable.IRDS_WHEEL_ROADFORCE_ABS_WRITE 注释）。Java 注入，
+    // native 侧禁止硬编码 RVA（CLAUDE.md 红线）。
+    uintptr_t abs_rf_write_offset;
+
     // IRDSPlayerControls::Update is hooked to continuously refresh
     // g_last_controller from the player's IRDSPlayerControls.carInputs
     // (offset 0x60). This survives scene reloads / restarts because Update

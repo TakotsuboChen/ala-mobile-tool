@@ -44,9 +44,10 @@ static int g_abs_base_uses[4] = {-1, -1, -1, -1};  // -1=未捕获，0/1=基线
 
 // ── TC/ABS 介入指示灯信号（Java 主线程 JNI 轮询读，volatile 保证可见性）──
 // ABS 介入信号 = **游戏原生执行点的直击**：inline 拦截 RoadForce 内
-// "tempBrakeF 释放/管理写入"指令（base+0x1A7B7DC，str s0,[x19,#0x3EC]——
-// 反汇编实证：只有滑移超阈帧才流经此处；未超阈 b.le 直接绕过；0x1A7B768
-// 的另一写入点是每帧必经的普通路径，不含介入语义）。命中即 = 游戏此刻
+// "tempBrakeF 释放/管理写入"指令（base + g_config.abs_rf_write_offset，
+// str s0,[x19,#0x3EC]——反汇编实证：只有滑移超阈帧才流经此处；未超阈
+// b.le 直接绕过；写点组里靠前的那条（8.0.4=0x1A7B768 / 8.0.6=0x1A7DF48）
+// 是每帧必经的普通路径，不含介入语义，勿拦截）。命中即 = 游戏此刻
 // 正在对某轮施加 ABS 滑移管理（含 pulse 泄压与 kP 管理两相位）——这是
 // 游戏自己的执行流在发声，非字段条件复算。玩家车过滤：x19(wheel) 与
 // g_player_controller 的 4 轮指针比对（AI 车 RoadForce 同样命中，必须滤）。
@@ -782,8 +783,10 @@ static void abs_apply_gear(void *this) {
 }
 
 // ── ABS 介入原生信号：RoadForce tempBrakeF 释放/管理写入指令拦截器 ──
-// 拦截地址 base+0x1A7B7DC（str s0, [x19, #0x3EC]）。反汇编实证
-//（build/abs_scan/roadforce.asm + TECHNICAL_ANALYSIS §2.3）：该指令只在
+// 拦截地址 base + g_config.abs_rf_write_offset（str s0, [x19, #0x3EC]；地址
+// 由 Java 侧 OffsetTable.IRDS_WHEEL_ROADFORCE_ABS_WRITE 注入，8.0.6 =
+// 0x1A7DFBC）。反汇编实证（build/abs_scan/roadforce.asm + TECHNICAL_ANALYSIS
+// §2.3）：该指令只在
 // 滑移超阈帧执行（未超阈走 0x1A7B770 b.le 绕过），是游戏 ABS 真实介入的
 // 执行点——命中即游戏此刻正在对该轮施加滑移管理。x19 = IRDSWheel。
 // 高频路径（全车每物理帧滑移超阈时命中）：只做 4 次指针比对 + 一次写。
@@ -826,8 +829,8 @@ static void abs_rf_intercept_pre(shadowhook_cpu_context_t *ctx, void *data) {
     }
 }
 
-// 安装 RoadForce 指令拦截器。offset 固定 0x1A7B7DC（8.0.4 专用，与
-// TractionFilter 等同受 VersionGate 门控）。失败仅记日志——指示灯失效
+// 安装 RoadForce 指令拦截器。offset 由 Java 侧 OffsetTable 注入（升版只改
+// OffsetTable，与 TractionFilter 等同受 VersionGate 门控）。失败仅记日志——指示灯失效
 // 不影响任何 gameplay 功能。
 // ⚠️ flags 用 DEFAULT：回调体 abs_rf_intercept_pre 已做到零浮点（0xF0
 // 过滤用 IEEE754 位型整数比较，见该函数头注释）——不需要 shadowhook 的
@@ -836,13 +839,18 @@ static void abs_rf_intercept_pre(shadowhook_cpu_context_t *ctx, void *data) {
 // 今后若在回调里加任何浮点逻辑，必须先确认不会碰 s0-v31，否则档位失效
 // 会复发（症状：pulse 泄压帧 tempBrakeF 出现 0~1.5 的扭矩量纲不可能值）。
 static void abs_rf_intercept_install(uintptr_t base) {
-    uintptr_t target = base + 0x1A7B7DC;
+    if (g_config.abs_rf_write_offset == 0) {
+        LOGE("abs_rf_write_offset not provided by Java, indicator interceptor skipped");
+        g_abs_rf_intercept_installed = 0;
+        return;
+    }
+    uintptr_t target = base + g_config.abs_rf_write_offset;
     void *stub = shadowhook_intercept_instr_addr(
             (void *) target, abs_rf_intercept_pre, NULL,
             SHADOWHOOK_INTERCEPT_DEFAULT);
     if (stub == NULL) {
         int err = shadowhook_get_errno();
-        LOGE("shadowhook_intercept_instr_addr(RoadForce 0x1A7B7DC) failed: %d (%s)",
+        LOGE("shadowhook_intercept_instr_addr(RoadForce 0x%" PRIxPTR ") failed: %d (%s)", target,
              err, shadowhook_to_errmsg(err));
         g_abs_rf_intercept_installed = 0;
     } else {

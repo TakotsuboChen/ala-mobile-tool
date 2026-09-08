@@ -37,6 +37,7 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
                                            jlong drivetrain_do_gear_shifting,
                                            jlong traction_filter,
                                            jlong handle_abs,
+                                           jlong abs_rf_write,
                                            jlong player_controls_update,
                                            jlong drs_toggle,
                                            jlong billing_manager_awake,
@@ -83,6 +84,7 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
         .drivetrain_do_gear_shifting_offset = (uintptr_t) drivetrain_do_gear_shifting,
         .traction_filter_offset = (uintptr_t) traction_filter,
         .handle_abs_offset = (uintptr_t) handle_abs,
+        .abs_rf_write_offset = (uintptr_t) abs_rf_write,
         .player_controls_update_offset = (uintptr_t) player_controls_update
     };
 
