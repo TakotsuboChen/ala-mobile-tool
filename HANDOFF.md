@@ -1,70 +1,69 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-09-07T10:51:56+08:00 · Git HEAD: `83dcb32`（模块仓；paddock 仓 `75dadf9` 均已推送）
+生成时间: 2026-09-08T21:58:40+08:00 · Git HEAD: `8f51d22`（模块仓已推送）
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: 模块仓 `main` @ `83dcb32`（2026-09-07）；paddock 仓 `main` @ `75dadf9`
-- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `83dcb32`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA；不一致以 git 实际输出为准
+- 锚点: main @ `8f51d22`（2026-09-08，工作+持久文档提交后的 HEAD）
+- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `8f51d22`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA；不一致以 git 实际输出为准
 - 待重探的 [?]: 见下方标记
-- 先读: 本文件 §2（头像缓存自噬的日志证据链）+ `docs/PADDOCK_PLAN.md` §4（avatar_url 契约）
+- 先读: 本文件 §2（导出 V5 契约）+ `native/src/pedal_hook.c` 注释（两版介入写点对拍结论）
 
 ## 1. 当前目标
-围场体验三需求（用户指令）：①进围场主页自动刷新积分 ②围场主页/排行榜下拉刷新 ③头像缓存止血 VPS 流量出口。**已全部完成、部署、装机、实机验证通过**。悬而未决的旧目标仍是游戏进程闪退定案（等用户复现 crash 现场）。
+本轮四特性全部完成并装机验证：①ABS 指示灯刹车必闪修复（8.0.6 偏移）②配置读取新鲜度仲裁（治 NPatch 陈旧 remote 快照）③日志收编红线（15 文件 148 处直用清零）④日志导出 V5（3s 探活门控+转圈遮罩+弹窗重做）。悬而未决旧目标仍是游戏进程闪退定案（等用户复现 crash 现场）。
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **头像三级缓存闭环实证**：`PaddockClient.fetchAvatar` = 内存 LruCache(256张)→磁盘 `cacheDir/paddock_avatars/`(存降采样JPEG, 5MB上限)→网络；失效靠服务端版本化 URL `?v=avatar_version`（上传即变）。实机日志：装机后首轮 38 条 `MISS, downloading` → 重启后 108 条全部 `disk HIT` 零下载
-- [V] **缓存自噬 bug 已根治**：首版磁盘存原图字节（实测单张最大 989KB），18 张顶满 5MB 上限 → 下载过程 trim 自删本轮文件 → 重启大面积 miss → 全量重下死循环（设备文件 mtime 全同分钟铁证）。改存降采样 JPEG（~20KB/张，67人<1.5MB）后 trim 永不触发
-- [V] **服务端已部署**：镜像 `paddock-api:1.0.1`（版本号未动）本地 build→save|gzip→scp -P 4142→VPS load→compose up；迁移 0008 生效（69 用户 67 个 avatar_version=1 回填）；线上榜单 avatar_url 已带 `?v=1`，curl HTTP 200
-- [V] **进页自动刷新**：`PaddockPager(isCurrentPage)` 以「本页落定 && 导航栈归位(backStack.size<=1)」为键触发 `PaddockViewModel.refresh(onDone)`；覆盖横滑进页/冷启动/从二级页返回三条路径
-- [V] **下拉刷新**：两页各包 miuix `PullToRefresh`（hoisted isRefreshing + contentPadding=innerPadding + topAppBarScrollBehavior）；排行榜走 `switchSeq++`(两阶段淡出)+`refreshSeq++`(同参数重跑 LaunchedEffect)；文案已中文化（REFRESH_TEXTS 四状态，`LeaderboardScreen.kt` 文件级 internal 常量，同包共用）
-- [V] `:app:assembleRelease` BUILD SUCCESSFUL；`:app:lint` 0 errors（54 warnings 全为既有）；`cargo build` 通过（2 warnings 既有 server_best）；装机 Success ×3（`1.0.4 Alpha 1`，版本号未动）
-- 工作区: 干净全推送。模块仓 `2c35f83`(功能) → `83dcb32`(CLAUDE.md)；paddock 仓 `75dadf9`(服务端)
+- [V] **ABS 指示灯修复**：根因 = `abs_rf_intercept_install` 硬编码 8.0.4 地址 `0x1A7B7DC`，升 8.0.6 后落在每帧必经的普通 tempBrakeF 写入路径 → 刹车必命中必闪。8.0.6 反汇编对拍（方法体同构仅平移 +0x27E0）：介入写点 = `0x1A7DFBC`（RoadForce RVA 0x1A7DB3C + 0x480，函数内偏移不变），已收进 `OffsetTable.IRDS_WHEEL_ROADFORCE_ABS_WRITE` 经 init 链注入，native 硬编码清零。用户确认功能正常
+- [V] **配置新鲜度仲裁**：`ModConfig.readFromTargetProcess` 三源（remote prefs/ConfigProvider/本地文件）全取比 `saved_at`（epoch millis）最新者胜出；写入侧 `ModConfig.write` 带 `KEY_SAVED_AT`。实机验证：12:29/12:32 两次冷启动全部读到最新配置（关 ABS 读到关），证据 = remote JSON 长度 929（新）vs 旧快照 955
+- [V] **日志收编**：`Logger` 新增带 tag 重载组（v/d/i/w/e(tag,msg[,throwable])，签名对齐 android.util.Log）；15 文件 148 处直用全部改 `Logger.x`，删除 15 个无用 import；残留 grep = 0。红线已入 CLAUDE.md（附自查 grep 命令）
+- [V] **日志导出 V5**：`awaitFreshLogs`（发 REQUEST_LOGS 后 3s 内轮询 cache 文件 mtime，更新=游戏活体）→ true 才导出+分享，false 收圈+Toast「请先启动游戏！」**不导出**（禁止回落旧缓存，用户定案）；转圈 = 窗口级 Dialog 全屏遮罩 + miuix `InfiniteProgressIndicator`，最短显示 800ms（`holdMinLoadingThenHide`）；弹窗标题「确保游戏在运行中」居中粗体、正文左对齐、左灰「取消」右蓝「继续导出」；10 秒等待规则已删除（`requestFreshLogs` 整个函数删除）
+- [V] **弹窗动画根治**：单变量当挂载条件+show 参数会跳过退出动画；拆 `gameDialogMounted`（挂载）+ `gameDialogShow`（show），`onDismissFinished` 里才摘除——EulaDialog 同款契约，已入 CLAUDE.md
+- [V] 硬编码全面复查：native 代码级 RVA 常量 = 0（注释文档性地址除外）；Kotlin 绕过 OffsetTable 的 RVA = 0；`unlock_hook.c` 3 处 fallback 与 OffsetTable 逐一相等（CLAUDE.md 登记的合法例外）
+- [V] `:app:assembleRelease` EXIT=0；`:app:lint` EXIT=0（0 errors, 54 warnings 全为既有）；装机 Success（版本号未动 `1.0.4 Alpha 1`）
+- 工作区: 干净全推送。`e20be96`(指示灯) → `5603c48`(仲裁+导出V5) → `ad96bc5`(日志收编) → `8f51d22`(CLAUDE.md)
 
 ### 测试/build 输出（真实退出码）
 ```
-./gradlew :app:assembleRelease → BUILD SUCCESSFUL
-./gradlew :app:lint → Lint found 54 warnings, 4 hints (3 errors+17 warnings filtered by baseline) BUILD SUCCESSFUL
-cargo build (paddock) → Finished dev profile
-docker build paddock-api:1.0.1 → 导出 5.9MB → VPS load → app 容器 Started+Healthy
-adb install -r → Success；dumpsys versionName=1.0.4 Alpha 1（未升版）
-实机日志：grep fetchAvatar → 38 MISS(23:56 首轮) / 108 disk HIT(00:01 重启后)
+./gradlew :app:assembleRelease → BUILD SUCCESSFUL, EXIT=0
+./gradlew :app:lint → 0 errors, 54 warnings, 5 hints (3 errors+17 warnings filtered by baseline), EXIT=0
+adb install -r → Success（1.0.4 Alpha 1，未升版）
+实机日志：探活 754ms 命中（21:22:07 fresh logs arriving）/ 超时路径 3000ms 判死（21:21:12）
 ```
 
 ## 3. 决策与理由
-- **版本化 URL 而非 ETag/304** [V]：失效逻辑全落在「URL 字符串不同」，客户端零协商代码；旧客户端拿 `?v=` URL 也照常工作（axum 忽略 query）→ 服务端可先部署。否决 ETag：要实现 If-None-Match/304 分支 + 处理「304 但本地无缓存」边界
-- **磁盘缓存存降采样 JPEG（85 质量）而非原图字节** [V]：显示才 36~56dp，缓存形态必须匹配消费形态；原图缓存 5MB 上限必自噬（实证）。否决调大上限：治标，2MB/张的原图缓存本身就不合理
-- **磁盘淘汰用总量上限+最旧先删，否决按 URL 集合精确清理** [V]：URL 集合随 tab/筛选变化（积分榜 205 人 vs 赛道榜 16 人），按集合清理必误删其他条件下仍有效的缓存；旧 ?v= 文件自然淘汰
-- **进页刷新键 = isCurrentPage && backStack.size<=1** [V]：仅 isCurrentPage 不够——从排行榜 pop 回来 pager 页不变、键不变不触发；导航栈归位补上这条路径
-- **下拉刷新复用两阶段时序（switchSeq++）而非直接换数据** [V]：与切筛选视觉语言一致，避免「下拉后内容瞬变」；refreshSeq 自增解决「相同参数 LaunchedEffect 不重跑」
-- 继承：crash 文件独立落盘 / PC 偏移对拍 / 版本号红线 / token 三级回落 / order==2 挂圈 / 积分公式 v40
+- **介入写点定位法 = 函数内偏移不变 + 分支结构对拍** [V]：8.0.4 与 8.0.6 的 RoadForce 方法体完全同构（介入写点都在 RVA+0x480，`b.le` 绕过结构一致），比单看指令字节可靠。OffsetTable 注释已写升版核对清单（确认 RVA+0x480 仍是 `str s0,[x19,#0x3EC]` 且位于 b.le 后）
+- **配置仲裁用 saved_at 时间戳而非通道优先级** [V]：三通道都可能陈旧（NPatch remote=陈旧快照实证/Provider 部分设备 Unknown authority/本地文件依赖广播送达），固定优先级隐含"高优先级永远更新"的假前提。写入方唯一（ConfigActivity）是时间戳可靠的前提
+- **探活最终方案 = 3s 内游戏推送到达与否**（用户定案）：导出的游戏日志段必须来自本次推送，语义与导出物对齐；否决 UsageStatsManager（需深权限，用户否决"藏得深的权限"）、否决日志 mtime（主菜单不写日志，mtime 停更≠进程死）、否决 ActivityManager API（API 21+ 只返回调用者自身，官方文档"only intended for debugging"）
+- **广播往返探针的边界**：部分 ROM 对后台应用定向广播限流（V1 实机 4 连败、游戏侧 0 次收到）——但本机（ColorOS 系）实测「游戏前台→切模块导出」往返正常（754ms 命中）。若未来有用户反馈导出误判，先查 ROM 广播限流
+- **转圈最短 800ms** [V]：成功路径 754ms 完成，无下限则一闪而过（用户反馈"没有转圈"）；窗口级 Dialog 替代页内 Box（页内会被 pager 裁剪、盖不住底栏）
+- **日志红线 + 弹窗两变量契约 + 排版铁律（标题居中粗体/正文左对齐）入 CLAUDE.md**：稳定约定每会话必达
+- 继承：版本号红线 / token 三级回落 / order==2 挂圈 / 积分公式 v40 / NPatch 管理器唤醒注入
 
 ## 4. 失败的尝试 — 不要再试
-- **磁盘缓存存原图字节** [V]——18 文件 5MB 顶满上限，trim 在下载过程中删掉本轮文件，重启后大面积 miss 全量重下（实机 mtime+日志双证）。降采样 JPEG 后闭环。不要再把「原字节直存」当省事方案
-- **pruneAvatarCache(aliveKeys) 按 URL 集合清理** [V]——设计阶段即否决（集合随筛选变化必误删），已改为 trimAvatarDiskCache 总量策略；`fetchAvatar(avatarUrl): ByteArray?` 旧签名已删，现在返回 `Bitmap?`，勿按旧签名写调用
-- **凭印象直接 `scp root@8.134.50.222`** [V]——22 端口被拒。正确参数在记忆 `paddock-vps-ssh-port-4142`：takotsubo@8.134.50.222 -p 4142 + 密钥 ~/.ssh_paddock/id_rsa（MEMORY.md 索引行已补端口特征）。部署前先翻记忆不凭印象
-- **Edit 契约文档时 old_string 覆盖过宽误删 `POST /v1/laps` 段** [V]——编辑表格型文档时 old/new 必须保住相邻段落，提交前 diff 自查
-- **PaddockPagerMiuix 用 `remember(uiState.userId, uiState.totalPoints)` 拐弯推 URL** [V]——脏 key 绑定；正确做法是 avatarUrl 进 UiState（已改）
-- **grep FATAL/SIGSEGV 零命中=没有崩溃** [X]（继承）——游戏进程 native 崩溃无声死亡+pid 跳变
-- 继承（前向有效，见 `.handoffs/20260907005000-handoff.md` §4）：SettingsPagerMiuix 删 UI 块保住兄弟组件起始行 / native_log_init 悬空函数体 / Java UncaughtExceptionHandler 覆盖不了游戏进程 / `<@openid>` 旧格式 [X] / 国旗 compact 逐码点剥空格 [X] / NPatch 靠 Remote Preferences 传 token [X] / ConfigProvider 读 filesDir [X] / 未经同意改版本号 [V] / VPS 禁 cargo build / mdns 端口漂移 / lap_hook 全套 / IL2CPP 扫描三坑 / TC/ABS 指示灯信号链 / FPSIMD 污染
+- **REQUEST_LOGS 广播往返探活（V1 探针）** [X]——游戏前台玩着切到模块 4 秒后探测，广播送不到动态注册的 ConfigReceiver，实机 4 连败、游戏侧 `REQUEST_LOGS received` 0 次。ROM 对后台应用定向广播限流。**但注意**：V5 的 `awaitFreshLogs` 用的同一条广播链是用户实测可用的（前台切出场景）——区别在 V1 是"游戏在后台时探测"，V5 是"用户刚从游戏切出"（广播缓冲未清）。两场景勿混
+- **UsageStatsManager 探活（V2）** [X]——需要 PACKAGE_USAGE_STATS 深权限，用户否决（"不希望麻烦地去授予什么藏得很深的权限"）；未授权时"点击没反应"（既不弹窗也不导出）是 V2 的第二个 bug
+- **日志 mtime 判活（V3 候选）** [X]——游戏在主菜单/暂停时日志全停，mtime 停更 3 分钟而进程健在，实机 stat 验证
+- **删除 10s 等待前直接弹 Toast 的 V3 流程** [X]——`export()` 内部残留的 10s REQUEST_LOGS 等待会顶掉 3s 兜底：Toast 弹了但 10s 后老流程照样导出（用户实测）。修复 = 彻底删除 `requestFreshLogs`，export 不再自带等待
+- **单变量驱动弹窗挂载+show** [X]——退出动画被跳过（组件被立即摘出组合树）。两变量拆分已入 CLAUDE.md
+- **页内 Box 当全屏转圈遮罩** [X]——被 pager 布局裁剪、盖不住底部导航栏。窗口级 Dialog 替代
+- **磁盘缓存存原图字节 / pruneAvatarCache 按 URL 集合清理 / 凭印象 scp root@ / Edit 契约文档覆盖过宽** [V]（继承，前向有效，见 `.handoffs/20260908221500-handoff.md` §4）
+- 继承（再往前，见 `.handoffs/20260907005000-handoff.md` §4）：grep FATAL 零命中≠没崩 / PaddockPagerMiuix 脏 key 推 URL / SettingsPagerMiuix 删 UI 块保住兄弟起始行 / native_log_init 悬空函数体 / 国旗 compact 逐码点剥空格 [X] / ConfigProvider 读 filesDir [X] / 未经同意改版本号 [V] / VPS 禁 cargo build / mdns 端口漂移 / lap_hook 全套 / IL2CPP 扫描三坑 / FPSIMD 污染
 
 ## 5. 已知坑
-- ⚠️ **游戏闪退真凶未定案** [?]（继承）——crash_hook 已随 1.0.4 Alpha 1 装机，等用户复现导出日志；crash 文件 pc 偏移对拍 `OffsetTable.kt` 即定案。若「游戏进程崩溃记录」段为空→查 sigaltstack/SA_ONSTACK 与 Unity handler 兼容性
+- ⚠️ **游戏闪退真凶未定案** [?]（继承）——crash_hook 已装机，等用户复现导出日志；crash 文件 pc 偏移对拍 `OffsetTable.kt` 定案
 - ⚠️ **模块 App 闪退排查未结案** [?]（继承）——Java CrashCatcher 在分发版里，等用户日志
-- ⚠️ **老客户端仍全量下载头像** [V]（本会话实证存活）——流量 relief 只覆盖升级用户；v1.0.4 正式发布后随更新扩散
-- ⚠️ **服务端无 HTTP 访问日志** [V]（本会话发现）——容器日志只有 qq_bot 流量，头像请求量要靠客户端日志推断；若要服务端观测需加 axum trace 层
-- ⚠️ **avatar_version 语义**：迁移 0008 把存量头像回填 v=1，新上传=epoch millis——两者共存，失效逻辑只要求「变过即不同」，无需统一 [V]
-- ⚠️ **lint baseline 13 条失效** [?]（继承）——重生成时机待定
-- ⚠️ **LogExporter java/native 段可各自回落不同时期缓存** [?]（继承，未修）
-- ⚠️ **该设备 ConfigProvider `Unknown authority`** [?]（继承，未修）——影响 token 第三级回落
-- ⚠️ 继承：NPatch 管理器 binder 时序 / paddock 版本三处同步无校验 / 排行榜无实时刷新 / 管理端网页验证未做 / 双仓赛道中文名两份硬编码 / Garage 206 测试对象 / SA_ONSTACK 64KB 未实测
+- ⚠️ **1.0.3 token missing 与配置旧值是同族不同病** [V]（本会话定案）——那批用户是 NPatch ② remote 返回 null（空壳）+③ ConfigProvider Unknown authority 双死；本机现证 NPatch ② 返回**陈旧快照**（行为已从"返回空"变成"返回旧值"，更危险）。token 链路 `loadAuth` 同样只防"无值"不防"陈旧值冒充权威"——若后续有 token 玄学报告，考虑给 token 也做时间戳对赌（本会话范围控制未动）
+- ⚠️ **ABSdiag/TCdiag 高频诊断扰度未处理** [?]——0.5s 一组 ×4 行常驻刷 logcat 与 2MB 文件，标定已完成可考虑默认关/降频（用户未拍板）
+- ⚠️ **导出探活依赖广播链，ROM 差异是边界** [?]——本机实测可用（754ms），激进 ROM 后台限流是理论边界；误判反馈先查广播送达（游戏侧 grep "REQUEST_LOGS received"）
+- ⚠️ 继承：lint baseline 13 条失效 / LogExporter java/native 段可各自回落不同时期缓存 [?]（freshness 门控后风险已降，未验）/ ConfigProvider `Unknown authority` 该设备存在 / NPatch 管理器 binder 时序 / paddock 版本三处同步无校验 / 双仓赛道中文名两份硬编码 / Garage 206 测试对象 / SA_ONSTACK 64KB 未实测
 
 ## 6. 下一步（有序）
 1. **等用户反馈游戏闪退 crash 现场**（继承主目标）→ 对拍 OffsetTable 定案 → 修元凶（嫌疑：pedal 写线程悬空写）
-2. v1.0.4 正式发布待用户定版（版本号红线；本会话三个特性已随 Alpha 1 装机验证）
-3. （可选）lint baseline 重生成 / 服务端 axum 访问日志层 / LogExporter 缓存回落修复
+2. v1.0.4 正式发布待用户定版（版本号红线；本轮四特性已随 Alpha 1 装机验证）
+3. （可选）ABSdiag/TCdiag 降频或默认关 / lint baseline 重生成 / 服务端 axum 访问日志层 / token 时间戳对赌
 
 ## 7. 留给用户的开放问题
 - 闪退用户反馈何时能拿到（crash 现场定案的唯一依赖）
-- v1.0.4 正式版版本号与发布时机（是否把本轮三特性写进 Release Notes）
-- 服务端头像流量下降是否达标（无访问日志，只能间接从 VPS 监控看出口流量曲线）
+- v1.0.4 正式版版本号与发布时机（是否把本轮四特性写进 Release Notes）
+- ABSdiag/TCdiag 诊断日志是否降频（标定期已过，现常驻刷屏）
+- 1.0.3 token missing 用户群是否需要回访验证（本轮新鲜度仲裁可能已顺带治愈部分场景，未验）
