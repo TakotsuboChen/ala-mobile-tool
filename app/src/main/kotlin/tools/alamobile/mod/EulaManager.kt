@@ -1,7 +1,7 @@
 package tools.alamobile.mod
 
+import tools.alamobile.mod.util.Logger
 import android.content.Context
-import android.util.Log
 import java.io.File
 
 /**
@@ -91,7 +91,7 @@ object EulaManager {
      */
     fun isAccepted(context: Context): Boolean {
         val version = readAcceptedVersion(context)
-        Log.i(TAG, "EulaManager.isAccepted: stored=$version current=$EULA_VERSION accepted=${version >= EULA_VERSION}")
+        Logger.i(TAG, "EulaManager.isAccepted: stored=$version current=$EULA_VERSION accepted=${version >= EULA_VERSION}")
         return version >= EULA_VERSION
     }
 
@@ -104,9 +104,9 @@ object EulaManager {
     fun accept(context: Context) {
         try {
             File(context.filesDir, EULA_FLAG_FILE).writeText(EULA_VERSION.toString())
-            Log.i(TAG, "EulaManager: accepted v$EULA_VERSION via local file")
+            Logger.i(TAG, "EulaManager: accepted v$EULA_VERSION via local file")
         } catch (e: Throwable) {
-            Log.w(TAG, "EulaManager: accept write failed", e)
+            Logger.w(TAG, "EulaManager: accept write failed", e)
         }
     }
 
@@ -120,9 +120,9 @@ object EulaManager {
     fun clear(context: Context) {
         try {
             File(context.filesDir, EULA_FLAG_FILE).delete()
-            Log.i(TAG, "EulaManager: cleared local file")
+            Logger.i(TAG, "EulaManager: cleared local file")
         } catch (e: Throwable) {
-            Log.w(TAG, "EulaManager: clear failed", e)
+            Logger.w(TAG, "EulaManager: clear failed", e)
         }
     }
 
@@ -138,7 +138,7 @@ object EulaManager {
                 file.readText().trim().toIntOrNull() ?: -1
             } else -1
         } catch (e: Throwable) {
-            Log.w(TAG, "EulaManager: read failed", e)
+            Logger.w(TAG, "EulaManager: read failed", e)
             -1
         }
     }

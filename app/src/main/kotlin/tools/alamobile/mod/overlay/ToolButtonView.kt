@@ -1,5 +1,6 @@
 package tools.alamobile.mod.overlay
 
+import tools.alamobile.mod.util.Logger
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -144,7 +145,7 @@ class ToolButtonView(
 
     init {
         isClickable = true
-        android.util.Log.i(
+        Logger.i(
             "AlaMobileTool",
             "ToolButtonView init: screen ${screenWidthPx}x${screenHeightPx} " +
                 "sizePx=$sizePx cornerRadiusPx=$cornerRadiusPx insetPx=$foregroundInsetPx"
@@ -186,7 +187,7 @@ class ToolButtonView(
                     inPreferredConfig = Bitmap.Config.ARGB_8888
                 }
             )
-            android.util.Log.i(
+            Logger.i(
                 "AlaMobileTool",
                 "ToolButtonView.loadForegroundBitmap: " +
                     "bytes=${bytes.size} " +
@@ -194,7 +195,7 @@ class ToolButtonView(
             )
             bmp
         } catch (e: Throwable) {
-            android.util.Log.e("AlaMobileTool", "ToolButtonView.loadForegroundBitmap threw", e)
+            Logger.e("AlaMobileTool", "ToolButtonView.loadForegroundBitmap threw", e)
             null
         }
     }

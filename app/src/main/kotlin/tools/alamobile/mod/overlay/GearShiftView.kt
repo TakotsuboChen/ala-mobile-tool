@@ -1,12 +1,12 @@
 package tools.alamobile.mod.overlay
 
+import tools.alamobile.mod.util.Logger
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.os.Build
-import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import tools.alamobile.mod.NativeBridge
@@ -127,7 +127,7 @@ class GearShiftView(
             MotionEvent.ACTION_DOWN -> {
                 val isUp = event.y < height / 2f
 
-                Log.d(TAG, "Shift ${if (isUp) "up" else "down"}")
+                Logger.d(TAG, "Shift ${if (isUp) "up" else "down"}")
 
                 // Direct JNI path. The legacy file-based IPC shift counter
                 // has been removed; NativeBridge.isAvailable is reliably
@@ -140,7 +140,7 @@ class GearShiftView(
                             NativeBridge.shiftDown()
                         }
                     } catch (e: Throwable) {
-                        Log.w(TAG, "JNI shift failed", e)
+                        Logger.w(TAG, "JNI shift failed", e)
                     }
                 }
 

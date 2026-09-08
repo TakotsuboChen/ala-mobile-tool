@@ -1,5 +1,6 @@
 package tools.alamobile.mod.config
 
+import tools.alamobile.mod.util.Logger
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.content.Context
@@ -53,7 +54,7 @@ class ConfigProvider : ContentProvider() {
                 context.contentResolver.call(uri, PUSH_GAME_LOG_METHOD, null, extras)
                 true
             } catch (e: Throwable) {
-                android.util.Log.w("AlaMobileTool", "ConfigProvider.pushGameLog failed: ${e.message}")
+                Logger.w("AlaMobileTool", "ConfigProvider.pushGameLog failed: ${e.message}")
                 false
             }
         }
@@ -127,7 +128,7 @@ class ConfigProvider : ContentProvider() {
                         org.json.JSONObject(f.readText()).optString("token", "").takeIf { it.isNotEmpty() }
                     } else null
                 } catch (_: Throwable) { null }
-                android.util.Log.i("AlaMobileTool", "ConfigProvider.readToken: ${if (token != null) "len=${token.length}" else "null"}")
+                Logger.i("AlaMobileTool", "ConfigProvider.readToken: ${if (token != null) "len=${token.length}" else "null"}")
                 return Bundle().apply { putString(KEY_TOKEN, token) }
             }
             PUSH_GAME_LOG_METHOD -> {
@@ -135,43 +136,43 @@ class ConfigProvider : ContentProvider() {
                 val javaLog = extras?.getString(KEY_JAVA_LOG) ?: ""
                 val nativeLog = extras?.getString(KEY_NATIVE_LOG) ?: ""
                 val cacheDir = providerContext.cacheDir
-                android.util.Log.i("AlaMobileTool", "ConfigProvider.pushGameLog: java=${javaLog.length} native=${nativeLog.length} cacheDir=${cacheDir.absolutePath}")
+                Logger.i("AlaMobileTool", "ConfigProvider.pushGameLog: java=${javaLog.length} native=${nativeLog.length} cacheDir=${cacheDir.absolutePath}")
                 try {
                     if (javaLog.isNotEmpty()) {
                         File(cacheDir, GAME_JAVA_LOG_FILE).writeText(javaLog)
-                        android.util.Log.i("AlaMobileTool", "ConfigProvider.pushGameLog: wrote game_java.log (${javaLog.length} bytes)")
+                        Logger.i("AlaMobileTool", "ConfigProvider.pushGameLog: wrote game_java.log (${javaLog.length} bytes)")
                     }
                     if (nativeLog.isNotEmpty()) {
                         File(cacheDir, GAME_NATIVE_LOG_FILE).writeText(nativeLog)
-                        android.util.Log.i("AlaMobileTool", "ConfigProvider.pushGameLog: wrote game_native.log (${nativeLog.length} bytes)")
+                        Logger.i("AlaMobileTool", "ConfigProvider.pushGameLog: wrote game_native.log (${nativeLog.length} bytes)")
                     }
                 } catch (e: Throwable) {
-                    android.util.Log.e("AlaMobileTool", "ConfigProvider.pushGameLog: write failed: ${e.message}")
+                    Logger.e("AlaMobileTool", "ConfigProvider.pushGameLog: write failed: ${e.message}")
                 }
                 return Bundle()
             }
             READ_GAME_LOG_METHOD -> {
                 // 模块进程读游戏进程推过来的日志缓存
                 val cacheDir = providerContext.cacheDir
-                android.util.Log.i("AlaMobileTool", "ConfigProvider.readGameLog: cacheDir=${cacheDir.absolutePath}")
+                Logger.i("AlaMobileTool", "ConfigProvider.readGameLog: cacheDir=${cacheDir.absolutePath}")
                 val javaLog = try {
                     val f = File(cacheDir, GAME_JAVA_LOG_FILE)
                     val exists = f.exists()
                     val len = if (exists) f.length() else 0
-                    android.util.Log.i("AlaMobileTool", "ConfigProvider.readGameLog: game_java.log exists=$exists len=$len")
+                    Logger.i("AlaMobileTool", "ConfigProvider.readGameLog: game_java.log exists=$exists len=$len")
                     if (exists) f.readText() else null
                 } catch (e: Throwable) {
-                    android.util.Log.w("AlaMobileTool", "ConfigProvider.readGameLog: java read failed: ${e.message}")
+                    Logger.w("AlaMobileTool", "ConfigProvider.readGameLog: java read failed: ${e.message}")
                     null
                 }
                 val nativeLog = try {
                     val f = File(cacheDir, GAME_NATIVE_LOG_FILE)
                     val exists = f.exists()
                     val len = if (exists) f.length() else 0
-                    android.util.Log.i("AlaMobileTool", "ConfigProvider.readGameLog: game_native.log exists=$exists len=$len")
+                    Logger.i("AlaMobileTool", "ConfigProvider.readGameLog: game_native.log exists=$exists len=$len")
                     if (exists) f.readText() else null
                 } catch (e: Throwable) {
-                    android.util.Log.w("AlaMobileTool", "ConfigProvider.readGameLog: native read failed: ${e.message}")
+                    Logger.w("AlaMobileTool", "ConfigProvider.readGameLog: native read failed: ${e.message}")
                     null
                 }
                 return Bundle().apply {

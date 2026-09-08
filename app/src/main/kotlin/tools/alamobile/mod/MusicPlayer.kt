@@ -1,11 +1,11 @@
 package tools.alamobile.mod
 
+import tools.alamobile.mod.util.Logger
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import java.io.File
 import java.util.zip.ZipFile
 
@@ -95,32 +95,32 @@ class MusicPlayer private constructor(private val context: Context) {
             if (apkPath != null) {
                 val entryFound = extractFromApk(apkPath)
                 if (entryFound) {
-                    Log.i(TAG, "MusicPlayer: extracted via APK path to ${musicFile?.absolutePath}")
+                    Logger.i(TAG, "MusicPlayer: extracted via APK path to ${musicFile?.absolutePath}")
                     return
                 }
-                Log.w(TAG, "MusicPlayer: $APK_ENTRY_PATH not found in APK ($apkPath), trying ClassLoader")
+                Logger.w(TAG, "MusicPlayer: $APK_ENTRY_PATH not found in APK ($apkPath), trying ClassLoader")
             } else {
-                Log.w(TAG, "MusicPlayer: cannot resolve module APK path, trying ClassLoader")
+                Logger.w(TAG, "MusicPlayer: cannot resolve module APK path, trying ClassLoader")
             }
         } catch (e: Throwable) {
-            Log.e(TAG, "MusicPlayer: APK extract failed, trying ClassLoader", e)
+            Logger.e(TAG, "MusicPlayer: APK extract failed, trying ClassLoader", e)
         }
         // 兜底：ClassLoader 资源流（部分环境下可用）
         try {
             val cl = NativeBridge::class.java.classLoader
             if (cl == null) {
-                Log.w(TAG, "MusicPlayer: ClassLoader null")
+                Logger.w(TAG, "MusicPlayer: ClassLoader null")
                 return
             }
             val inputStream = cl.getResourceAsStream(RAW_RESOURCE_PATH)
             if (inputStream == null) {
-                Log.w(TAG, "MusicPlayer: resource not found in ClassLoader ($RAW_RESOURCE_PATH)")
+                Logger.w(TAG, "MusicPlayer: resource not found in ClassLoader ($RAW_RESOURCE_PATH)")
                 return
             }
             inputStream.use { copyToCache(it) }
-            Log.i(TAG, "MusicPlayer: extracted via ClassLoader to ${musicFile?.absolutePath}")
+            Logger.i(TAG, "MusicPlayer: extracted via ClassLoader to ${musicFile?.absolutePath}")
         } catch (e: Throwable) {
-            Log.e(TAG, "MusicPlayer: ClassLoader extract failed", e)
+            Logger.e(TAG, "MusicPlayer: ClassLoader extract failed", e)
         }
     }
 
@@ -129,7 +129,7 @@ class MusicPlayer private constructor(private val context: Context) {
         return try {
             val found = ZipFile(apkPath).use { zip ->
                 val entry = zip.getEntry(APK_ENTRY_PATH) ?: run {
-                    Log.w(TAG, "MusicPlayer: APK has no entry $APK_ENTRY_PATH (entries assets/: ${zip.entries().asSequence().filter { it.name.startsWith("assets") }.map { it.name }.toList()})")
+                    Logger.w(TAG, "MusicPlayer: APK has no entry $APK_ENTRY_PATH (entries assets/: ${zip.entries().asSequence().filter { it.name.startsWith("assets") }.map { it.name }.toList()})")
                     return false
                 }
                 zip.getInputStream(entry).use { copyToCache(it) }
@@ -137,7 +137,7 @@ class MusicPlayer private constructor(private val context: Context) {
             }
             found
         } catch (e: Throwable) {
-            Log.e(TAG, "MusicPlayer: ZipFile open failed ($apkPath)", e)
+            Logger.e(TAG, "MusicPlayer: ZipFile open failed ($apkPath)", e)
             false
         }
     }
@@ -160,7 +160,7 @@ class MusicPlayer private constructor(private val context: Context) {
         if (!enabled) {
             stopMusic()
         }
-        Log.i(TAG, "MusicPlayer: enabled=$enabled")
+        Logger.i(TAG, "MusicPlayer: enabled=$enabled")
     }
 
     private fun poll() {
@@ -188,7 +188,7 @@ class MusicPlayer private constructor(private val context: Context) {
                 stopMusic()
             }
         } catch (e: Throwable) {
-            Log.w(TAG, "MusicPlayer: poll failed", e)
+            Logger.w(TAG, "MusicPlayer: poll failed", e)
         }
         handler.postDelayed(pollRunnable, POLL_INTERVAL_MS)
     }
@@ -214,10 +214,10 @@ class MusicPlayer private constructor(private val context: Context) {
             if (!mp.isPlaying) {
                 mp.start()
                 isPlaying = true
-                Log.i(TAG, "MusicPlayer: started playing F1 music")
+                Logger.i(TAG, "MusicPlayer: started playing F1 music")
             }
         } catch (e: Throwable) {
-            Log.e(TAG, "MusicPlayer: start failed", e)
+            Logger.e(TAG, "MusicPlayer: start failed", e)
         }
     }
 
@@ -230,9 +230,9 @@ class MusicPlayer private constructor(private val context: Context) {
                 }
             }
             isPlaying = false
-            Log.i(TAG, "MusicPlayer: stopped")
+            Logger.i(TAG, "MusicPlayer: stopped")
         } catch (e: Throwable) {
-            Log.e(TAG, "MusicPlayer: stop failed", e)
+            Logger.e(TAG, "MusicPlayer: stop failed", e)
         }
     }
 
@@ -245,6 +245,6 @@ class MusicPlayer private constructor(private val context: Context) {
             musicFile?.delete()
         } catch (_: Throwable) {}
         musicFile = null
-        Log.i(TAG, "MusicPlayer: destroyed")
+        Logger.i(TAG, "MusicPlayer: destroyed")
     }
 }

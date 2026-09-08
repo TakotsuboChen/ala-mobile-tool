@@ -1,10 +1,10 @@
 package tools.alamobile.mod.config
 
+import tools.alamobile.mod.util.Logger
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -105,11 +105,11 @@ class LogReceiver : BroadcastReceiver() {
                         .addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES) // 强制投递给后台静态 receiver
                     context.sendBroadcast(intent)
                 } catch (e: Throwable) {
-                    Log.w(TAG, "LogReceiver.send: chunk $index/${chunks.size} ($type) failed: ${e.message}")
+                    Logger.w(TAG, "LogReceiver.send: chunk $index/${chunks.size} ($type) failed: ${e.message}")
                     success = false
                 }
             }
-            Log.i(TAG, "LogReceiver.send: $type log ${log.length} bytes → ${chunks.size} chunks (session=$sessionId)")
+            Logger.i(TAG, "LogReceiver.send: $type log ${log.length} bytes → ${chunks.size} chunks (session=$sessionId)")
             return success
         }
 
@@ -133,7 +133,7 @@ class LogReceiver : BroadcastReceiver() {
                 .sortedBy { it.value.createdAt }
                 .take(sessions.size - MAX_PENDING_SESSIONS / 2)
             for (entry in stale) {
-                Log.w(TAG, "LogReceiver: cleaning stale session ${entry.key} (received ${entry.value.received}/${entry.value.total})")
+                Logger.w(TAG, "LogReceiver: cleaning stale session ${entry.key} (received ${entry.value.received}/${entry.value.total})")
                 sessions.remove(entry.key)
             }
         }
@@ -165,7 +165,7 @@ class LogReceiver : BroadcastReceiver() {
             session.received++
         }
 
-        Log.d(TAG, "LogReceiver: chunk $index/$total ($type) session=$sessionId (received ${session.received}/${session.total})")
+        Logger.d(TAG, "LogReceiver: chunk $index/$total ($type) session=$sessionId (received ${session.received}/${session.total})")
 
         // 全部到齐 → 拼接写入文件
         if (session.received >= session.total) {
@@ -177,9 +177,9 @@ class LogReceiver : BroadcastReceiver() {
             }
             try {
                 File(context.cacheDir, fileName).writeText(fullLog)
-                Log.i(TAG, "LogReceiver: assembled $type log ${fullLog.length} bytes → $fileName")
+                Logger.i(TAG, "LogReceiver: assembled $type log ${fullLog.length} bytes → $fileName")
             } catch (e: Throwable) {
-                Log.e(TAG, "LogReceiver: write $fileName failed: ${e.message}")
+                Logger.e(TAG, "LogReceiver: write $fileName failed: ${e.message}")
             }
             sessions.remove(key)
         }

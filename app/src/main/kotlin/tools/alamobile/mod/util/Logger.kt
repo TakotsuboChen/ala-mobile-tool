@@ -67,6 +67,17 @@ object Logger {
         log(Log.ERROR, TAG, full)
     }
 
+    // ── 带 tag 的重载：供直用 android.util.Log 的调用点迁移（2026-09-07 收编，
+    // 全部日志必须双写 logcat+文件，见 CLAUDE.md「日志红线」）。签名对齐
+    // android.util.Log.x(tag, msg)，机械替换 Log.x( → Logger.x( 即可。
+    fun v(tag: String, msg: String) = log(Log.VERBOSE, tag, msg)
+    fun d(tag: String, msg: String) = log(Log.DEBUG, tag, msg)
+    fun i(tag: String, msg: String) = log(Log.INFO, tag, msg)
+    fun w(tag: String, msg: String) = log(Log.WARN, tag, msg)
+    fun e(tag: String, msg: String) = log(Log.ERROR, tag, msg)
+    fun w(tag: String, msg: String, t: Throwable) = log(Log.WARN, tag, "$msg: ${Log.getStackTraceString(t)}")
+    fun e(tag: String, msg: String, t: Throwable) = log(Log.ERROR, tag, "$msg: ${Log.getStackTraceString(t)}")
+
     /**
      * 写一行带时间戳 + pid + tid 的日志到文件。
      * 超 MAX_LOG_SIZE 时截断保留后半部分（简单滚动）。

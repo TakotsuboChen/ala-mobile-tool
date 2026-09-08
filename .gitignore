@@ -43,3 +43,4 @@ references/
 
 # Windows NTFS download-mark metadata (WSL mount artifacts)
 *:Zone.Identifier
+hs_err_pid*.log

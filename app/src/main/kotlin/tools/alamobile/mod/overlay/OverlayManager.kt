@@ -1,5 +1,6 @@
 package tools.alamobile.mod.overlay
 
+import tools.alamobile.mod.util.Logger
 import android.app.Activity
 import android.content.Context
 import android.graphics.Point
@@ -38,7 +39,7 @@ class OverlayManager(context: Context) {
 
         fun notifyConfigChanged(json: String?) {
             if (json != null) latestConfigJson = json
-            android.util.Log.i("AlaMobileTool", "notifyConfigChanged: instance=${instance != null} json=${json != null}")
+            Logger.i("AlaMobileTool", "notifyConfigChanged: instance=${instance != null} json=${json != null}")
             instance?.let { mgr ->
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     mgr.rebuildFromConfigChange()
@@ -95,7 +96,7 @@ class OverlayManager(context: Context) {
      * 用户没操作，可见性应保持）。
      */
     private fun rebuildFromConfigChange() {
-        android.util.Log.i("AlaMobileTool", "rebuildFromConfigChange: root=${root != null} overlaysVisible=$overlaysVisible")
+        Logger.i("AlaMobileTool", "rebuildFromConfigChange: root=${root != null} overlaysVisible=$overlaysVisible")
         // Activity 可能已重建，旧 root 失效——先刷新。
         refreshRoot()
         if (root == null) return
@@ -255,7 +256,7 @@ class OverlayManager(context: Context) {
     private fun addGamingOverlays() {
         val screenWidth = appContext.resources.displayMetrics.widthPixels
         val screenHeight = appContext.resources.displayMetrics.heightPixels
-        android.util.Log.i("AlaMobileTool", "addGamingOverlays: pedalMode=${settings.pedalMode} root=${root} rootHash=${System.identityHashCode(root)}")
+        Logger.i("AlaMobileTool", "addGamingOverlays: pedalMode=${settings.pedalMode} root=${root} rootHash=${System.identityHashCode(root)}")
 
         val gearPosition = settings.gearPosition
         val pedalPosition = settings.pedalPosition
@@ -477,7 +478,7 @@ class OverlayManager(context: Context) {
         try {
             ModConfig.saveOverlayPosition(appContext, key, position)
         } catch (e: Throwable) {
-            android.util.Log.e("AlaMobileTool", "Failed to save overlay position", e)
+            Logger.e("AlaMobileTool", "Failed to save overlay position", e)
         }
     }
 
@@ -486,7 +487,7 @@ class OverlayManager(context: Context) {
         // 供用户再次点击，只需重建踏板/换挡 view 反映最新配置。
         // 用局部 val 快照 root，避免 var 的 smart cast 限制。
         val parent = root ?: return
-        android.util.Log.i("AlaMobileTool", "removeGamingOverlays: root=${parent} rootHash=${System.identityHashCode(parent)}")
+        Logger.i("AlaMobileTool", "removeGamingOverlays: root=${parent} rootHash=${System.identityHashCode(parent)}")
         parent.findViewWithTag<View>("pedal_overlay")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("brake_overlay")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("gear_shift_overlay")?.let { parent.removeView(it) }

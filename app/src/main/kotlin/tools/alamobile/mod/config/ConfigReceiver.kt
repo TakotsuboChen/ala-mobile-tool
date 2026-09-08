@@ -1,9 +1,9 @@
 package tools.alamobile.mod.config
 
+import tools.alamobile.mod.util.Logger
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 import java.io.File
 import org.json.JSONObject
 import tools.alamobile.mod.overlay.OverlayManager
@@ -45,7 +45,7 @@ class ConfigReceiver : BroadcastReceiver() {
         // REQUEST_LOGS：模块进程导出日志前请求游戏进程重新推送最新日志。
         // 不带 JSON，不需要写配置，只推送日志文件。
         if (intent.action == ACTION_REQUEST_LOGS) {
-            Log.i(TAG, "ConfigReceiver: REQUEST_LOGS received — pushing fresh logs")
+            Logger.i(TAG, "ConfigReceiver: REQUEST_LOGS received — pushing fresh logs")
             pushGameLogs(context)
             return
         }
@@ -53,7 +53,7 @@ class ConfigReceiver : BroadcastReceiver() {
         if (intent.action != ACTION_CONFIG_UPDATE) return
         val json = intent.getStringExtra(EXTRA_JSON)
         if (json.isNullOrEmpty()) {
-            Log.w(TAG, "ConfigReceiver: empty json")
+            Logger.w(TAG, "ConfigReceiver: empty json")
             return
         }
         try {
@@ -61,7 +61,7 @@ class ConfigReceiver : BroadcastReceiver() {
             // 无需权限，无 scoped storage 限制。OverlayManager 后续读同一路径。
             val dir = context.getExternalFilesDir(null)
             if (dir == null) {
-                Log.w(TAG, "ConfigReceiver: externalFilesDir null")
+                Logger.w(TAG, "ConfigReceiver: externalFilesDir null")
                 return
             }
             val file = File(dir, FILE_NAME)
@@ -84,7 +84,7 @@ class ConfigReceiver : BroadcastReceiver() {
                 }
             }
             file.writeText(existing.toString(2))
-            Log.i(
+            Logger.i(
                 TAG,
                 "ConfigReceiver: merged ${json.length} bytes to ${file.absolutePath} " +
                     "pedalMode_in=${incoming.optString("pedal_mode", "?")} " +
@@ -107,7 +107,7 @@ class ConfigReceiver : BroadcastReceiver() {
             val enableAbs = incoming.optBoolean("enable_abs", true)
             if (tools.alamobile.mod.NativeBridge.isAvailable) {
                 tools.alamobile.mod.NativeBridge.setTcAbs(enableTc, enableAbs)
-                Log.i(TAG, "ConfigReceiver: setTcAbs enableTc=$enableTc enableAbs=$enableAbs")
+                Logger.i(TAG, "ConfigReceiver: setTcAbs enableTc=$enableTc enableAbs=$enableAbs")
             }
 
             // 实时同步 TC 档位（强度插值 + 时机 ε/minSPD 配对覆写）——游戏运行中改档立即生效。
@@ -122,7 +122,7 @@ class ConfigReceiver : BroadcastReceiver() {
             )
             if (tools.alamobile.mod.NativeBridge.isAvailable) {
                 tools.alamobile.mod.NativeBridge.setTcParams(tcMix, tcEps, tcMinspd)
-                Log.i(TAG, "ConfigReceiver: setTcParams mix=$tcMix eps=$tcEps minspd=$tcMinspd")
+                Logger.i(TAG, "ConfigReceiver: setTcParams mix=$tcMix eps=$tcEps minspd=$tcMinspd")
             }
 
             // 实时同步 ABS 档位（干预强度 b 覆写 + 制动压力输入端缩放）——
@@ -139,27 +139,27 @@ class ConfigReceiver : BroadcastReceiver() {
             )
             if (tools.alamobile.mod.NativeBridge.isAvailable) {
                 tools.alamobile.mod.NativeBridge.setAbsParams(absMix, absBOverride, brakeScale)
-                Log.i(TAG, "ConfigReceiver: setAbsParams mix=$absMix bOverride=$absBOverride brakeScale=$brakeScale")
+                Logger.i(TAG, "ConfigReceiver: setAbsParams mix=$absMix bOverride=$absBOverride brakeScale=$brakeScale")
             }
 
             // 实时同步音乐替换开关——用户从配置页切到游戏时即时生效。
             // 需要 native 可用（mute 游戏音乐靠 native hook 静音 AudioSource）。
             val enableMusicReplace = incoming.optBoolean("enable_music_replace", false)
             tools.alamobile.mod.MusicPlayer.setEnabled(enableMusicReplace)
-            Log.i(TAG, "ConfigReceiver: MusicPlayer.setEnabled=$enableMusicReplace")
+            Logger.i(TAG, "ConfigReceiver: MusicPlayer.setEnabled=$enableMusicReplace")
 
             // 实时同步 V10 引擎声浪开关——用户从配置页切到游戏时即时生效。
             // 需要 native 可用（静音开场 introSound 靠 native hook）。
             val enableV10Sound = incoming.optBoolean("enable_v10_sound", false)
             tools.alamobile.mod.IntroSoundPlayer.setEnabled(enableV10Sound)
-            Log.i(TAG, "ConfigReceiver: IntroSoundPlayer.setEnabled=$enableV10Sound")
+            Logger.i(TAG, "ConfigReceiver: IntroSoundPlayer.setEnabled=$enableV10Sound")
 
             // 实时同步"隐藏游戏原生油门/刹车按钮"开关——
             // native 层 hide_pedals_tick 据此启停查找 + SetActive（全在 Unity 脚本线程）。
             val hideGamePedals = incoming.optBoolean("hide_game_pedals", false)
             if (tools.alamobile.mod.NativeBridge.isAvailable) {
                 tools.alamobile.mod.NativeBridge.setHidePedalsEnabled(hideGamePedals)
-                Log.i(TAG, "ConfigReceiver: setHidePedalsEnabled=$hideGamePedals")
+                Logger.i(TAG, "ConfigReceiver: setHidePedalsEnabled=$hideGamePedals")
             }
 
             // TC/ABS 介入指示灯开关——无需 native 同步（开关只控制 Java 层
@@ -170,7 +170,7 @@ class ConfigReceiver : BroadcastReceiver() {
             // 供 ConfigActivity 的"导出并分享日志"读取（跨进程文件不可直接读）。
             pushGameLogs(context)
         } catch (e: Throwable) {
-            Log.e(TAG, "ConfigReceiver: write failed", e)
+            Logger.e(TAG, "ConfigReceiver: write failed", e)
         }
     }
 
@@ -193,11 +193,11 @@ class ConfigReceiver : BroadcastReceiver() {
                 val nativeCrashLog = if (nativeCrashFile.exists()) nativeCrashFile.readText() else ""
                 if (javaLog.isNotEmpty() || nativeLog.isNotEmpty() || nativeCrashLog.isNotEmpty()) {
                     val pushed = LogReceiver.send(context, javaLog, nativeLog, nativeCrashLog)
-                    Log.i(TAG, "ConfigReceiver: pushed game logs via broadcast (java=${javaLog.length} native=${nativeLog.length} nativeCrash=${nativeCrashLog.length} success=$pushed)")
+                    Logger.i(TAG, "ConfigReceiver: pushed game logs via broadcast (java=${javaLog.length} native=${nativeLog.length} nativeCrash=${nativeCrashLog.length} success=$pushed)")
                 }
             }
         } catch (e: Throwable) {
-            Log.w(TAG, "ConfigReceiver: push game logs failed: ${e.message}")
+            Logger.w(TAG, "ConfigReceiver: push game logs failed: ${e.message}")
         }
     }
 }

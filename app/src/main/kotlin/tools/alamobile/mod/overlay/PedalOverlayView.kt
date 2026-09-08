@@ -7,7 +7,6 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.os.Build
 import android.os.SystemClock
-import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import tools.alamobile.mod.NativeBridge
@@ -637,7 +636,7 @@ class PedalOverlayView(
                 NativeBridge.setThrottle(mappedThrottle)
                 NativeBridge.setBrake(mappedBrake)
             } catch (e: Throwable) {
-                Log.w(TAG, "JNI setThrottle/setBrake failed", e)
+                Logger.w(TAG, "JNI setThrottle/setBrake failed", e)
             }
         }
     }

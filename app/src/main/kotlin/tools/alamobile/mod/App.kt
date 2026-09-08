@@ -1,11 +1,11 @@
 package tools.alamobile.mod
 
+import tools.alamobile.mod.util.Logger
 import android.app.Application
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
 import android.os.IBinder
-import android.util.Log
 import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
 import kotlinx.coroutines.CoroutineScope
@@ -160,7 +160,7 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
                 )
                 val binder: IBinder? = result?.getBinder(NPATCH_KEY_BINDER)
                 if (binder == null) {
-                    Log.i(TAG, "App: NPatch remote service returned null binder (manager not installed or module not registered)")
+                    Logger.i(TAG, "App: NPatch remote service returned null binder (manager not installed or module not registered)")
                     return
                 }
                 // XposedService 构造器包级私有，但 XposedServiceHelper.onBinderReceived
@@ -169,13 +169,13 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
                 XposedServiceHelper::class.java.getDeclaredMethod("onBinderReceived", IBinder::class.java)
                     .apply { isAccessible = true }
                     .invoke(null, binder)
-                Log.i(TAG, "App: NPatch remote service bound via $NPATCH_REMOTE_AUTHORITY")
+                Logger.i(TAG, "App: NPatch remote service bound via $NPATCH_REMOTE_AUTHORITY")
                 // NPatch 绑上后同样 flush filesDir → remote（与 LSPosed 路径
                 // onServiceBind 对称）。NPatch 无 daemon 异步推 binder，bindNpatchRemoteService
                 // 是主动一次性调用；成功后 onServiceBind 会被 onBinderReceived 触发，
                 // 那里会调 flushLocalConfigToRemote，所以这里不需要重复调。
             } catch (e: Throwable) {
-                Log.i(TAG, "App: NPatch remote service bind failed (likely LSPosed or embedded mode): ${e.message}")
+                Logger.i(TAG, "App: NPatch remote service bind failed (likely LSPosed or embedded mode): ${e.message}")
             }
         }
     }
@@ -192,7 +192,7 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
         // Application.onCreate 不在 createOrUpdateClassLoaderLocked 路径里。
         val isGameProcess = packageName != "tools.alamobile.mod"
         if (isGameProcess) {
-            Log.i(TAG, "App: game process detected, deferring service binding to next main loop")
+            Logger.i(TAG, "App: game process detected, deferring service binding to next main loop")
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 doServiceBinding()
             }
@@ -220,9 +220,9 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
     private fun doServiceBinding() {
         try {
             XposedServiceHelper.registerListener(this)
-            Log.i(TAG, "App: XposedServiceHelper listener registered")
+            Logger.i(TAG, "App: XposedServiceHelper listener registered")
         } catch (e: Throwable) {
-            Log.w(TAG, "App: failed to register XposedServiceHelper listener", e)
+            Logger.w(TAG, "App: failed to register XposedServiceHelper listener", e)
         }
         // NPatch 路径兜底：LSPosed daemon 没异步回调时，主动从 NPatch 管理器
         // RemoteApiProvider 拿可写 service binder。LSPosed 路径下此调用失败
@@ -235,7 +235,7 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
             delay(1500)
             _connectionState.update { currentState ->
                 if (currentState is ConnectionState.Connecting) {
-                    Log.i(TAG, "App: service connection timed out (1.5s), likely not activated")
+                    Logger.i(TAG, "App: service connection timed out (1.5s), likely not activated")
                     ConnectionState.Disconnected
                 } else {
                     currentState
@@ -277,7 +277,7 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
         }
         if (shouldUpdate) {
             xposedService = service
-            Log.i(TAG, "App: XposedService bound (framework=$newName)")
+            Logger.i(TAG, "App: XposedService bound (framework=$newName)")
             // service 绑上时把 filesDir 里的最新配置 flush 到 remote prefs。
             //
             // 兜底场景：用户在 ConfigActivity 改配置时 xposedService 还没绑上
@@ -297,9 +297,9 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
                     .edit()
                     .putString(KEY_PADDOCK_TOKEN, token)
                     .apply()
-                Log.i(TAG, "App: flushed paddock token to remote prefs")
+                Logger.i(TAG, "App: flushed paddock token to remote prefs")
             } catch (e: Throwable) {
-                Log.w(TAG, "App: flush paddock token failed", e)
+                Logger.w(TAG, "App: flush paddock token failed", e)
             }
         }
     }
@@ -315,7 +315,7 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
         try {
             val file = java.io.File(filesDir, "ala_tool_config.json")
             if (!file.exists()) {
-                Log.i(TAG, "App: flushLocalConfigToRemote — no local config, nothing to flush")
+                Logger.i(TAG, "App: flushLocalConfigToRemote — no local config, nothing to flush")
                 return
             }
             val json = file.readText()
@@ -323,9 +323,9 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
                 .edit()
                 .putString(KEY_CONFIG_JSON, json)
                 .apply()
-            Log.i(TAG, "App: flushed local config to remote prefs (${json.length} bytes)")
+            Logger.i(TAG, "App: flushed local config to remote prefs (${json.length} bytes)")
         } catch (e: Throwable) {
-            Log.w(TAG, "App: flushLocalConfigToRemote failed", e)
+            Logger.w(TAG, "App: flushLocalConfigToRemote failed", e)
         }
     }
 
@@ -347,7 +347,7 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
         }
         if (isDisconnected) {
             xposedService = null
-            Log.w(TAG, "App: XposedService died")
+            Logger.w(TAG, "App: XposedService died")
         }
     }
 }

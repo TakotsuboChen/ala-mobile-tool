@@ -1,9 +1,9 @@
 package tools.alamobile.mod
 
+import tools.alamobile.mod.util.Logger
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import android.util.Log
 
 /**
  * 模块激活状态判定。
@@ -125,7 +125,7 @@ object LsposedStatus {
         if (cachedStatus == null) {
             cachedStatus = evaluateInternal(context)
             detectionDone = true
-            Log.i(TAG, "forceSettle: settled to $cachedStatus after timeout")
+            Logger.i(TAG, "forceSettle: settled to $cachedStatus after timeout")
         }
     }
 
@@ -144,11 +144,11 @@ object LsposedStatus {
     private fun evaluateInternal(context: Context): Status {
         // 1) 目标进程路径：onModuleLoaded 执行过（游戏进程被真正注入）。
         if (hasModuleLoadedFlag()) {
-            Log.i(TAG, "detectOnce: hasModuleLoadedFlag=true → LSPOSED")
+            Logger.i(TAG, "detectOnce: hasModuleLoadedFlag=true → LSPOSED")
             clearNonRootConfirmed(context)
             return Status.LSPOSED
         }
-        Log.i(TAG, "detectOnce: hasModuleLoadedFlag=false, continue")
+        Logger.i(TAG, "detectOnce: hasModuleLoadedFlag=false, continue")
 
         // 2) ConfigActivity 进程路径：LSPosed daemon 已绑定。
         //    App.xposedService 由 App.onServiceBind 赋值。只认 frameworkName=="LSPosed"，
@@ -156,20 +156,20 @@ object LsposedStatus {
         val service = App.xposedService
         if (service != null) {
             if (isLsposedService(service)) {
-                Log.i(TAG, "detectOnce: frameworkName=LSPosed → LSPOSED")
+                Logger.i(TAG, "detectOnce: frameworkName=LSPosed → LSPOSED")
                 clearNonRootConfirmed(context)
                 return Status.LSPOSED
             }
-            Log.i(TAG, "detectOnce: service is not LSPosed framework → fall through")
+            Logger.i(TAG, "detectOnce: service is not LSPosed framework → fall through")
         }
 
         // 3) Non-root 用户确认标记 —— 用户在弹窗里选了"是"。
         if (readNonRootConfirmed(context)) {
-            Log.i(TAG, "detectOnce: nonroot_confirmed=true → NONROOT")
+            Logger.i(TAG, "detectOnce: nonroot_confirmed=true → NONROOT")
             return Status.NONROOT
         }
 
-        Log.i(TAG, "detectOnce: no path matched → INACTIVE")
+        Logger.i(TAG, "detectOnce: no path matched → INACTIVE")
         return Status.INACTIVE
     }
 
@@ -212,10 +212,10 @@ object LsposedStatus {
     private fun isLsposedService(service: io.github.libxposed.service.XposedService): Boolean {
         return try {
             val name = service.frameworkName
-            Log.i(TAG, "isLsposedService: frameworkName=$name")
+            Logger.i(TAG, "isLsposedService: frameworkName=$name")
             name == "LSPosed"
         } catch (e: Throwable) {
-            Log.w(TAG, "isLsposedService: getFrameworkName() failed, assuming not LSPosed", e)
+            Logger.w(TAG, "isLsposedService: getFrameworkName() failed, assuming not LSPosed", e)
             false
         }
     }
@@ -238,9 +238,9 @@ object LsposedStatus {
         try {
             val file = java.io.File(context.filesDir, "nonroot_confirmed.flag")
             file.writeText("1")
-            Log.i(TAG, "confirmNonRoot: wrote local flag (filesDir)")
+            Logger.i(TAG, "confirmNonRoot: wrote local flag (filesDir)")
         } catch (e: Throwable) {
-            Log.w(TAG, "confirmNonRoot: local flag write failed", e)
+            Logger.w(TAG, "confirmNonRoot: local flag write failed", e)
         }
         cachedStatus = Status.NONROOT
     }
