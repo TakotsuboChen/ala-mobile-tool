@@ -1,5 +1,6 @@
 package tools.alamobile.mod.config
 
+import tools.alamobile.mod.util.Logger
 import android.content.Context
 import android.content.Intent
 import android.os.Environment
@@ -42,6 +43,13 @@ object ModConfig {
     // 优先用它，失败（null 或异常）回退现有 externalFilesDir 路径——广播方案
     // 在游戏运行时仍可靠，作为兜底。
     var remoteConfigReader: (() -> String?)? = null
+
+    // 配置写入时刻（epoch millis）。三存储通道（remote prefs / ConfigProvider /
+    // 游戏本地 externalFilesDir）都可能因跨进程时序持有陈旧快照（NPatch 实证
+    // 2026-09-07：remote 955 字节旧 JSON 一票否决本地 1459 字节新 JSON，用户
+    // 关 ABS 启动游戏读到的仍是开）——读取侧不能按固定优先级仲裁，必须比
+    // saved_at 取最新。旧 JSON 无此字段 = 0（最旧），自然被淘汰。
+    const val KEY_SAVED_AT = "saved_at"
 
     // Feature toggles
     const val KEY_ENABLE_AUTO_DRS = "enable_auto_drs"
@@ -750,6 +758,7 @@ object ModConfig {
             // 不管 position。广播 JSON 不含 position，ConfigReceiver 收到
             // 后合并——保留游戏进程已有的 position，只更新这里的非 position 字段。
             put(KEY_PADDOCK_SERVER, settings.paddockServer)
+            put(KEY_SAVED_AT, System.currentTimeMillis())
         }.toString(2)
 
         // 1. 优先走 Remote Preferences（LSPosed daemon SQLite，无视进程存活）。
@@ -765,21 +774,21 @@ object ModConfig {
                     .edit()
                     .putString(tools.alamobile.mod.App.KEY_CONFIG_JSON, json)
                     .apply()
-                android.util.Log.i("AlaMobileTool", "Config written via remote preferences")
+                Logger.i("AlaMobileTool", "Config written via remote preferences")
             } catch (e: Throwable) {
-                android.util.Log.w("AlaMobileTool", "Remote preferences write failed, falling back", e)
+                Logger.w("AlaMobileTool", "Remote preferences write failed, falling back", e)
             }
         } else {
-            android.util.Log.w("AlaMobileTool", "XposedService not bound yet, using local fallback")
+            Logger.w("AlaMobileTool", "XposedService not bound yet, using local fallback")
         }
 
         // 2. 写模块 filesDir 作持久化备份（模块进程天然可写，service 不可用时兜底）。
         try {
             val file = File(context.filesDir, FILE_NAME)
             file.writeText(json)
-            android.util.Log.i("AlaMobileTool", "Config written to module filesDir: ${file.absolutePath}")
+            Logger.i("AlaMobileTool", "Config written to module filesDir: ${file.absolutePath}")
         } catch (e: Throwable) {
-            android.util.Log.e("AlaMobileTool", "ModConfig.write to filesDir failed", e)
+            Logger.e("AlaMobileTool", "ModConfig.write to filesDir failed", e)
         }
 
         // 3. 发定向广播给所有目标游戏包，让游戏进程 ConfigReceiver 写自己目录
@@ -794,9 +803,9 @@ object ModConfig {
                     .setPackage(pkg)
                     .putExtra(ConfigReceiver.EXTRA_JSON, json)
                 context.sendBroadcast(intent)
-                android.util.Log.i("AlaMobileTool", "Config broadcast sent to $pkg")
+                Logger.i("AlaMobileTool", "Config broadcast sent to $pkg")
             } catch (e: Throwable) {
-                android.util.Log.w("AlaMobileTool", "Config broadcast to $pkg failed", e)
+                Logger.w("AlaMobileTool", "Config broadcast to $pkg failed", e)
             }
         }
     }
@@ -838,122 +847,92 @@ object ModConfig {
      * 模块 filesDir 的 JSON 不含 position（ConfigActivity 不管 position）。
      */
     fun readFromTargetProcess(context: Context): Settings {
-        // 优先走 Remote Preferences（libxposed API 102）：经 Binder 到 LSPosed daemon
-        // 读 daemon SQLite 里的模块配置 JSON。不依赖游戏进程是否在运行——daemon 常驻，
-        // ConfigActivity 经 App.xposedService 写入 daemon，根治"游戏没运行→广播丢失
-        // →下次启动读旧值"的 M11 首次滞后 bug。position 字段不在 daemon 的 JSON 里
-        // （由游戏进程拖拽时写本地 externalFilesDir），下面单独从本地合并。
-        val remoteJson = try {
+        // ── 新鲜度仲裁（2026-09-07）──
+        // 三存储通道都可能持有陈旧快照，固定优先级不再成立：
+        // - remote prefs：NPatch 下 loader 返回游戏进程本地 fallback store 的
+        //   老快照（实证 955 字节旧 JSON），LSPosed 下 daemon 虽权威但写入
+        //   依赖 service 绑定时序；
+        // - ConfigProvider：NPatch 下是模块 filesDir 的直读，但部分设备
+        //   Unknown authority 拉不到；
+        // - 游戏本地 externalFilesDir：依赖广播送达（游戏没运行时丢失）。
+        // 策略：三源全取，比 KEY_SAVED_AT（epoch millis），最新者胜出。
+        // 旧 JSON 无 saved_at = 0（最旧）。position 字段永远从本地合并
+        // （position 由游戏进程拖拽持有，不走 ConfigActivity 写路径）。
+
+        fun fetchRemote(): String? = try {
             val reader = remoteConfigReader
-            if (reader != null) {
-                val content = reader()
-                android.util.Log.i(
-                    TAG,
-                    "readFromTargetProcess: remote prefs ${if (content != null) "ok len=${content.length}" else "null (key not in daemon db)"}"
-                )
-                content
-            } else null
+            val content = reader?.invoke()
+            Logger.i(
+                TAG,
+                "readFromTargetProcess: remote prefs ${if (content != null) "ok len=${content.length}" else "null (key not in daemon db)"}"
+            )
+            content
         } catch (e: Throwable) {
-            android.util.Log.w(TAG, "readFromTargetProcess: remote prefs failed, falling back to local", e)
+            Logger.w(TAG, "readFromTargetProcess: remote prefs failed", e)
             null
         }
 
-        // 如 Remote Preferences 已有数据，直接走 remote 路径（LSPosed daemon 或 NPatch
-        // 管理器 ContentProvider 写入的），这是最权威的路径。
-        if (remoteJson != null) {
-            val dir = context.getExternalFilesDir(null)
-            val localJson = if (dir != null) {
-                val file = File(dir, FILE_NAME)
-                if (file.exists()) {
-                    try { file.readText() } catch (e: Throwable) { null }
-                } else null
-            } else null
-            val merged = mergePositionFromLocalPublic(remoteJson, localJson)
-            val settings = fromJson(merged)
-            android.util.Log.i(
-                TAG,
-                "Config via remote prefs (merged local position): pedalMode=${settings.pedalMode} " +
-                    "remotePreview=${remoteJson.take(80).replace('\n', ' ')}"
-            )
-            return settings
-        }
-
-        // Remote Preferences 不可用时（NPatch local 模式无 daemon），尝试从模块进程的
-        // ConfigProvider ContentProvider 读取模块 filesDir 的最新配置。
-        // NPatch local 模式下，游戏进程的 PackageManager 能看到模块包（NPatch loader
-        // 绕过了 Android 11+ 包可见性限制），ConfigProvider 已 exported=true，可访问。
-        // LSPosed 模式下此调用会抛 IllegalArgumentException（Unknown authority）或
-        // SecurityException（包不可见），静默回退到本地文件路径。
-        val moduleConfigJson = try {
+        fun fetchProvider(): String? = try {
             val uri = android.net.Uri.parse("content://tools.alamobile.mod.config")
             val result = context.contentResolver.call(uri, "read_config", null, null)
             val json = result?.getString("json")
             if (json != null && json.isNotEmpty()) {
-                android.util.Log.i(TAG, "readFromTargetProcess: ConfigProvider ok, len=${json.length}")
+                Logger.i(TAG, "readFromTargetProcess: ConfigProvider ok, len=${json.length}")
                 json
             } else {
-                android.util.Log.w(TAG, "readFromTargetProcess: ConfigProvider returned empty/null")
+                Logger.w(TAG, "readFromTargetProcess: ConfigProvider returned empty/null")
                 null
             }
         } catch (e: Throwable) {
-            android.util.Log.i(TAG, "readFromTargetProcess: ConfigProvider not reachable (expected in LSPosed mode): ${e.message?.take(80)}")
+            Logger.i(TAG, "readFromTargetProcess: ConfigProvider not reachable (expected in LSPosed mode): ${e.message?.take(80)}")
             null
         }
 
-        // 有模块 ConfigProvider 数据：用模块配置（非 position 字段）+ 本地 position 合并。
-        // 这修复了 NPatch local 模式下"游戏不运行时改配置→启动游戏读旧值"的问题。
-        if (moduleConfigJson != null) {
-            // 本地 externalFilesDir JSON：收 position 字段（拖拽时 saveOverlayPosition 写）。
-            val dir = context.getExternalFilesDir(null)
-            val localJson = if (dir != null) {
-                val file = File(dir, FILE_NAME)
-                if (file.exists()) {
-                    try { file.readText() } catch (e: Throwable) { null }
-                } else null
-            } else null
-            val merged = mergePositionFromLocalPublic(moduleConfigJson, localJson)
-            val settings = fromJson(merged)
-            android.util.Log.i(
-                TAG,
-                "Config via module ConfigProvider (merged local position): pedalMode=${settings.pedalMode} "
-            )
-            return settings
-        }
-
-        // 本地 externalFilesDir JSON：ConfigReceiver 收广播后写，且拖拽 position
-        // 存这里。游戏运行时广播方案仍可靠，作为兜底。
-        // 无论 Remote Preferences 成功与否，position 都必须从本地读——daemon
-        // 的 JSON 不含 position（ConfigActivity 不管 position）。
-        val dir = context.getExternalFilesDir(null) ?: run {
-            android.util.Log.w(TAG, "readFromTargetProcess: externalFilesDir null, using defaults")
-            return defaultSettings()
-        }
-        val file = File(dir, FILE_NAME)
-        android.util.Log.i(
-            TAG,
-            "readFromTargetProcess: local path=${file.absolutePath} exists=${file.exists()} " +
-                "lastModified=${if (file.exists()) java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date(file.lastModified())) else "n/a"} " +
-                "now=${java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())}"
-        )
-
-        val localJson = if (file.exists()) {
-            try { file.readText() } catch (e: Throwable) {
-                android.util.Log.w(TAG, "readFromTargetProcess: local read failed", e)
+        fun fetchLocal(): String? {
+            val dir = context.getExternalFilesDir(null) ?: return null
+            val file = File(dir, FILE_NAME)
+            if (!file.exists()) return null
+            return try {
+                file.readText()
+            } catch (e: Throwable) {
+                Logger.w(TAG, "readFromTargetProcess: local read failed", e)
                 null
             }
-        } else null
+        }
 
-        if (localJson != null) {
-            val settings = fromJson(localJson)
-            android.util.Log.i(
-                TAG,
-                "Config via local fallback (remote+provider unavailable): pedalMode=${settings.pedalMode} " +
-                    "localPreview=${localJson.take(80).replace('\n', ' ')}"
-            )
+        fun savedAt(json: String?): Long = try {
+            JSONObject(json ?: return 0L).optLong(KEY_SAVED_AT, 0L)
+        } catch (e: Throwable) {
+            0L
+        }
+
+        val remoteJson = fetchRemote()
+        val providerJson = fetchProvider()
+        val localJson = fetchLocal()
+
+        // 最新者胜出（并列时按 remote > provider > local：remote 在 LSPosed 下
+        // 经 daemon 双写，传播路径最短）。
+        val remoteTs = savedAt(remoteJson)
+        val providerTs = savedAt(providerJson)
+        val localTs = savedAt(localJson)
+        val bestJson = when {
+            remoteTs >= providerTs && remoteTs >= localTs -> remoteJson
+            providerTs >= localTs -> providerJson
+            else -> localJson
+        }
+
+        if (bestJson != null) {
+            val winner = when (bestJson) {
+                remoteJson -> "remote prefs"
+                providerJson -> "ConfigProvider"
+                else -> "local file"
+            } + " (ts: remote=$remoteTs provider=$providerTs local=$localTs)"
+            val settings = fromJson(mergePositionFromLocalPublic(bestJson, localJson))
+            Logger.i(TAG, "Config via freshness arbitration, winner=$winner pedalMode=${settings.pedalMode}")
             return settings
         }
 
-        android.util.Log.i(TAG, "No config (remote+provider+local all empty), using defaults")
+        Logger.i(TAG, "No config (remote+provider+local all empty), using defaults")
         return defaultSettings()
     }
 
