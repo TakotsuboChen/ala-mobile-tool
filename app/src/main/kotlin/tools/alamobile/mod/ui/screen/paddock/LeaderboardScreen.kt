@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -168,8 +169,48 @@ fun LeaderboardScreen() {
         popupHost = { },
         contentWindowInsets = WindowInsets.systemBars.add(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal),
     ) { innerPadding ->
-        Box(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
+        Column(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
+            // ── 筛选卡固定区（在下拉刷新手势区之外）──
+            // 刷新指示器出现在筛选卡与榜单行之间（而非大标题下）：下拉新开的空隙
+            // 只能开在"不随手势下移"的元素下方——筛选卡必须钉在 PullToRefresh 之外，
+            // 否则它随内容一起下移，指示器永远只能出现在它上方。
+            Column(
+                modifier = Modifier
+                    .padding(top = innerPadding.calculateTopPadding())
+                    .padding(horizontal = 12.dp),
+            ) {
+                Column(
+                    modifier = Modifier.padding(vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // ── 页签 + 筛选（onSelect 先启动两阶段时序：旧行淡出→换源→新行淡入）──
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        TabRowLite(tabIndex, onTab = {
+                            if (it != tabIndex) {
+                                tabIndex = it
+                                switchSeq++
+                            }
+                        })
+                        if (tabIndex == 1) {
+                            TrackSpinner(selectedTrack, onPick = {
+                                if (it != selectedTrack) {
+                                    selectedTrack = it
+                                    switchSeq++
+                                }
+                            })
+                        }
+                        VersionSpinner(selectedVersion) {
+                            if (it != selectedVersion) {
+                                selectedVersion = it
+                                switchSeq++
+                            }
+                        }
+                    }
+                }
+            }
+            // ── 下拉刷新区：指示器出现在筛选卡下方、榜单行上方 ──
             PullToRefresh(
+                modifier = Modifier.weight(1f),
                 isRefreshing = isRefreshing,
                 onRefresh = {
                     isRefreshing = true
@@ -177,7 +218,6 @@ fun LeaderboardScreen() {
                     switchSeq++
                     refreshSeq++
                 },
-                contentPadding = innerPadding,
                 refreshTexts = REFRESH_TEXTS,
                 topAppBarScrollBehavior = scrollBehavior,
             ) {
@@ -190,41 +230,15 @@ fun LeaderboardScreen() {
                     .scrollEndHaptic()
                     .overScrollVertical()
                     .nestedScroll(scrollBehavior.nestedScrollConnection)
-                    .padding(horizontal = 12.dp),
-                contentPadding = innerPadding,
+                    .padding(horizontal = 12.dp)
+                    // 视口顶缘圆角裁切：行滚出视口时顶边仍是圆角（不然被平直截断，
+                    // 连体卡"缺角"）。clip 在 padding 之后 = 裁切轮廓与行宽对齐；
+                    // 16dp 与卡片圆角一致。
+                    .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)),
+                // 顶部间隙由外层筛选卡提供；这里只保留系统栏/底栏避让
+                contentPadding = PaddingValues(bottom = innerPadding.calculateBottomPadding()),
                 overscrollEffect = null,
             ) {
-                item(key = "filter") {
-                    Column(
-                        modifier = Modifier.padding(vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        // ── 页签 + 筛选（onSelect 先启动两阶段时序：旧行淡出→换源→新行淡入）──
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            TabRowLite(tabIndex, onTab = {
-                                if (it != tabIndex) {
-                                    tabIndex = it
-                                    switchSeq++
-                                }
-                            })
-                            if (tabIndex == 1) {
-                                TrackSpinner(selectedTrack, onPick = {
-                                    if (it != selectedTrack) {
-                                        selectedTrack = it
-                                        switchSeq++
-                                    }
-                                })
-                            }
-                            VersionSpinner(selectedVersion) {
-                                if (it != selectedVersion) {
-                                    selectedVersion = it
-                                    switchSeq++
-                                }
-                            }
-                        }
-                    }
-                }
-
                 // ── 榜单行（连排行，无分隔）──
                 // 渲染数据 = visibleBoard（淡出完成后才切换），不是当前筛选条件——
                 // 这保证"旧内容淡出完成 → 新内容才淡入"的两阶段观感。
@@ -363,7 +377,7 @@ private fun BoardEmptyRow(alpha: Float = 1f) {
 }
 
 /**
- * 一行：排名（28dp 等宽槽位居中） 圆形头像 用户名 …… 右对齐数值。行间无分隔，连排。
+ * 一行：排名（32dp 等宽槽位居中） 圆形头像 用户名 …… 右对齐数值。行间无分隔，连排。
  * 自带 surfaceContainer 底色 + 拼接圆角（rowShape）代替外层 Card；
  * alpha 为显式渐隐通道（切换时旧行渐隐，与新行 animateItem 淡入分工，见 switchSeq 注释）；
  * 水平内边距 16dp = miuix preference 标准（BasicComponentDefaults.InsideMargin），
@@ -390,10 +404,11 @@ private fun BoardRow(
     ) {
         Text(
             text = rankLabel(rank),
-            fontSize = 15.sp,
+            // 前三名声字 emoji 放大 50%（15→22.5sp）；数字名次维持 15sp。
+            fontSize = if (rank <= 3) 22.5.sp else 15.sp,
             color = colorScheme.onBackground.copy(alpha = 0.6f),
             textAlign = TextAlign.Center,
-            modifier = Modifier.width(28.dp),
+            modifier = Modifier.width(32.dp),
         )
         AvatarOrPlaceholder(avatarUrl)
         Text(
