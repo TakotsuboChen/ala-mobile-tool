@@ -171,6 +171,7 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 ## Files to Know
 
 - `app/src/main/kotlin/tools/alamobile/mod/AlaMobileModule.kt` — LSPosed entry point.
+- `app/src/main/kotlin/tools/alamobile/mod/update/ForceUpdateGate.kt` — 启动门控（2026-09-10 扩展）：判定红线 = **确认游戏/模块版本之前完全零 Hook**。三态：游戏版本不匹配（本地同步判定，`isSupportedVersion`，无 fail-open——错版本装 hook = 开屏闪退实证）/ 模块落后最新 Release（缓存秒判+后台检查，离线 fail-open）/ 双失配；激活后循环 Toast（文案三态动态取，无版本号）。⚠️ scope 里有非游戏包（GMS/WebView）——`evaluate` 入口必须按包名放行非游戏进程，否则误激活会在 GMS 进程弹 Toast（实机踩过）。`isVerdictDone` 语义 = 游戏版本已确认 **且** 模块判定出结果；context 为 null 时 verdict 不放行，hook 路径 200ms 主线程轮询重试（绝不阻塞）。
 - `app/src/main/kotlin/tools/alamobile/mod/ConfigActivity.kt` — miuix Compose settings UI.
 - `app/src/main/kotlin/tools/alamobile/mod/NativeBridge.kt` — JNI declarations.
 - `app/src/main/kotlin/tools/alamobile/mod/overlay/PedalOverlayView.kt` — dual-zone pedal.
