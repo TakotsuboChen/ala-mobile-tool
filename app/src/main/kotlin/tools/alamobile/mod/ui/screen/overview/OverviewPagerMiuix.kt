@@ -167,16 +167,17 @@ fun OverviewPagerMiuix(
             isCheckingUpdate = false
             if (result is UpdateCheckResult.HasUpdate) {
                 val info = result.info
+                // 记录已知最新 versionCode：游戏进程 ForceUpdateGate 秒判缓存的写入源
+                info.latestVersionCode?.let {
+                    tools.alamobile.mod.update.ForceUpdateGate.recordLatestVersionCode(context, it)
+                }
                 if (info.latestVersionCode != null &&
                     info.latestVersionCode > BuildConfig.VERSION_CODE
                 ) {
-                    // 检查是否被用户跳过
-                    val skipped = UpdatePreferences.getSkippedVersionCode(context)
-                    if (skipped != info.latestVersionCode) {
-                        updateInfo = info
-                        showUpdateDialog = true
-                        updateDialogVisible = true
-                    }
+                    // 强制升级：不再检查跳过标记，有新版本必弹
+                    updateInfo = info
+                    showUpdateDialog = true
+                    updateDialogVisible = true
                 }
             }
         }
@@ -272,6 +273,8 @@ fun OverviewPagerMiuix(
             }
             MiuixPopupHost()
             // 更新弹窗排最后，zIndex 最低，确保不与 EULA 和激活弹窗打架。
+            // 强制升级：弹窗不可关闭（内部不传 onDismissRequest），唯一出路是
+            // 「退出模块」(finish) 或完成更新自动安装；跳过版本机制已移除。
             if (showUpdateDialog && updateInfo != null) {
                 UpdateDialog(
                     show = updateDialogVisible,
@@ -279,11 +282,6 @@ fun OverviewPagerMiuix(
                     onRequestClose = { updateDialogVisible = false },
                     onDismissFinished = {
                         showUpdateDialog = false
-                    },
-                    onSkipped = {
-                        updateInfo?.latestVersionCode?.let {
-                            UpdatePreferences.skipVersion(context, it)
-                        }
                     }
                 )
             }
@@ -338,6 +336,10 @@ fun OverviewPagerMiuix(
                                             }
                                             is UpdateCheckResult.HasUpdate -> {
                                                 val info = result.info
+                                                // 记录已知最新 versionCode（ForceUpdateGate 缓存写入源）
+                                                info.latestVersionCode?.let {
+                                                    tools.alamobile.mod.update.ForceUpdateGate.recordLatestVersionCode(context, it)
+                                                }
                                                 if (info.latestVersionCode == null ||
                                                     info.latestVersionCode <= BuildConfig.VERSION_CODE
                                                 ) {

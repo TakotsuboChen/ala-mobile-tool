@@ -7,18 +7,20 @@ import java.io.File
  * 更新相关的持久化状态。
  *
  * 存储在 SharedPreferences `update_prefs` 里：
- * - `skipped_version_code`：用户点「跳过该版本」时记录的 versionCode，下次检查到该版本不再弹窗。
  * - `downloaded_version_code`：上次下载的 APK 对应的 versionCode，用于下次启动时判断是否需要清理旧 APK。
  *
  * APK 下载目录：`context.cacheDir/download/`，文件名取 GitHub Release asset name。
+ *
+ * 历史注记：`skipped_version_code`（跳过该版本）机制已随强制升级改造移除——
+ * 更新弹窗不可关闭，无跳过入口。
  */
 object UpdatePreferences {
 
     private const val PREFS_NAME = "update_prefs"
-    private const val KEY_SKIPPED = "skipped_version_code"
     private const val KEY_DOWNLOADED = "downloaded_version_code"
     private const val KEY_DOWNLOADED_FILE = "downloaded_file_name"
     private const val KEY_CHANNEL = "update_channel"
+    private const val KEY_LATEST_KNOWN = "latest_known_version_code"
 
     /**
      * 更新通道：0 = 稳定版（仅 Release），1 = 预览版（Release + Pre-release）。
@@ -50,32 +52,20 @@ object UpdatePreferences {
     }
 
     /**
-     * 用户跳过的 versionCode，null 表示没有跳过任何版本。
+     * 「已知最新 versionCode」缓存：检查更新成功后记录，供游戏进程
+     * ForceUpdateGate 秒判版本落后（免等网络检查）。
+     * 值只增不减：手动检查/自动检查到更高的才写。
      */
-    fun getSkippedVersionCode(context: Context): Int? {
-        val v = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getInt(KEY_SKIPPED, -1)
-        return if (v == -1) null else v
+    fun getLatestKnownVersionCode(context: Context): Int {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getInt(KEY_LATEST_KNOWN, 0)
     }
 
-    /**
-     * 标记跳过指定版本。
-     */
-    fun skipVersion(context: Context, versionCode: Int) {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putInt(KEY_SKIPPED, versionCode)
-            .apply()
-    }
-
-    /**
-     * 清除跳过的版本标记，下次自动检查将重新弹窗。
-     */
-    fun clearSkippedVersion(context: Context) {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .remove(KEY_SKIPPED)
-            .apply()
+    fun setLatestKnownVersionCode(context: Context, code: Int) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        if (code > prefs.getInt(KEY_LATEST_KNOWN, 0)) {
+            prefs.edit().putInt(KEY_LATEST_KNOWN, code).apply()
+        }
     }
 
     /**

@@ -91,6 +91,23 @@ class AlaMobileModule : XposedModule() {
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         logX(Log.INFO, TAG, "Module loaded in process ${param.processName}")
         markActivated()
+        // 强制升级门控——最早的判定点（先于一切 hook）。onModuleLoaded 是框架注入
+        // 的第一个回调，早于 onPackageLoaded/onPackageReady 的所有延迟块。缓存秒判
+        // 是同步 SharedPreferences 读，命中则 isActive 在本进程恒 true，后续所有
+        // hook 安装路径（BillingHook/unlock/intro/15s 延迟）全部跳过——保证任何
+        // hook 都不会「先生效零点几秒再停」。
+        // getAppContext() 在此阶段可能为 null（Application 未建），null 时缓存
+        // 判定顺延到 onPackageReady/延迟块里的 evaluate 复查（fail-open）。
+        try {
+            val gateCtx = getAppContext()
+            if (gateCtx != null) {
+                tools.alamobile.mod.update.ForceUpdateGate.evaluate(gateCtx)
+            } else {
+                logX(Log.INFO, TAG, "ForceUpdateGate: context null at onModuleLoaded, defer evaluate")
+            }
+        } catch (e: Throwable) {
+            logX(Log.WARN, TAG, "ForceUpdateGate onModuleLoaded failed (fail-open): ${e.message}")
+        }
     }
 
     /**
@@ -119,12 +136,32 @@ class AlaMobileModule : XposedModule() {
         //（native SetUnlocked 才是主路径），延迟几毫秒不影响功能。
         logX(Log.INFO, TAG, "NPatch: deferring BillingHook.install to next main loop")
         Handler(Looper.getMainLooper()).post {
-            try {
-                BillingHook.install(this, param)
-                logX(Log.INFO, TAG, "Java hooks installed successfully (deferred)")
-            } catch (e: Throwable) {
-                logX(Log.ERROR, TAG, "Failed to install Java hooks: ${e.message}")
+            // 强制升级门控：BillingHook 是 Java 辅助路径，激活时同样禁装。
+            // 主线程 200ms 轮询等判定完成（绝不阻塞主线程——await/Thread.sleep
+            // 会 ANR）：判定完成后才装 hook，杜绝「检查未出结果就装 hook」的抢跑。
+            val gatePoll = object : Runnable {
+                override fun run() {
+                    try {
+                        if (!tools.alamobile.mod.update.ForceUpdateGate.isVerdictDone) {
+                            val gateCtx = getAppContext()
+                            if (gateCtx != null) {
+                                tools.alamobile.mod.update.ForceUpdateGate.evaluate(gateCtx)
+                            }
+                            Handler(Looper.getMainLooper()).postDelayed(this, 200)
+                            return
+                        }
+                        if (tools.alamobile.mod.update.ForceUpdateGate.isActive) {
+                            logX(Log.WARN, TAG, "ForceUpdateGate active: skipping BillingHook.install")
+                            return
+                        }
+                        BillingHook.install(this@AlaMobileModule, param)
+                        logX(Log.INFO, TAG, "Java hooks installed successfully (deferred)")
+                    } catch (e: Throwable) {
+                        logX(Log.ERROR, TAG, "Failed to install Java hooks: ${e.message}")
+                    }
+                }
             }
+            gatePoll.run()
         }
     }
 
@@ -186,6 +223,31 @@ class AlaMobileModule : XposedModule() {
 
         if (context != null && !isSupportedVersion(context)) {
             logX(Log.WARN, TAG, "Unsupported game version, attempting hooks anyway for debugging")
+        }
+
+        // 强制升级门控：版本落后最新 Release 时激活（Toast 循环 + 全部 hook 禁装）。
+        // onModuleLoaded 已秒判过（通常此处已激活）；这里对 onModuleLoaded 时
+        // context==null 的场景补评估。doPackageReadyDeferred 本身跑在主线程
+        // Handler.post 里，判定未完成时同样 200ms 轮询重推，绝不阻塞主线程。
+        // 判定完成且激活 → 整个早期路径 return；否则正常装 hook。
+        if (!tools.alamobile.mod.update.ForceUpdateGate.isVerdictDone) {
+            if (context != null) {
+                try {
+                    tools.alamobile.mod.update.ForceUpdateGate.evaluate(context)
+                } catch (e: Throwable) {
+                    logX(Log.WARN, TAG, "ForceUpdateGate evaluate failed (fail-open): ${e.message}")
+                }
+            }
+            if (!tools.alamobile.mod.update.ForceUpdateGate.isVerdictDone) {
+                // 判定仍在途（后台网络检查中）：200ms 后重走本函数入口再判。
+                // doPackageReadyDeferred 无副作用前置（上面 DIAG 日志重复无害）。
+                Handler(Looper.getMainLooper()).postDelayed({ doPackageReadyDeferred(param) }, 200)
+                return
+            }
+        }
+        if (tools.alamobile.mod.update.ForceUpdateGate.isActive) {
+            logX(Log.WARN, TAG, "ForceUpdateGate active: skipping early unlock/intro hooks")
+            return
         }
 
         // ShadowHook + forceLoad + initUnlock 全部在这里同步执行
@@ -327,6 +389,11 @@ class AlaMobileModule : XposedModule() {
         val hideGamePedals = settings?.hideGamePedals ?: false
 
         // forceLoad + initUnlock（deferred 后同步执行，ShadowHook 已 init）
+        // 强制升级门控：激活时跳过早期 unlock/intro hooks。
+        if (tools.alamobile.mod.update.ForceUpdateGate.isActive) {
+            logX(Log.WARN, TAG, "ForceUpdateGate active: skipping early unlock/intro hooks")
+            return
+        }
         logX(Log.INFO, TAG, "NPatch early unlock path: forceLoad + initUnlock (deferred)")
         if (enableUnlock) {
             try {
@@ -405,6 +472,14 @@ class AlaMobileModule : XposedModule() {
             // 2) 第二个 .so 副本装 hook 失败但启动第二个 writer 线程
             if (isNativeInstalled()) {
                 logX(Log.INFO, TAG, "Native already installed by another ClassLoader, skipping overlay+hooks")
+                return@postDelayed
+            }
+            // 强制升级门控复查：15s 时判定早已完成（onModuleLoaded 秒判或后台检查），
+            // isActive 直接读即可。激活则跳过全部 15s 路径（overlay/native/上传/日志推送），
+            // 并占位双 ClassLoader 标记防第二个 ClassLoader 副本补装。
+            if (tools.alamobile.mod.update.ForceUpdateGate.isActive) {
+                logX(Log.WARN, TAG, "ForceUpdateGate active: skipping 15s delayed overlay+hooks")
+                markNativeInstalled()
                 return@postDelayed
             }
             val ctx = getAppContext()
@@ -514,6 +589,14 @@ class AlaMobileModule : XposedModule() {
                         logX(Log.INFO, TAG, "lap hooks initialized (log-only lap timing)")
                     } catch (e: Throwable) {
                         logX(Log.ERROR, TAG, "initLap failed: ${e.message}")
+                    }
+                    // 线程 CPU 探针：10s 周期把各线程真实占用写进日志——
+                    // 用户（无电脑/不会 adb）导日志时自带归因数据，卡顿类
+                    // 反馈直接对比 main vs UnityMain 占用即可定位责任线程。
+                    try {
+                        tools.alamobile.mod.util.ThreadCpuProbe.start()
+                    } catch (e: Throwable) {
+                        logX(Log.WARN, TAG, "ThreadCpuProbe start failed: ${e.message}")
                     }
                     // 围场上传链（S2+）：1Hz 轮询 native 单槽取有效圈 → HTTPS 上报。
                     // 服务器地址覆盖从配置读（设置页可改，空 = 内置默认

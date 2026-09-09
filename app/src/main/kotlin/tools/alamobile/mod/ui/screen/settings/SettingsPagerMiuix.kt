@@ -328,22 +328,6 @@ fun SettingsPagerMiuix(
                                 }
                             )
                             ArrowPreference(
-                                title = "清除跳过更新标记",
-                                summary = "恢复被跳过版本的自动弹窗提示",
-                                startAction = {
-                                    Icon(
-                                        Icons.Rounded.Delete,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = null,
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                onClick = {
-                                    UpdatePreferences.clearSkippedVersion(context)
-                                    Toast.makeText(context, "已清除跳过更新标记", Toast.LENGTH_SHORT).show()
-                                }
-                            )
-                            ArrowPreference(
                                 title = "用户协议",
                                 summary = "重新查看并确认用户协议",
                                 startAction = {

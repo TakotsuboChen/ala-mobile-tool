@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -34,44 +35,41 @@ import tools.alamobile.mod.update.UpdatePreferences
 import java.io.File
 
 /**
- * 更新弹窗。
+ * 更新弹窗（强制升级）。
  *
  * 两种状态：
- * - **信息态**：展示新版本号 + Release Note + 「跳过该版本」「下载更新」按钮。
- * - **下载态**：显示下载百分比文本，「跳过该版本」按钮变为「取消下载」。
+ * - **信息态**：展示 Release Note + 「退出模块」「下载更新/安装更新」按钮。
+ * - **下载态**：显示下载百分比文本，无按钮（不可取消/不可后台，下载完成自动调起安装器）。
  *
- * 退出动画与 [EulaDialog] 同模式。
+ * 弹窗不可通过点外部或返回键关闭（不传 [OverlayDialog] 的 onDismissRequest）——
+ * 唯一出路是「退出模块」（退出动画播完后 finish Activity）或完成更新自动安装。
+ * 下载失败回信息态显示错误文本，可再次点击下载重试。
+ *
+ * 退出动画与 [EulaDialog] 同模式（两变量契约）：pendingAction 在 onDismissFinished 里执行，
+ * 保证 finish 发生在退出动画播完之后。
  *
  * @param show 控制弹窗显示/隐藏
  * @param updateInfo 新版本信息
  * @param onRequestClose 请求关闭（翻外部 show=false 触发退出动画）
  * @param onDismissFinished 退出动画完成回调
- * @param onSkipped 用户点「跳过该版本」，调用方记录跳过的 versionCode
  */
 @Composable
 fun UpdateDialog(
     show: Boolean,
     updateInfo: UpdateInfo,
     onRequestClose: () -> Unit,
-    onDismissFinished: () -> Unit,
-    onSkipped: () -> Unit
+    onDismissFinished: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var isDownloading by remember { mutableStateOf(false) }
-    var downloadProgress by remember { mutableStateOf(0) }
     var downloadStatus by remember { mutableStateOf("") }
+    var downloadError by remember { mutableStateOf<String?>(null) }
     var pendingAction by remember { mutableStateOf<() -> Unit>({ }) }
 
     OverlayDialog(
         show = show,
         title = "发现新版本",
-        onDismissRequest = {
-            if (!isDownloading) {
-                pendingAction = { }
-                onRequestClose()
-            }
-        },
         onDismissFinished = {
             onDismissFinished()
             pendingAction()
@@ -79,39 +77,12 @@ fun UpdateDialog(
         content = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 if (isDownloading) {
-                    // 下载态：进度文本
+                    // 下载态：进度文本，无按钮（强制升级：不可取消/不可后台）
                     Text(
                         text = downloadStatus,
                         fontSize = MiuixTheme.textStyles.body2.fontSize,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary
                     )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        TextButton(
-                            text = "取消下载",
-                            onClick = {
-                                // 简化：直接回到信息态，已下载部分会留在 cache
-                                pendingAction = { }
-                                isDownloading = false
-                                downloadProgress = 0
-                                downloadStatus = ""
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                        Spacer(modifier = Modifier.width(20.dp))
-                        TextButton(
-                            text = "后台下载",
-                            onClick = {
-                                pendingAction = { }
-                                onRequestClose()
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
-                        )
-                    }
                 } else {
                     // 信息态：Release Note + 按钮
                     // 检查是否已下载该版本 APK，有则按钮显示"安装更新"而非"下载更新"
@@ -132,9 +103,10 @@ fun UpdateDialog(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         TextButton(
-                            text = "跳过该版本",
+                            text = "退出模块",
                             onClick = {
-                                pendingAction = { onSkipped() }
+                                // 先翻 show=false 播退出动画，动画结束后 onDismissFinished 才 finish
+                                pendingAction = { (context as? android.app.Activity)?.finish() }
                                 onRequestClose()
                             },
                             modifier = Modifier.weight(1f)
@@ -151,12 +123,11 @@ fun UpdateDialog(
                                 }
                                 if (existing != null) {
                                     installApk(context, existing)
-                                    pendingAction = { }
-                                    onRequestClose()
                                     return@TextButton
                                 }
 
                                 isDownloading = true
+                                downloadError = null
                                 downloadStatus = "正在下载..."
                                 scope.launch {
                                     UpdateDownloader.download(
@@ -169,7 +140,6 @@ fun UpdateDialog(
                                                 totalBytes: Long,
                                                 progress: Int
                                             ) {
-                                                downloadProgress = progress
                                                 downloadStatus = if (totalBytes > 0) {
                                                     "正在下载... $progress%"
                                                 } else {
@@ -185,15 +155,15 @@ fun UpdateDialog(
                                                     file.name
                                                 )
                                                 installApk(context, file)
-                                                pendingAction = { }
                                                 isDownloading = false
-                                                onRequestClose()
+                                                downloadStatus = ""
                                             }
 
                                             override fun onError(message: String) {
-                                                downloadStatus = "下载失败：$message"
+                                                // 回信息态显示错误，可再次点击下载重试
+                                                downloadError = message
                                                 isDownloading = false
-                                                downloadProgress = 0
+                                                downloadStatus = ""
                                             }
                                         }
                                     )
@@ -201,6 +171,15 @@ fun UpdateDialog(
                             },
                             modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.textButtonColorsPrimary()
+                        )
+                    }
+                    // 下载失败错误提示（信息态下显示）
+                    downloadError?.let { message ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "下载失败：$message",
+                            fontSize = MiuixTheme.textStyles.body2.fontSize,
+                            color = Color.Red
                         )
                     }
                 }
