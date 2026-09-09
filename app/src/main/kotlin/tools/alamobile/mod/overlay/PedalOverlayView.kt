@@ -144,6 +144,37 @@ class PedalOverlayView(
     private var mappedThrottle = 0f
     private var mappedBrake = 0f
 
+    // 上次实际送 native / 绘制的值（NaN = 尚未送过，强制首帧必发）。
+    // 值不变早退（2026-09-09 卡顿排查）：手指静止按住时 MOVE 事件仍以触摸
+    // 采样率到达，旧实现每事件都走 JNI 双调用 + invalidate → saveLayer
+    // 离屏合成。反馈用户设备（rawY 通道 100% 被注入偏移 + 疑似高触摸采样率）
+    // 上该路径成为主线程热点。raw/mapped 与上次完全一致 → 绘制结果与
+    // native 状态均不变，跳过两者。rebuild 重建 view 后新实例 sentinel=NaN
+    // 首帧必发，与 native 现状对齐。
+    private var lastSentThrottle = Float.NaN
+    private var lastSentBrake = Float.NaN
+    private var lastDrawnThrottle = Float.NaN
+    private var lastDrawnBrake = Float.NaN
+
+    // invalidate 合并到 vsync 帧边界（2026-09-09 卡顿排查·锁30fps 定案）：
+    // 旧实现 invalidate 跟随触摸事件率（电竞屏 360Hz 逐事件派发），每个显示
+    // 帧触发多次 saveLayer 离屏重绘 + RenderThread 唤醒，游戏 Surface 合成
+    // 节奏被持续扰动 → SurfaceFlinger 帧率仲裁失稳（Scene CSV：掉帧→锁30
+    // ↔ 恢复 60 横跳，全程 CPU/GPU 空闲）。改为：MOVE 只更新值，绘制请求经
+    // postOnAnimation 在下一帧边界合并（同帧多个事件只 invalidate 一次），
+    // 与系统 UI 框架的标准绘制节奏一致。JNI 送值不延迟（输入不能等 vsync）。
+    private var invalidatePending = false
+    private var attachedToWindow = false
+
+    private fun scheduleDraw() {
+        if (invalidatePending) return
+        invalidatePending = true
+        postOnAnimation {
+            invalidatePending = false
+            if (attachedToWindow) invalidate()
+        }
+    }
+
     // Active pointer 跟踪：记录当前控制踏板的手指 pointerId，
     // 防止其他手指的触摸事件干扰踏板值。详见 onTouchEvent。
     private var activePointerId = MotionEvent.INVALID_POINTER_ID
@@ -157,6 +188,17 @@ class PedalOverlayView(
     // 双源分叉观测：累计污染帧数（进日志统计总量）与上次日志时间（节流）。
     private var mismatchCount = 0L
     private var mismatchLastLogMs = 0L
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        attachedToWindow = true
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        attachedToWindow = false
+        invalidatePending = false
+    }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
@@ -256,6 +298,10 @@ class PedalOverlayView(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 activePointerId = event.getPointerId(0)
+                // 新触摸流重新校验坐标源：sticky 污染状态清零，DOWN 帧必走
+                // 一次完整双源校验（含 getLocationOnScreen），既刷新 loc 缓存
+                // 又给"污染消失"的设备解除 sticky 的机会。
+                stickyRawPolluted = false
                 // DOWN 打布局对比：view 实际屏幕位置 vs 配置换算位置。共存版
                 // pairip 壳可能反复 relayout 移动 view——若两者不一致，
                 // rawY−配置topPx 的换算基准失真，踏板值随 relayout 漂移。
@@ -352,24 +398,67 @@ class PedalOverlayView(
         // 分叉超 SWITCH 阈值 → 判污染帧，改用 yOnScreen 继续输出（官方文档：
         // getY 正确处理这些场景；源切换后踏板仍精确跟手）。仅超 LOG 阈值 →
         // 只记日志沿用 rawY（现状行为，保守不动值）。
+        //
+        // ⚠️ getLocationOnScreen 是 binder IPC（走 WindowSession），反馈用户
+        // 设备（2026-09-09 Scene CSV + 日志定案）rawY 通道被恒定注入 −屏高
+        // 偏移，每一帧都命中 switch 分支 → 每帧两次 IPC。该设备 CPU 明明
+        // 不忙（Scene 实测 ~37%）却持续掉帧，IPC 偶发长阻塞是头号嫌疑。
+        // 记忆化：一旦切换（sticky），后续帧直接用 yOnScreen 通道，
+        // loc 缓存复用——只在「DOWN 新触摸」和「切换后分叉消失」（设备
+        // 恢复正常管道，如 ROM 关高刷/游戏模式）时重新校验。sticky 状态
+        // 下若 getY 本身也漂移（罕见：transform 管道被污染），分叉检测
+        // 仍保留——重取 loc 校验一次，防止缓存过期。
         val rawY = event.rawYAt(pointerIndex)
-        val loc = IntArray(2)
-        getLocationOnScreen(loc)
+        val sticky = stickyRawPolluted
+        // 零分配热路径：loc 用实例级复用缓冲（高采样率设备 360Hz 逐事件派发，
+        // 每事件一个 IntArray 会喂 GC——GC 线程与主线程抢大核 = 偶发掉帧）。
+        val loc = scratchLocation
+        if (!sticky) {
+            getLocationOnScreen(loc)
+        } else {
+            loc[0] = cachedLocation[0]; loc[1] = cachedLocation[1]
+        }
         val yOnScreen = event.getY(pointerIndex) + loc[1]
         val rawX = event.rawXAt(pointerIndex)
         val xOnScreen = event.getX(pointerIndex) + loc[0]
-        val relativeY = when (val absDiff = abs(rawY - yOnScreen)) {
-            in 0f..MISMATCH_LOG_PX -> rawY - viewTop
-            else -> {
-                val switched = absDiff > MISMATCH_SWITCH_PX
-                logMismatch(event, pointerIndex, rawY, rawX, xOnScreen, yOnScreen, loc, switched)
-                val y = if (switched) yOnScreen else rawY
-                y - viewTop
+        // range in-check 改裸比较：`in 0f..X` 每次创建 ClosedFloatingPointRange
+        // 对象，同上属热路径隐藏分配。
+        val absDiff = abs(rawY - yOnScreen)
+        var relativeYForDiag = 0f
+        if (absDiff <= MISMATCH_LOG_PX) {
+            // 两源一致：正常路径。若处于 sticky（污染消失），重取一次 loc
+            // 确认后解除 sticky——回到零 IPC 快路径。
+            if (sticky) {
+                getLocationOnScreen(scratchLocation2)
+                cachedLocation[0] = scratchLocation2[0]; cachedLocation[1] = scratchLocation2[1]
+                val freshY = event.getY(pointerIndex) + scratchLocation2[1]
+                if (abs(rawY - freshY) <= MISMATCH_LOG_PX) {
+                    stickyRawPolluted = false
+                }
             }
+            relativeYForDiag = rawY - viewTop
+            updateValues(relativeYForDiag, viewHeight)
+        } else {
+            val switched = absDiff > MISMATCH_SWITCH_PX
+            relativeYForDiag = (if (switched) yOnScreen else rawY) - viewTop
+            updateValues(relativeYForDiag, viewHeight)
+            if (switched && !sticky) {
+                stickyRawPolluted = true
+                cachedLocation[0] = loc[0]; cachedLocation[1] = loc[1]
+            }
+            logMismatch(event, pointerIndex, rawY, rawX, xOnScreen, yOnScreen, loc, switched)
         }
-        updateValues(relativeY, viewHeight)
-        diagMaybeLogMove(event, pointerIndex, relativeY, viewHeight)
+        diagMaybeLogMove(pointerIndex, relativeYForDiag, viewHeight)
     }
+
+    // sticky 污染状态（实例级，DUAL 两 view 各自独立）：一旦某帧判定 raw
+    // 通道被污染（switch=true），后续帧跳过 getLocationOnScreen IPC，
+    // 直接用缓存的 loc 走 yOnScreen 通道（见 updateValuesFromPointer 注释）。
+    @Volatile private var stickyRawPolluted = false
+    private val cachedLocation = IntArray(2)
+    // 触摸热路径复用缓冲（零分配）。仅主线程 onTouchEvent 访问，无需同步。
+    private val scratchLocation = IntArray(2)
+    private val scratchLocation2 = IntArray(2)
 
     // RAW_MISMATCH 诊断日志：全通道一次打齐，供下一轮日志裁决污染层级——
     //   rawX 与 xT 同步分叉 → PointerCoords 本体被改（mTransform 也脏）；
@@ -400,16 +489,15 @@ class PedalOverlayView(
     // MOVE 高频（60Hz+）节流：t 变化超 2% 或距上条 ≥500ms 才打。
     // 记录 rawY → relY → t → raw/mapped 值的完整换算链，配合 DOWN 的
     // 布局对比日志可定位漂移发生在哪一环。
-    private fun diagMaybeLogMove(event: MotionEvent, pointerIndex: Int, relativeY: Float, viewHeight: Float) {
+    private fun diagMaybeLogMove(pointerIndex: Int, relativeY: Float, viewHeight: Float) {
         val t = if (viewHeight > 0f) relativeY / viewHeight else 0f
         val now = SystemClock.uptimeMillis()
         if (abs(t - diagLastT) <= 0.02f && now - diagLastLogMs < 500L) return
         diagLastT = t
         diagLastLogMs = now
-        val rawY = event.rawYAt(pointerIndex)
         Logger.i(
-            "pedal[$role] MOVE idx=$pointerIndex rawY=$rawY relY=$relativeY " +
-                "t=${"%.3f".format(t)} thr=$rawThrottle brk=$rawBrake " +
+            "pedal[$role] MOVE idx=$pointerIndex relY=$relativeY " +
+                "thr=$rawThrottle brk=$rawBrake " +
                 "mappedT=$mappedThrottle mappedB=$mappedBrake"
         )
     }
@@ -439,8 +527,15 @@ class PedalOverlayView(
                 sharedLastTouched = if (sharedRawThrottle > 0f) PedalRole.THROTTLE else null
             }
         }
+        // 复位后清 sentinel（NaN = 强制下次必发）：reset 本身要走到
+        // updateNativeValues（见下）把清零送 native，但下次按下值可能
+        // 恰好又从相同值开始，不能被早退误吞。
+        lastSentThrottle = Float.NaN
+        lastSentBrake = Float.NaN
+        lastDrawnThrottle = Float.NaN
+        lastDrawnBrake = Float.NaN
         updateNativeValues()
-        invalidate()
+        scheduleDraw()
     }
 
     private fun updateValues(y: Float, viewHeight: Float) {
@@ -454,8 +549,16 @@ class PedalOverlayView(
             PedalRole.BRAKE -> updateDedicatedBrake(t)
         }
 
+        // 值不变早退：raw 与 mapped 均与上次相同 → 绘制与 native 状态不变，
+        // 跳过 JNI + invalidate（手指静止按住时 MOVE 高频重复，此分支消灭
+        // 全部无效开销）。精度：Float 全等即可——同一坐标源算出的重复值
+        // 逐位一致；即便偶有 1ulp 抖动也只是退化为旧路径，无正确性风险。
+        if (rawThrottle == lastDrawnThrottle && rawBrake == lastDrawnBrake &&
+            mappedThrottle == lastSentThrottle && mappedBrake == lastSentBrake
+        ) return
+
         updateNativeValues()
-        invalidate()
+        scheduleDraw()
     }
 
     private fun updateSingle(t: Float) {
@@ -631,10 +734,15 @@ class PedalOverlayView(
 
     private fun updateNativeValues() {
         // 送 mapped 值给 native（曲线变换后），raw 留给绘制。
+        // 成功送出后记录 sentinel 供 updateValues 值不变早退判定。
         if (NativeBridge.isAvailable) {
             try {
                 NativeBridge.setThrottle(mappedThrottle)
                 NativeBridge.setBrake(mappedBrake)
+                lastSentThrottle = mappedThrottle
+                lastSentBrake = mappedBrake
+                lastDrawnThrottle = rawThrottle
+                lastDrawnBrake = rawBrake
             } catch (e: Throwable) {
                 Logger.w(TAG, "JNI setThrottle/setBrake failed", e)
             }
