@@ -83,6 +83,8 @@ Run lint:
 
 > ⚠️ `:app:assembleDebug/Release` do **not** run lint — CI's `:app:lint` step is the only lint gate. After any Kotlin/Java change, run `./gradlew :app:lint` (require 0 errors) before pushing; misses surface as long streaks of red CI runs (once 20+ from a single API-29 call under minSdk 26).
 
+> ⚠️ 本机（2026-09-09）`assembleRelease` 会因 `lintVitalAnalyzeRelease` Kotlin FIR 崩溃失败（AboutScreen.kt 内部错误，干净基线复现 = 环境问题非代码问题）：加 `-x :app:lintVitalAnalyzeRelease -x :app:lintVitalRelease` 跳过；`:app:lint` 正常，CI 不受影响。
+
 Clean build outputs:
 ```bash
 ./gradlew clean
@@ -157,7 +159,7 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - Native hooks that intercept or override gameplay behavior (TC/ABS disable, future ESC tuning) must gate on the whitelist comparison `is_target_player_car` (`this == g_player_controller`), never on the `is_player_controller` field probe — the `playerControls` field (0x108) can be non-null on AI cars, and intercepting them breaks all AI drivers (verified: disabling TC once crippled the whole AI field).
 - Passthrough hooks (installed on methods shared by all cars/instances, e.g. proxy_shift_up/down) must stay log-free — any unconditional LOGI there floods the log (measured: 18810 lines in 21 min, fires even when the feature is off) and drowns diagnostic logs. Log only at install time or inside player-gated paths.
 - **日志红线（2026-09-07）**：所有 Java/Kotlin 日志必须经 `Logger`（双写 logcat + 文件），**禁止直用 `android.util.Log.x`**——直用的日志只进 logcat 环形缓冲不落文件，且会被 native 高频诊断（ABSdiag/TCdiag 0.5s 一组）挤出缓冲，排查时证据链被劈成两半（2026-09-07 配置仲裁排查实证：裁决日志只在 logcat 且 3 分钟后被刷掉，只能靠字节长度指纹间接定案）。新增日志一律 `Logger.i/w/e(TAG, msg[, throwable])`（带 tag 重载已就绪，签名对齐 android.util.Log）；全仓直用点已于 2026-09-07 收编清零（15 文件 148 处），lint 前可 grep `(^\|[^A-Za-z_.])Log\.(i\|w\|e\|d\|v)\(` 自查，命中即违规。`Log.INFO` 等常量与 `Log.getStackTraceString` 仍可直接用。
-- Overlay Views use raw Android Canvas (not Compose) because Compose cannot overlay reliably on a Unity SurfaceView.
+- Overlay Views use raw Android Canvas (not Compose) because Compose cannot overlay reliably on a Unity SurfaceView. Overlay 是注入进游戏 Activity decorView 的 View（非独立悬浮窗），其绘制节奏直接进入游戏窗口的刷新率仲裁输入：**触摸驱动的 invalidate 必须合并到 vsync 帧边界**（`postOnAnimation` + pending 标记，见 PedalOverlayView.scheduleDraw），且触摸热路径零分配（复用缓冲、裸比较替代 `in 0f..X` 装箱）。2026-09-09 定案：iQOO 12/OriginOS 4 的 LTPO 逐帧刷新率重估会被事件率驱动的 invalidate 扰动（刷新率 120/72/60/51/45/30 乱跳→掉帧/锁30），scheduleDraw 也压不住——用户侧解法=把游戏加进游戏魔盒（白名单即锁刷新率，与具体设置无关）。
 - miuix dialogs (`OverlayDialog`) must stay mounted in the composition tree and be driven by their `show` param — mounting under `if (visible) { ... }` skips the exit animation (dialog vanishes instantly). Follow the SupportDialog/EulaDialog pattern: **two variables** — `mounted` gates the composition-tree mount, `show` drives the param; close = flip `show=false` (plays exit animation), and `onDismissFinished` flips `mounted=false` to unmount. A single variable serving both roles skips the exit animation. Dialogs also follow the layout rule: **title centered + bold, body left-aligned** (never center body text).
 - **跨进程配置仲裁（2026-09-08）**：`ModConfig.readFromTargetProcess` 不再按固定优先级（remote→Provider→local）——三源全取比 `saved_at`（epoch millis）**最新者胜出**。固定优先级已被实机证伪：NPatch 下 remote prefs 返回陈旧快照（955 字节旧 JSON）会一票否决新鲜的本地文件，用户"关 ABS 启动游戏读到开"。写配置一律带 `KEY_SAVED_AT`；旧 JSON 无此字段 = 0 最旧自然淘汰。**写入侧永远只有一个权威方（ConfigActivity），时间戳才可靠**——多写方场景此法失效。
 - User-visible emoji in UI strings need the U+FE0F variation selector (`⚠️` = U+26A0 + U+FE0F); the bare codepoint renders as a monochrome text glyph on Android.
