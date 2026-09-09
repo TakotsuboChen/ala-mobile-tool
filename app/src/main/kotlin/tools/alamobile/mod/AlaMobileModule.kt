@@ -91,20 +91,14 @@ class AlaMobileModule : XposedModule() {
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         logX(Log.INFO, TAG, "Module loaded in process ${param.processName}")
         markActivated()
-        // 强制升级门控——最早的判定点（先于一切 hook）。onModuleLoaded 是框架注入
-        // 的第一个回调，早于 onPackageLoaded/onPackageReady 的所有延迟块。缓存秒判
-        // 是同步 SharedPreferences 读，命中则 isActive 在本进程恒 true，后续所有
-        // hook 安装路径（BillingHook/unlock/intro/15s 延迟）全部跳过——保证任何
-        // hook 都不会「先生效零点几秒再停」。
-        // getAppContext() 在此阶段可能为 null（Application 未建），null 时缓存
-        // 判定顺延到 onPackageReady/延迟块里的 evaluate 复查（fail-open）。
+        // 启动门控——最早的判定点（先于一切 hook）。onModuleLoaded 是框架注入
+        // 的第一个回调，早于 onPackageLoaded/onPackageReady 的所有延迟块。
+        // 两种失配都在此拦截：① 游戏版本不匹配（错版本装 hook = 开屏闪退，见
+        // ForceUpdateGate）② 模块落后最新 Release（缓存秒判）。context 为 null 时
+        // evaluate 内部直接返回（游戏版本未确认 → verdict 不放行），由 onPackageReady
+        // /延迟块里的 evaluate 复查——确认游戏/模块版本之前完全零 Hook。
         try {
-            val gateCtx = getAppContext()
-            if (gateCtx != null) {
-                tools.alamobile.mod.update.ForceUpdateGate.evaluate(gateCtx)
-            } else {
-                logX(Log.INFO, TAG, "ForceUpdateGate: context null at onModuleLoaded, defer evaluate")
-            }
+            tools.alamobile.mod.update.ForceUpdateGate.evaluate(getAppContext())
         } catch (e: Throwable) {
             logX(Log.WARN, TAG, "ForceUpdateGate onModuleLoaded failed (fail-open): ${e.message}")
         }
@@ -136,9 +130,11 @@ class AlaMobileModule : XposedModule() {
         //（native SetUnlocked 才是主路径），延迟几毫秒不影响功能。
         logX(Log.INFO, TAG, "NPatch: deferring BillingHook.install to next main loop")
         Handler(Looper.getMainLooper()).post {
-            // 强制升级门控：BillingHook 是 Java 辅助路径，激活时同样禁装。
+            // 启动门控：BillingHook 是 Java 辅助路径，任一失配激活时同样禁装。
             // 主线程 200ms 轮询等判定完成（绝不阻塞主线程——await/Thread.sleep
             // 会 ANR）：判定完成后才装 hook，杜绝「检查未出结果就装 hook」的抢跑。
+            // 游戏版本不匹配路径在 evaluate 拿到 context 的第一次就定案激活；
+            // 这里轮询的意义是等模块过期的网络判定出结果。
             val gatePoll = object : Runnable {
                 override fun run() {
                     try {
@@ -222,14 +218,15 @@ class AlaMobileModule : XposedModule() {
         }
 
         if (context != null && !isSupportedVersion(context)) {
-            logX(Log.WARN, TAG, "Unsupported game version, attempting hooks anyway for debugging")
+            logX(Log.WARN, TAG, "Unsupported game version (ForceUpdateGate will have blocked all hooks)")
         }
 
-        // 强制升级门控：版本落后最新 Release 时激活（Toast 循环 + 全部 hook 禁装）。
-        // onModuleLoaded 已秒判过（通常此处已激活）；这里对 onModuleLoaded 时
-        // context==null 的场景补评估。doPackageReadyDeferred 本身跑在主线程
-        // Handler.post 里，判定未完成时同样 200ms 轮询重推，绝不阻塞主线程。
-        // 判定完成且激活 → 整个早期路径 return；否则正常装 hook。
+        // 启动门控：两种失配任一命中时激活（游戏版本不匹配 / 模块落后最新
+        // Release，Toast 循环 + 全部 hook 禁装）。onModuleLoaded 已判过（通常
+        // 此处已定案）；这里对 onModuleLoaded 时 context==null 的场景补评估。
+        // doPackageReadyDeferred 本身跑在主线程 Handler.post 里，判定未完成时
+        // 同样 200ms 轮询重推，绝不阻塞主线程。判定完成且激活 → 整个早期路径
+        // return；否则正常装 hook。
         if (!tools.alamobile.mod.update.ForceUpdateGate.isVerdictDone) {
             if (context != null) {
                 try {
@@ -389,7 +386,7 @@ class AlaMobileModule : XposedModule() {
         val hideGamePedals = settings?.hideGamePedals ?: false
 
         // forceLoad + initUnlock（deferred 后同步执行，ShadowHook 已 init）
-        // 强制升级门控：激活时跳过早期 unlock/intro hooks。
+        // 启动门控：激活时跳过早期 unlock/intro hooks。
         if (tools.alamobile.mod.update.ForceUpdateGate.isActive) {
             logX(Log.WARN, TAG, "ForceUpdateGate active: skipping early unlock/intro hooks")
             return
@@ -474,9 +471,10 @@ class AlaMobileModule : XposedModule() {
                 logX(Log.INFO, TAG, "Native already installed by another ClassLoader, skipping overlay+hooks")
                 return@postDelayed
             }
-            // 强制升级门控复查：15s 时判定早已完成（onModuleLoaded 秒判或后台检查），
-            // isActive 直接读即可。激活则跳过全部 15s 路径（overlay/native/上传/日志推送），
-            // 并占位双 ClassLoader 标记防第二个 ClassLoader 副本补装。
+            // 门控复查：15s 时判定必然早已完成——15s 块只有在首次判定完成
+            //（verdictDone 单调置位）且未激活时才被调度，isActive 直接读即可。
+            // 激活则跳过全部 15s 路径（overlay/native/上传/日志推送），并占位
+            // 双 ClassLoader 标记防第二个 ClassLoader 副本补装。
             if (tools.alamobile.mod.update.ForceUpdateGate.isActive) {
                 logX(Log.WARN, TAG, "ForceUpdateGate active: skipping 15s delayed overlay+hooks")
                 markNativeInstalled()
