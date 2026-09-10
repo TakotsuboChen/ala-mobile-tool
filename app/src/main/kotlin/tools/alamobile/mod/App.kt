@@ -105,6 +105,23 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
             private set
 
         /**
+         * 全部活着的 service binder（LSPosed + NPatch 可能并存）。
+         *
+         * 背景（2026-09-10 token 残留案）：本机 LSPosed 与 NPatch 管理器同时激活，
+         * onServiceBind 的升级逻辑让 [xposedService] 最终只指向 LSPosed——NPatch
+         * binder 被丢弃。而游戏进程（共存版 = NPatch 注入）loadAuth 经 NPatch
+         * loader 的 FallbackModuleServiceWrapper 读的是**管理器 NPatchRemoteStore**，
+         * 与 lspd 是两个物理存储。token 只写/清 xposedService = 只动 lspd，
+         * NPatch store 里残留旧 token：游戏读到已失效的 token → 登录门控误放行
+         * + 上传全 401（用户"经常上传成绩失败"的根因）。
+         *
+         * 写/清 token 必须遍历这里对**每个** service 操作（PaddockClient）；
+         * 读侧不用改——读到的 store 只要有任何一个是新的即视为有效登录态，
+         * 而写侧全写后任一 store 都不会残留旧值。
+         */
+        val allServices = mutableListOf<XposedService>()
+
+        /**
          * 协程 scope，用于 service 绑定超时兜底（参照 AdClose ServiceManager.scope）。
          * 用 Default dispatcher，不依赖主线程 Handler——主线程阻塞时不影响超时。
          */
@@ -277,7 +294,14 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
         }
         if (shouldUpdate) {
             xposedService = service
-            Logger.i(TAG, "App: XposedService bound (framework=$newName)")
+        }
+        // 无论是否"升级覆盖"，每个新 binder 都要记录：token 写/清要遍历全部
+        // service（NPatch store 与 lspd 是两个物理存储，见 allServices 注释）。
+        if (allServices.none { it === service }) {
+            allServices.add(service)
+        }
+        Logger.i(TAG, "App: XposedService bound (framework=$newName, all=${allServices.size})")
+        if (shouldUpdate) {
             // service 绑上时把 filesDir 里的最新配置 flush 到 remote prefs。
             //
             // 兜底场景：用户在 ConfigActivity 改配置时 xposedService 还没绑上

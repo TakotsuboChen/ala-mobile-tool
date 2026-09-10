@@ -37,6 +37,10 @@ object PaddockClient {
 
     private const val QUEUE_FILE = "paddock_pending_laps.json"
     private const val AUTH_FILE = "paddock_auth.json"
+
+    /** 安装周期标记 prefs（内部存储：升级保留、卸载随应用删除） */
+    private const val INSTALL_PREFS = "paddock_install_state"
+    private const val KEY_AUTH_WIPE_DONE = "auth_wipe_done_v1"
     private const val QUEUE_TTL_MS = 30L * 24 * 3600 * 1000
     private const val RETRY_RESTORE_INTERVAL_MS = 60_000L
     private const val CONNECT_TIMEOUT = 8000
@@ -60,15 +64,61 @@ object PaddockClient {
     /** 游戏版本号（versionCode），模块初始化时从 VersionGate 注入 */
     @Volatile var versionCode: Int = 0
 
-    fun init(ctx: Context, serverOverride: String?) {
+    fun init(ctx: Context?, serverOverride: String?) {
+        if (ctx == null) return
         appContext = ctx.applicationContext
         serverBase = serverOverride?.takeIf { it.isNotBlank() } ?: DEFAULT_SERVER
+        wipeAuthIfFreshInstall(ctx)
         loadAuth()
+    }
+
+    /**
+     * 新安装（覆盖安装保留、卸载重装触发）时强制清空一次登录态。
+     *
+     * 判据：内部存储 SharedPreferences 标记 [KEY_AUTH_WIPE_DONE]——内部存储
+     * 升级保留、卸载随应用删除；而 auth 文件在 **external** files（不随卸载删除，
+     * 卸载重装后残留）。标记缺失 = 卸载后重装（或首次安装）→ 全渠道清登录态：
+     * 本地 auth 文件删除 + 全部 daemon remote prefs 空串覆盖（clearAuth）。
+     * 清完立即写标记，本安装周期内（含后续升级）不再重复清。
+     */
+    private fun wipeAuthIfFreshInstall(ctx: Context) {
+        try {
+            val prefs = ctx.getSharedPreferences(INSTALL_PREFS, Context.MODE_PRIVATE)
+            if (prefs.getBoolean(KEY_AUTH_WIPE_DONE, false)) return
+            // 无条件全渠道清（不只看本地文件）：残留 token 可能只在 daemon
+            // remote prefs（本地文件已删/从未落文件），漏清 = 游戏进程 loadAuth
+            // 回落捞出死 token → 上传 401。clearAuth 对不存在的存储是 no-op。
+            Logger.log(Log.INFO, TAG, "fresh install detected: wiping persisted auth (external file survives uninstall)")
+            clearAuth()
+            prefs.edit().putBoolean(KEY_AUTH_WIPE_DONE, true).apply()
+        } catch (e: Throwable) {
+            Logger.log(Log.WARN, TAG, "wipeAuthIfFreshInstall failed: ${e.message}")
+        }
     }
 
     // ── 登录态 ──────────────────────────────────────────────
 
     private fun authFile(): File = File(getDir(), AUTH_FILE)
+
+    /**
+     * 登录态文件是否真实存在且含 token（模块 App 登录门控的冷启动快判用）。
+     * 只读本地文件（模块进程写侧权威），不走 daemon/Provider 回落——冷启动
+     * 时 service 未必已绑，且模块进程本地文件正是 saveAuth 的第一落点。
+     * 结果为 false 即门控弹登录弹窗的场景；登录成功后 saveAuth 落文件，
+     * hasToken/登录 UI 状态随之推进。
+     */
+    fun hasPersistedAuth(): Boolean {
+        val ctx = appContext ?: return false
+        return try {
+            val f = File(ctx.getExternalFilesDir(null) ?: ctx.filesDir, AUTH_FILE)
+            if (!f.exists()) return false
+            val o = JSONObject(f.readText())
+            o.optString("token", "").isNotEmpty()
+        } catch (e: Throwable) {
+            Logger.log(Log.WARN, TAG, "hasPersistedAuth: ${e.message}")
+            false
+        }
+    }
 
     private fun getDir(): File {
         val ctx = appContext ?: error("PaddockClient not initialized")
@@ -138,7 +188,7 @@ object PaddockClient {
      */
     @Volatile var remoteTokenReader: (() -> String?)? = null
 
-    /** 登录成功后持久化 token（模块进程写：本地 + daemon 双写；游戏进程恢复用 daemon） */
+    /** 登录成功后持久化 token（模块进程写：本地 + 全部 service 双写；游戏进程恢复用 daemon） */
     fun saveAuth(token: String) {
         authToken = token
         try {
@@ -147,29 +197,32 @@ object PaddockClient {
         } catch (e: Throwable) {
             Logger.log(Log.WARN, TAG, "saveAuth failed: ${e.message}")
         }
-        // 双写 daemon（LSPosed Remote Preferences）。service 未绑定时主动尝试
-        // NPatch 绑定兜底（NPatch 无 daemon 异步推送，登录页是 bindNpatchRemoteService
-        // 在模块进程里最晚的触发时机——App.onCreate 时 NPatch 管理器可能还没就绪，
-        // 用户此时已点登录，正是重试窗口）。仍失败才降级"只写本地"。
-        // 此前静默降级的后果（用户日志实证）：daemon 里永远没有 token key，
-        // 游戏进程 "remote token read: null (key missing)"，圈全进本地队列出不去。
+        // 写入**全部** service（LSPosed lspd + NPatch 管理器 store 是两个物理存储，
+        // 游戏进程经 NPatch loader 读管理器 store——只写一个就会出现"登录了但
+        // 游戏读到另一个 store 里的残留旧 token"（2026-09-10 实证：上传 401 根因）。
+        // service 未绑定时主动尝试 NPatch 绑定兜底（NPatch 无 daemon 异步推送，
+        // 登录页是 bindNpatchRemoteService 在模块进程里最晚的触发时机）。仍失败
+        // 才降级"只写本地"（onServiceBind flush 兜底补写）。
         try {
-            var service = App.xposedService
-            if (service == null) {
-                try {
-                    val ctx = appContext
-                    if (ctx != null) App.bindNpatchRemoteService(ctx)
-                } catch (_: Throwable) {}
-                service = App.xposedService
+            var ctx = appContext
+            if (App.xposedService == null && ctx != null) {
+                try { App.bindNpatchRemoteService(ctx) } catch (_: Throwable) {}
             }
-            if (service != null) {
-                service.getRemotePreferences(App.PREF_GROUP)
-                    .edit()
-                    .putString(App.KEY_PADDOCK_TOKEN, token)
-                    .apply()
-                Logger.log(Log.INFO, TAG, "token saved to remote prefs")
-            } else {
-                Logger.log(Log.WARN, TAG, "xposedService not bound, token saved locally only (will flush on service bind / paddock page entry)")
+            val services = App.allServices.toList()
+            if (services.isEmpty()) {
+                Logger.log(Log.WARN, TAG, "saveAuth: no service bound, token saved locally only (will flush on service bind)")
+            }
+            for (service in services) {
+                try {
+                    service.getRemotePreferences(App.PREF_GROUP)
+                        .edit()
+                        .putString(App.KEY_PADDOCK_TOKEN, token)
+                        .apply()
+                    val fw = try { service.frameworkName } catch (_: Throwable) { "?" }
+                    Logger.log(Log.INFO, TAG, "token saved to remote prefs ($fw)")
+                } catch (e: Throwable) {
+                    Logger.log(Log.WARN, TAG, "remote token save failed: ${e.message}")
+                }
             }
         } catch (e: Throwable) {
             Logger.log(Log.WARN, TAG, "remote token save failed: ${e.message}")
@@ -179,20 +232,63 @@ object PaddockClient {
     fun clearAuth() {
         authToken = null
         authFile().delete()
-        // 同步清 daemon：退出登录必须两侧都清，否则游戏进程还能用旧 token 传圈
-        try {
-            val service = App.xposedService
-            if (service != null) {
+        // 同步清**全部** service：退出登录必须两侧（lspd + NPatch store）都清，
+        // 否则游戏进程还能从没清的那个 store 读到残留 token。
+        //
+        // ⚠️ 用 putString("") 空串覆盖而非 remove()：实测（2026-09-12:11，双框架）
+        // remove 的 delete diff 在 LSPosed daemon 和 NPatch 管理器两侧**都不生效**
+        //（日志打成功、db 里行还在），putString 却一直可靠（登录写入均成功）。
+        // 读侧 loadAuth / remoteTokenReader 全部 takeIf { isNotEmpty() }——空串
+        // 天然等于"无 token"，与 remove 等效。
+        val services = App.allServices.toList()
+        if (services.isEmpty()) {
+            Logger.log(Log.WARN, TAG, "clearAuth: no service bound, daemon stores NOT cleared (stale token may persist)!")
+        }
+        for (service in services) {
+            try {
                 service.getRemotePreferences(App.PREF_GROUP)
                     .edit()
-                    .remove(App.KEY_PADDOCK_TOKEN)
+                    .putString(App.KEY_PADDOCK_TOKEN, "")
                     .apply()
+                val fw = try { service.frameworkName } catch (_: Throwable) { "?" }
+                Logger.log(Log.INFO, TAG, "token blanked in remote prefs ($fw)")
+            } catch (e: Throwable) {
+                Logger.log(Log.WARN, TAG, "remote token blank failed: ${e.message}")
             }
-        } catch (_: Throwable) {
         }
     }
 
     fun hasToken(): Boolean = !authToken.isNullOrBlank()
+
+    /**
+     * 登录态的**权威判定**（游戏进程门控用）：call ConfigProvider read_token，
+     * 由模块进程读它自己 externalFilesDir 下的 auth 文件（saveAuth/clearAuth
+     * 的第一落点，写删都可靠）。
+     *
+     * ⚠️ 不用 [hasToken]：其内存值可能来自 daemon remote prefs 回落——实测
+     * （2026-09-10）LSPosed daemon 与 NPatch 管理器两侧的 remote prefs **写入
+     * 和删除都不可靠**（put/remove 打成功日志但库里数据不变），退出登录后残留
+     * token 会造成"模块已退出登录、游戏仍判已登录"的分裂。auth 本地文件是
+     * 唯一读写闭环可靠的存储。
+     *
+     * 阻塞 IPC（Binder call，模块进程可能被冷拉起，首次 100ms~1s），只能
+     * 工作线程调用。任何异常（模块进程被杀/Provider 不可达）→ false=未登录
+     * （门控 fail-closed）。
+     */
+    fun queryLoginStateFromModule(): Boolean {
+        val ctx = appContext ?: return false
+        return try {
+            val uri = android.net.Uri.parse("content://${tools.alamobile.mod.config.ConfigProvider.AUTHORITY}")
+            val result = ctx.contentResolver.call(
+                uri,
+                tools.alamobile.mod.config.ConfigProvider.READ_TOKEN_METHOD, null, null
+            )
+            result?.getString(tools.alamobile.mod.config.ConfigProvider.KEY_TOKEN)?.isNotEmpty() == true
+        } catch (e: Throwable) {
+            Logger.log(Log.WARN, TAG, "queryLoginStateFromModule: ${e.message}")
+            false
+        }
+    }
 
     /**
      * 游戏进程侧 token 缺失时的周期性重试恢复（PaddockUploader 1Hz 轮询里调用）。
