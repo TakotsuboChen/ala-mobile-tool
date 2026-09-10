@@ -272,9 +272,20 @@ object PaddockClient {
     fun hasToken(): Boolean = !authToken.isNullOrBlank()
 
     /**
-     * 登录态的**权威判定**（游戏进程门控用）：call ConfigProvider read_token，
-     * 由模块进程读它自己 externalFilesDir 下的 auth 文件（saveAuth/clearAuth
-     * 的第一落点，写删都可靠）。
+     * 登录态的**权威判定**（游戏进程门控用）——两级回落：
+     *
+     * ① ConfigProvider read_token：模块进程读它自己 externalFilesDir 下的 auth
+     *    文件（saveAuth/clearAuth 的第一落点，写删都可靠）。NPatch 本地模式下
+     *    provider 与游戏同进程同 uid（模块类合并进共存版 APK），进程内 call
+     *    必达；返回 false = auth 文件确实没 token = 未登录。
+     * ② remote prefs 回落（仅 LSPosed）：游戏包是官方 APK（改不了 manifest），
+     *    Android 11+ 包可见性下游戏进程无法跨包 resolve 模块的 provider →
+     *    "Unknown authority"，Binder call 根本没发出去（2026-09-10 实机实证，
+     *    模块明明已登录仍被误判未登录）。此时回落读 LSPosed daemon remote
+     *    prefs——读侧权威（"写侧不可靠"指 remove 不落盘，已由空串覆盖+全
+     *    binder 遍历修复，put 落盘可靠，清过的 key 读回空串无残留误判）。
+     *    NPatch 下 remoteTokenReader 是空壳（Bundle.EMPTY），但 NPatch 走不到
+     *    这里（① 必达），fail-closed 语义不变。
      *
      * ⚠️ 不用 [hasToken]：其内存值可能来自 daemon remote prefs 回落——实测
      * （2026-09-10）LSPosed daemon 与 NPatch 管理器两侧的 remote prefs **写入
@@ -283,12 +294,13 @@ object PaddockClient {
      * 唯一读写闭环可靠的存储。
      *
      * 阻塞 IPC（Binder call，模块进程可能被冷拉起，首次 100ms~1s），只能
-     * 工作线程调用。任何异常（模块进程被杀/Provider 不可达）→ false=未登录
+     * 工作线程调用。两级全失败（模块进程被杀/双通道异常）→ false=未登录
      * （门控 fail-closed）。
      */
     fun queryLoginStateFromModule(): Boolean {
         val ctx = appContext ?: return false
-        return try {
+        // ① ConfigProvider：null=通道不可达（区别于"可达但未登录"=false）
+        val viaProvider: Boolean? = try {
             val uri = android.net.Uri.parse("content://${tools.alamobile.mod.config.ConfigProvider.AUTHORITY}")
             val result = ctx.contentResolver.call(
                 uri,
@@ -297,6 +309,17 @@ object PaddockClient {
             result?.getString(tools.alamobile.mod.config.ConfigProvider.KEY_TOKEN)?.isNotEmpty() == true
         } catch (e: Throwable) {
             Logger.log(Log.WARN, TAG, "queryLoginStateFromModule: ${e.message}")
+            null
+        }
+        if (viaProvider != null) return viaProvider
+        // ② LSPosed 回落：provider 被包可见性拦截时，remote prefs 是唯一活通道
+        val reader = remoteTokenReader ?: return false
+        return try {
+            val t = reader()?.isNotEmpty() == true
+            Logger.log(Log.INFO, TAG, "queryLoginStateFromModule: provider unreachable, remote prefs fallback → $t")
+            t
+        } catch (e: Throwable) {
+            Logger.log(Log.WARN, TAG, "queryLoginStateFromModule: remote prefs fallback failed: ${e.message}")
             false
         }
     }
