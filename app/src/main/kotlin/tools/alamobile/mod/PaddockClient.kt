@@ -21,6 +21,8 @@ import tools.alamobile.mod.util.Logger
  * 定案映射（docs/PADDOCK_PLAN.md）：
  * - 每有效圈都上传（服务端去重留最佳）；Toast 判定权在服务端响应。
  * - 未登录/弱网时圈进本地待传队列（30 天时效），登录成功后补传。
+ * - **任何上传失败都入本地队列,绝不丢圈**（2026-09-10 定案）;本地有队列时游戏
+ *   进程每 30s 静默补传一批（失败不弹 Toast，只落日志）。
  * - 90 天滑动 token；登录态文件放 external files（与游戏侧 ala_tool.log 同区，
  *   module 进程 ConfigActivity 与游戏进程 AlaMobileModule 都可见）。
  * - Toast 四条件取最高：alltime_server > version_server > alltime_personal > version_personal。
@@ -51,6 +53,15 @@ object PaddockClient {
 
     /** 头像磁盘缓存总量上限（裁剪后 JPEG 普遍 20~80KB，5MB ≈ 百人级榜单全量） */
     private const val AVATAR_DISK_MAX_BYTES = 5L * 1024 * 1024
+
+    /**
+     * 圈速上传失败但**已进本地待传队列**时的提示文案(2026-09-10)。
+     * 与 [uploadLap] 的入队分支一一对应:**凡入队的失败路径都返回它**,否则
+     * 「已保存在本地」就是假话。200 以外全部入队(含 4xx/5xx/异常/无 token),
+     * 是否继续重试由 [isRetryableStatus] 在补传时判定。补传时机:下一次上传
+     * 成功时 / 进围场页时 / 每 30s 静默周期 / token 恢复重试。
+     */
+    private const val TOAST_LAP_QUEUED = "圈速上传失败,已保存在本地,待连接后自动补传!"
 
     @Volatile private var appContext: Context? = null
     @Volatile private var serverBase: String = DEFAULT_SERVER
@@ -455,8 +466,9 @@ object PaddockClient {
     // ── 圈速上传 ────────────────────────────────────────────
 
     /**
-     * 上传一条有效圈。返回服务端 Toast 文案（可为 null=无提示）。
-     * 401/网络失败时圈进本地待传队列。阻塞 IO，工作线程调用。
+     * 上传一条有效圈。返回 Toast 文案(可为 null=无提示):成功=服务端四条件文案,
+     * 失败(200 以外任何情况)=TOAST_LAP_QUEUED,且必定已入本地待传队列——
+     * 入队与提示严格一一对应,绝不静默丢圈。阻塞 IO,工作线程调用。
      */
     fun uploadLap(gpIndex: Int, lapMs: Int): String? {
         lastUploadAt = System.currentTimeMillis()
@@ -467,7 +479,7 @@ object PaddockClient {
                 Log.WARN, TAG,
                 "uploadLap: no token, queued locally (gp=$gpIndex, ${pendingCount()} pending)"
             )
-            return null
+            return TOAST_LAP_QUEUED
         }
         return try {
             val body = JSONObject()
@@ -484,18 +496,31 @@ object PaddockClient {
                     }
                     toast
                 }
-                code == 401 -> { enqueue(gpIndex, lapMs); null }
-                else -> { // 4xx 参数类错误：不重传（服务端明确拒绝）
-                    Logger.log(Log.WARN, TAG, "upload rejected: $code ${errText(code, resp)}")
-                    null
+                else -> {
+                    // 用户定案(2026-09-10):**只要有效圈上传失败就进本地队列**,绝不丢成绩。
+                    // 含服务端 4xx——也可能是临时性误判(赛道映射未就绪/网关改写请求),
+                    // 宁可先存后判;是否继续重试交给 [drainQueue] 的 [isRetryableStatus]
+                    // (永久 4xx 会在下一轮补传中被丢弃,不会长期占队头挡后面的好圈)。
+                    // 入队与 TOAST_LAP_QUEUED 严格一一对应——提示「已保存在本地」永不说假话。
+                    enqueue(gpIndex, lapMs)
+                    if (isRetryableStatus(code)) {
+                        Logger.log(Log.WARN, TAG, "upload failed (retryable $code), queued: ${errText(code, resp)}")
+                    } else {
+                        Logger.log(Log.WARN, TAG, "upload rejected ($code), queued for one retry: ${errText(code, resp)}")
+                    }
+                    TOAST_LAP_QUEUED
                 }
             }
         } catch (e: IOException) {
             enqueue(gpIndex, lapMs)
-            null
+            TOAST_LAP_QUEUED
         } catch (e: Throwable) {
-            Logger.log(Log.WARN, TAG, "uploadLap failed: ${e.message}")
-            null
+            // 兜底:非 IO 的意外异常(JSON 解析崩等)同样入队,绝不静默丢圈。
+            // 这是「偶尔没见补传、成绩丢了」的另一处漏点——改前此处既不入队也不提示,
+            // 圈直接蒸发(唯一的痕迹只有一行 WARN 日志)。
+            enqueue(gpIndex, lapMs)
+            Logger.log(Log.WARN, TAG, "uploadLap failed (unexpected), queued: ${e.message}")
+            TOAST_LAP_QUEUED
         }
     }
 
@@ -555,6 +580,18 @@ object PaddockClient {
         }
     }
 
+    /**
+     * 上传失败是否值得重试(决定队列条目保留还是丢弃)。**单一判据**:[uploadLap]
+     * 与 [drainQueue] 共用——两处判据分裂曾是"5xx 在直传侧当明确拒绝丢圈、在补传
+     * 侧当可重试"的根因。
+     * - 401:登录态失效(token 过期/被清),重新登录后可补传
+     * - 408/429:请求超时 / 网关限流(瞬时,重传通常即成功)
+     * - 5xx:服务端故障(瞬时)
+     * - -1:[drainQueue] 内部表示"未拿到响应"(网络异常/异常兜底)
+     */
+    private fun isRetryableStatus(code: Int): Boolean =
+        code == -1 || code == 401 || code == 408 || code == 429 || code >= 500
+
     /** 补传队列（过期丢弃）。返回成功条数。 */
     @Synchronized
     private fun drainQueue(token: String, max: Int): Int {
@@ -581,9 +618,9 @@ object PaddockClient {
             } catch (e: Throwable) {
                 -1  // 网络异常：保留待下次补传
             }
-            val kept = (code == 401 || code == -1 || code >= 500)  // 可重试类：登录态问题/网络/服务端故障
-            if (kept) remaining.put(it) else if (code == 200) ok++
-            // 其他 4xx：服务端明确拒绝，丢弃
+            // 可重试类：登录态问题（401）/网络（-1）/网关限流（408/429）/服务端故障（5xx）
+            val kept = isRetryableStatus(code)
+            // 其余 4xx：服务端明确拒绝，丢弃（不重试）
         }
         queueFile().writeText(remaining.toString())
         return ok
@@ -614,6 +651,28 @@ object PaddockClient {
             }
         } catch (e: Throwable) {
             Logger.log(Log.WARN, TAG, "drainPendingQueueOnEntry: ${e.message}")
+        }
+    }
+
+    /**
+     * 游戏进程侧的**静默周期补传**入口(PaddockUploader 每 30s 调一次,2026-09-10 用户定案)。
+     * 本地无待传 或 无 token → 直接返回(无操作、无日志噪音);有则补传一批。
+     *
+     * **静默**:补传失败不弹任何 Toast——周期任务反复弹提示是打扰,且失败原因(断网)
+     * 下一轮必然重试,用户无需感知;仅落日志备查。与 [uploadLap] 的入队提示分工明确:
+     * 失败**当下**告知一次(用户刚跑完圈,需要知道成绩没丢),之后**静默**重试。
+     *
+     * 阻塞 IO(网络 + 读队列文件),必须工作线程调用(PaddockUploader 丢 io 单线程池)。
+     */
+    fun drainPendingQueueSilently() {
+        try {
+            val token = authToken ?: return
+            val n = pendingCount()
+            if (n == 0) return
+            val ok = drainQueue(token, 20)
+            Logger.log(Log.INFO, TAG, "periodic drain: $ok/$n pending laps uploaded")
+        } catch (e: Throwable) {
+            Logger.log(Log.WARN, TAG, "periodic drain failed (silent): ${e.message}")
         }
     }
 
