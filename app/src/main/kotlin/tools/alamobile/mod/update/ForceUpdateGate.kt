@@ -40,6 +40,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  *   ——断网不误伤已有登录态。优先级低于前两种失配：任一更新失配激活时本判定
  *    直接跳过（hook 反正全禁，Toast 只显示更新文案）。判定失败按未登录处理
  *   （fail-closed，门控语义 = 无本地登录态不许用）。
+ *   反之放行时分两态（2026-09-10，见 [announcePaddockConnection]）：fetchMe 通
+ *   → 问候 Toast（欢迎 x 号车手 xxx）；连不上但本地有登录态 → 上传风险提示 Toast。
+ *   两态都放行模块功能，仅提示文案不同。
  *
  * ⚠️ 仅限游戏进程调用 [evaluate]/[evaluateLoginGate]/激活路径（日志走
  * AlaMobileModule.logX）；模块进程只准调用 [recordLatestVersionCode]
@@ -57,6 +60,9 @@ object ForceUpdateGate {
         "游戏版本不匹配且模块已更新，功能失效，请到 QQ 群更新游戏和模块！"
     private const val TOAST_TEXT_NOT_LOGIN =
         "您尚未登录围场，模块功能将不会生效，请先返回模块 App 登录！"
+    /** 已登录但服务端不可达/凭据失效:放行模块,仅提示成绩上传风险。 */
+    private const val TOAST_TEXT_OFFLINE =
+        "网络连接异常,成绩上传可能会失败,未上传的成绩将会保存在本地,连接成功后自动补传"
     private const val TOAST_INTERVAL_MS = 2500L
 
     /** scope 内的两个游戏包名（与 VersionGate.SUPPORTED_PACKAGES 一致）。 */
@@ -244,6 +250,11 @@ object ForceUpdateGate {
                             "paddock login verified via ConfigProvider (local auth file) → gate pass"
                         )
                         verdictDone.set(true)
+                        // 放行后独立跑一次连通性问候(fetchMe 带网络,最长 ~18s)。
+                        // ⚠️ 必须在 verdictDone 置位**之后**异步发起:early unlock
+                        // 路径等 loginVerdictDone,BillingManager.Awake(≈2s)窗口
+                        // 若被 fetchMe 的 connect/read 超时拖住就会错过 → 解锁失败。
+                        announcePaddockConnection(context)
                     } else {
                         evaluateLogin(context)
                     }
@@ -278,6 +289,47 @@ object ForceUpdateGate {
         )
         startToastLoop(context)
         verdictDone.set(true)
+    }
+
+    /**
+     * 登录门控**放行后**的一次性连通性问候 Toast(2026-09-10):
+     * - [PaddockClient.fetchMe] 成功 → 已成功连接到围场,欢迎 x 号车手 xxx!
+     * - 失败(断网/弱网/HTTP 非 200/token 失效)→ [TOAST_TEXT_OFFLINE],提示成绩
+     *   上传风险 + 本地暂存 + 自动补传
+     * 两种情况都**不影响放行**:本地登录态已由 [evaluateLoginGate] 确认,模块功能
+     * 照常生效。纯提示,任何异常静默吞掉。
+     *
+     * ⚠️ 独立后台线程跑,绝不阻塞 [verdictDone](见调用点注释);Toast 回主线程弹。
+     * 每进程仅调用一次(evaluateLoginGate 由 loginEvalStarted CAS 保证唯一)。
+     */
+    private fun announcePaddockConnection(context: Context) {
+        Thread {
+            val msg = try {
+                val me = PaddockClient.fetchMe()
+                if (me.ok) {
+                    if (me.username.isNotBlank()) {
+                        "已成功连接到围场,欢迎 ${me.regSeq} 号车手 ${me.username}!"
+                    } else {
+                        "已成功连接到围场!"
+                    }
+                } else {
+                    TOAST_TEXT_OFFLINE
+                }
+            } catch (e: Throwable) {
+                AlaMobileModule.logX(
+                    android.util.Log.WARN, TAG,
+                    "startup greeting fetchMe failed: ${e.message}"
+                )
+                TOAST_TEXT_OFFLINE
+            }
+            AlaMobileModule.logX(android.util.Log.INFO, TAG, "paddock startup greeting: $msg")
+            Handler(Looper.getMainLooper()).post {
+                try {
+                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                } catch (_: Throwable) {
+                }
+            }
+        }.start()
     }
 
     /**
