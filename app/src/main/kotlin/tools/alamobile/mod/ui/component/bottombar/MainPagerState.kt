@@ -71,13 +71,11 @@ class MainPagerState(
 
 private suspend fun PagerState.springAnimateToPage(target: Int) {
     if (target !in 0 until pageCount) return
-    var shouldSnapToTarget = false
     scroll(MutatePriority.UserInput) {
         val pageSize = layoutInfo.pageSize + layoutInfo.pageSpacing
         val distance = target - currentPage - currentPageOffsetFraction
         val scrollPixels = distance * pageSize
         if (abs(scrollPixels) <= 0.5f) return@scroll
-
         var consumedScroll = 0f
         var skipScroll = false
         Animatable(0f).animateTo(
@@ -91,7 +89,6 @@ private suspend fun PagerState.springAnimateToPage(target: Int) {
                 val consumed = scrollBy(delta)
                 consumedScroll += consumed
                 if (abs(delta - consumed) > 0.1f) {
-                    shouldSnapToTarget = true
                     skipScroll = true
                 }
             } else {
@@ -109,9 +106,16 @@ private suspend fun PagerState.springAnimateToPage(target: Int) {
         }
     }
 
-    if (shouldSnapToTarget || currentPage != target) {
-        scrollToPage(target)
-    }
+    // ⚠️ 无条件精确归位（2026-09-10 焦点闪跳定案修复）：KernelSU 原版在
+    // 「|remaining| <= 0.5f 且 currentPage == target」时跳过 scrollToPage——
+    // pager 会停在离页边界最多 1px 的位置。登录门控锁页后 userScrollEnabled=false，
+    // 没有任何手势能再触发 snap 归位，这个亚像素残差**常驻**；此后 TextField 聚焦/
+    // IME 弹出的 bringIntoView 请求经 PagerBringIntoViewSpec 判定「不在页边界」
+    // → settlingScrollDistance 算出整页吸附距离 → pager 无手势时凭空跳到邻页
+    // （实机实证：点用户名框跳设置页且滑不回来，点底栏 animateToPage 归位后才恢复）。
+    // 每次程序化导航后强制 scrollToPage 保证 firstVisiblePageOffset 恒为 0，
+    // 焦点滚动请求恒为 0 距离，跳页物理性消失。
+    scrollToPage(target)
 }
 
 @Composable
