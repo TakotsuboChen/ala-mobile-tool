@@ -61,6 +61,9 @@ import tools.alamobile.mod.ui.theme.LocalEnableBlur
 import tools.alamobile.mod.ui.util.BlurredBar
 import tools.alamobile.mod.ui.util.rememberBlurBackdrop
 import tools.alamobile.mod.ui.viewmodel.PaddockViewModel
+import tools.alamobile.mod.util.MODULE_QQ_GROUP_CODE
+import tools.alamobile.mod.util.MODULE_QQ_GROUP_FALLBACK_URL
+import tools.alamobile.mod.util.openQqGroup
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
@@ -128,16 +131,9 @@ fun PaddockPagerMiuix(
         contentWindowInsets = WindowInsets.systemBars.add(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal),
     ) { innerPadding ->
         Box(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
-            PullToRefresh(
-                isRefreshing = isRefreshing,
-                onRefresh = {
-                    isRefreshing = true
-                    actions.refresh { isRefreshing = false }
-                },
-                contentPadding = innerPadding,
-                refreshTexts = REFRESH_TEXTS,
-                topAppBarScrollBehavior = scrollBehavior,
-            ) {
+            // 列表内容两种模式共用；未登录不挂 PullToRefresh（核验页无数据可刷，
+            // 挂着会让下拉手势在内容不满一屏时直接拉出刷新指示器）。
+            val paddockList: @Composable () -> Unit = {
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxHeight()
@@ -157,6 +153,23 @@ fun PaddockPagerMiuix(
                         }
                     }
                 }
+            }
+            if (uiState.loggedIn) {
+                // 下拉刷新（miuix PullToRefresh hoisted 模式）：true → 转圈，refresh 完成回调里收起
+                PullToRefresh(
+                    isRefreshing = isRefreshing,
+                    onRefresh = {
+                        isRefreshing = true
+                        actions.refresh { isRefreshing = false }
+                    },
+                    contentPadding = innerPadding,
+                    refreshTexts = REFRESH_TEXTS,
+                    topAppBarScrollBehavior = scrollBehavior,
+                ) {
+                    paddockList()
+                }
+            } else {
+                paddockList()
             }
         }
     }
@@ -490,7 +503,8 @@ private fun ResetPasswordDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text(
-                    text = "在模块交流 QQ 群发送「我需要重置密码」，助理按你的群身份自动匹配账号并回复重置码，回填此处：",
+                    text = "请在模块 QQ 交流群内发送「我需要重置密码」7 个字，" +
+                        "智能助理会根据你的群身份自动匹配围场账号回复重置码，将其填到此处：",
                     fontSize = 14.sp,
                 )
                 TextField(
@@ -537,8 +551,8 @@ private fun ResetPasswordDialog(
 }
 
 /**
- * 注册申请弹窗：居中标题"申请围场通行证"，左对齐正文三行，
- * 唯一蓝色按钮"点击复制指令"（复制后关弹窗）。
+ * 注册申请弹窗：居中标题"申请围场通行证"，左对齐正文（含加群提醒），
+ * 唯一蓝色按钮"复制申请指令并跳转QQ群"（复制后跳群、关弹窗）。
  */
 @Composable
 private fun RegisterDialog(
@@ -546,6 +560,7 @@ private fun RegisterDialog(
     onCopy: (String) -> Unit,
     onDismissFinished: () -> Unit,
 ) {
+    val context = LocalContext.current
     var show by remember { mutableStateOf(true) }
     OverlayDialog(
         show = show,
@@ -559,30 +574,26 @@ private fun RegisterDialog(
                 Text(
                     text = "申请围场通行证",
                     fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = "请复制以下申请指令，直接发送到交流群内：",
-                        fontSize = 14.sp,
-                    )
-                    Text(
-                        text = command,
-                        fontSize = 16.sp,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        text = "智能助理回复校验成功后返回此处点击登录即可。",
-                        fontSize = 14.sp,
-                    )
-                }
+                Text(
+                    text = "请点击按钮复制申请指令，直接粘贴发送到官方 QQ 交流群内，不要更改任何文字，" +
+                        "也无需 @ 机器人。若您还未加入 QQ 群，务必申请加入并认真回答入群问题，" +
+                        "切记不要把申请指令当成入群答案！",
+                    fontSize = 14.sp,
+                )
                 TextButton(
-                    text = "点击复制指令",
+                    text = "复制申请指令并跳转QQ群",
                     onClick = {
                         onCopy(command)
                         show = false
+                        openQqGroup(
+                            context = context,
+                            groupCode = MODULE_QQ_GROUP_CODE,
+                            fallbackUrl = MODULE_QQ_GROUP_FALLBACK_URL,
+                        )
                     },
                     colors = ButtonDefaults.textButtonColorsPrimary(),
                     modifier = Modifier.fillMaxWidth(),

@@ -85,6 +85,8 @@ import tools.alamobile.mod.util.GameVersionStatus
 import tools.alamobile.mod.util.OFFICIAL_PKG
 import tools.alamobile.mod.util.checkGameVersion
 import tools.alamobile.mod.util.openExternalUrl
+import tools.alamobile.mod.util.MODULE_QQ_GROUP_CODE
+import tools.alamobile.mod.util.MODULE_QQ_GROUP_FALLBACK_URL
 import tools.alamobile.mod.util.openQqGroup
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -686,8 +688,8 @@ private fun LinksCard(
                 onClick = {
                     openQqGroup(
                         context = context,
-                        groupCode = "757940708",
-                        fallbackUrl = "https://qun.qq.com/universal-share/share?ac=1&authKey=V0nuKHg0u%2BZKVi/jgDReAiZSCQdbMb0yMwaOSV49gejQWRtdz%2BG4G6eQQgWyFOJB&busi_data=eyJncm91cENvZGUiOiI3NTc5NDA3MDgiLCJ0b2tlbiI6IjVzRjZTTWpLckJIRExvRTk3K0QzVzVzJGK2N4QURRM2RwRjJWNkw0L29wcG9ocjI1NXo5T1hLZ2FJVkZXZkhlMVAiLCJ1aW4iOiIxMjU5OTc2NTIwIn0=&data=x1JvsLJUAovAdpfNmLQpuTN_-yGbUrMfCJ1VSQqD-QbIzj9-ZLiRKNEHNbJXpokkPhx5cc-RG47HyWYUrPBtTA&svctype=4&tempid=h5_group_info",
+                        groupCode = MODULE_QQ_GROUP_CODE,
+                        fallbackUrl = MODULE_QQ_GROUP_FALLBACK_URL,
                     )
                 }
             )
