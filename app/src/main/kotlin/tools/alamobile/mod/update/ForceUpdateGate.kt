@@ -7,6 +7,7 @@ import android.widget.Toast
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import tools.alamobile.mod.AlaMobileModule
+import tools.alamobile.mod.PaddockClient
 import tools.alamobile.mod.util.isSupportedVersion
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -29,12 +30,20 @@ import java.util.concurrent.atomic.AtomicBoolean
  * ANR）。宁可不装 hook，也不在版本未确认时抢跑。
  *
  * Toast 循环：主线程 Handler 每 2.5s 弹一次 LENGTH_SHORT（约 2s），视觉上连续
- * 不断。文案按当前命中组合动态取：双失配 / 仅游戏版本 / 仅模块过期 三种。
+ * 不断。文案按当前命中组合动态取：双失配 / 仅游戏版本 / 仅模块过期 / 仅未登录
+ * 四种（更新失配优先于登录——用户定案 2026-09-10：有更新提示就提示更新）。
  * 激活幂等（AtomicBoolean compareAndSet），重复调用 evaluate 不会重复起循环。
  *
- * ⚠️ 仅限游戏进程调用 [evaluate]/激活路径（日志走 AlaMobileModule.logX）；
- * 模块进程只准调用 [recordLatestVersionCode]（libxposed-api 是 compileOnly，
- * 模块进程引 Xposed 类即 NoClassDefFoundError）。
+ * 3. **未登录围场**（2026-09-10 扩展，见 [evaluateLoginGate]）：游戏进程本地
+ *    三级回落读不到围场 token = 未登录 → 零 hook + 循环 Toast。**判定全程无
+ *    网络**（本地文件 / daemon Remote Preferences / ConfigProvider 都是本地读）
+ *   ——断网不误伤已有登录态。优先级低于前两种失配：任一更新失配激活时本判定
+ *    直接跳过（hook 反正全禁，Toast 只显示更新文案）。判定失败按未登录处理
+ *   （fail-closed，门控语义 = 无本地登录态不许用）。
+ *
+ * ⚠️ 仅限游戏进程调用 [evaluate]/[evaluateLoginGate]/激活路径（日志走
+ * AlaMobileModule.logX）；模块进程只准调用 [recordLatestVersionCode]
+ * （libxposed-api 是 compileOnly，模块进程引 Xposed 类即 NoClassDefFoundError）。
  */
 object ForceUpdateGate {
 
@@ -46,6 +55,8 @@ object ForceUpdateGate {
         "游戏版本不匹配，功能失效，请到 QQ 群下载最新版本游戏！"
     private const val TOAST_TEXT_BOTH =
         "游戏版本不匹配且模块已更新，功能失效，请到 QQ 群更新游戏和模块！"
+    private const val TOAST_TEXT_NOT_LOGIN =
+        "您尚未登录围场，模块功能将不会生效，请先返回模块 App 登录！"
     private const val TOAST_INTERVAL_MS = 2500L
 
     /** scope 内的两个游戏包名（与 VersionGate.SUPPORTED_PACKAGES 一致）。 */
@@ -61,8 +72,18 @@ object ForceUpdateGate {
     /** 模块落后最新 Release（缓存秒判或后台网络检查命中）。 */
     private val moduleOutdated = AtomicBoolean(false)
 
+    /**
+     * 未登录围场（2026-09-10 扩展）。激活前提：前两种更新失配都不在
+     * （更新优先于登录），且三级回落读不到本地 token。判定无网络。
+     */
+    private val notLoggedIn = AtomicBoolean(false)
+
     private val toastLoopStarted = AtomicBoolean(false)
     private val bgCheckStarted = AtomicBoolean(false)
+    private val loginEvalStarted = AtomicBoolean(false)
+
+    /** 登录门控判定完成（Provider 查询出结果，无论登录与否）。 */
+    private val loginVerdictDone = AtomicBoolean(true)
 
     /**
      * 判定完成信号：游戏版本已确认**且**模块判定已出结果（激活或确认无需激活、
@@ -71,8 +92,12 @@ object ForceUpdateGate {
      */
     private val verdictDone = AtomicBoolean(false)
 
-    /** 门控是否已激活（任一失配命中；激活后游戏进程所有 hook 安装路径必须跳过）。 */
-    val isActive: Boolean get() = gameMismatch.get() || moduleOutdated.get()
+    /**
+     * 门控是否已激活（任一失配命中；激活后游戏进程所有 hook 安装路径必须跳过）。
+     * 未登录激活路径把 verdictDone 一并置位——对 hook 安装路径而言「已判定」即可，
+     * 两条路径都不该装 hook。
+     */
+    val isActive: Boolean get() = gameMismatch.get() || moduleOutdated.get() || notLoggedIn.get()
 
     /**
      * 判定是否已完成（游戏版本确认 + 模块判定出结果，或 fail-open 放行）。
@@ -105,6 +130,7 @@ object ForceUpdateGate {
         val pkg = context.packageName
         if (pkg != GAME_PKG_OFFICIAL && pkg != GAME_PKG_COEX) {
             gameVersionVerified.set(true)
+            notLoggedIn.set(true)  // 登录门控同样只在游戏进程评估
             verdictDone.set(true)
             return
         }
@@ -121,6 +147,8 @@ object ForceUpdateGate {
                 )
             } else {
                 gameMismatch.set(true)
+                // 更新优先于登录：版本失配命中后登录门控退出竞争。
+                notLoggedIn.set(true)
                 AlaMobileModule.logX(
                     android.util.Log.WARN, TAG,
                     "game version MISMATCH → zero hooks (offset crash guard), toast loop started"
@@ -135,7 +163,9 @@ object ForceUpdateGate {
             return
         }
 
-        // ② 模块落后门控：缓存秒判 + 后台网络检查（fail-open）。
+        // ② 模块落后门控：缓存秒判 + 后台网络检查（fail-open）。缓存未命中时
+        //    丢后台线程跑网络检查；登录门控（③）由 15s 主路径经 [evaluateLoginGate]
+        //    在后台检查出结果后评估——不在此处串联，避免网络在途时抢跑激活登录门控。
         val current = tools.alamobile.mod.BuildConfig.VERSION_CODE
         if (!moduleOutdated.get()) {
             val cached = UpdatePreferences.getLatestKnownVersionCode(context)
@@ -150,7 +180,112 @@ object ForceUpdateGate {
             return
         }
         if (!bgCheckStarted.compareAndSet(false, true)) return
+        startBackgroundCheck(context)
+    }
 
+    /**
+     * 未登录围场门控公共入口（2026-09-10）：由调用方（AlaMobileModule 的
+     * remoteTokenReader 注入点之后、15s 主路径之前）显式调用一次。不挂在
+     * [evaluate] 内部——② 的后台网络检查在途时（verdictDone 未置位）登录门控
+     * 若已激活，会跟模块过期 Toast 打架（更新优先于登录）；等检查出结果后再
+     * 评估，两种失配都不在才轮到登录门控。
+     *
+     * 未登录门控判定：读不到本地登录态 = 未登录 → 零 hook + 循环 Toast。
+     *
+     * ⚠️ 判定走 [PaddockClient.queryLoginStateFromModule]（ConfigProvider →
+     * 模块进程 auth 文件），**不走 hasToken()**——后者可能拿到 daemon remote
+     * prefs 的残留值（实测 put/remove 都不落盘，退出登录清不掉），残留 token
+     * 会造成"模块已退出登录、游戏仍放行"的分裂（2026-09-10 两轮实机实证）。
+     *
+     * ConfigProvider 是阻塞 IPC，判定丢后台线程跑（不阻塞主线程——ANR 红线）。
+     * ⚠️ 抢跑教训（2026-09-10 12:28 实测）：查询在途时 verdictDone 未置位——
+     * hook 安装路径（BillingHook 轮询 / doPackageReadyDeferred / 15s 主路径）
+     * 全部依赖 verdictDone/isActive 守门，自然等到查询出结果，**无抢跑窗口**。
+     * 但 early unlock 路径在 doPackageReadyDeferred 里位于 evaluateLoginGate
+     * 调用**之后**、同一主线程消息内同步执行——它检查 isActive 时查询还在途
+     * （notLoggedIn 未置位）→ 抢跑装上 hook（实测 Successfully hooked 出现
+     * 在 ACTIVATED 之前 24ms）。修复：发起查询时**先置 verdictDone=false 并
+     * 由 early unlock 路径自查 loginVerdict**——见 [isLoginVerdictDone]，
+     * 未出结果时 early unlock 路径必须 return 等待重推。
+     */
+    fun evaluateLoginGate(context: Context?) {
+        if (context == null) return
+        if (gameMismatch.get() || moduleOutdated.get()) return  // 更新优先于登录
+        if (notLoggedIn.get()) {
+            verdictDone.set(true)
+            return
+        }
+        // ⚠️ 短路教训（2026-09-10 12:34 实测）：此处**禁止**用 loginVerdictDone
+        // 初始值 true 做 early return——那会让本函数整个变 no-op，查询永不发起、
+        // 门控永不激活，而 early unlock 的 isLoginVerdictDone 检查看到初始 true
+        // 直接放行（hook 抢跑）。判定"未出结果"的唯一权威是 loginEvalStarted：
+        // CAS 成功 = 第一次进入 = 发起查询；CAS 失败 = 查询已在途/已完成，重入无害。
+        if (loginEvalStarted.compareAndSet(false, true)) {
+            // 发起查询前把两个 verdict 标志拉回 false：本函数在 ② 的 fail-open
+            // 置 verdictDone 后才调用，early unlock 路径靠 isLoginVerdictDone
+            // 守门——查询在途时两个标志都是 false，守门路径统一等待重推。
+            verdictDone.set(false)
+            loginVerdictDone.set(false)
+            Thread {
+                val loggedIn = try {
+                    PaddockClient.queryLoginStateFromModule()
+                } catch (e: Throwable) {
+                    AlaMobileModule.logX(
+                        android.util.Log.WARN, TAG,
+                        "login gate query failed (fail-closed): ${e.message}"
+                    )
+                    false
+                }
+                Handler(Looper.getMainLooper()).post {
+                    loginVerdictDone.set(true)
+                    if (loggedIn) {
+                        AlaMobileModule.logX(
+                            android.util.Log.INFO, TAG,
+                            "paddock login verified via ConfigProvider (local auth file) → gate pass"
+                        )
+                        verdictDone.set(true)
+                    } else {
+                        evaluateLogin(context)
+                    }
+                }
+            }.start()
+        }
+    }
+
+    /**
+     * 登录门控判定是否出结果（early unlock 路径的额外守门条件）。
+     * verdictDone 只反映 ①② 更新失配判定；登录判定（Provider IPC）更慢，
+     * early unlock 在两者都完成前不得装 hook。
+     */
+    val isLoginVerdictDone: Boolean get() = loginVerdictDone.get()
+
+    /**
+     * 未登录激活（[evaluateLoginGate] 的 Provider 查询返回 false 后走到这里）：
+     * 立标记 + 起 toast 循环。仅主线程调用。
+     */
+    private fun evaluateLogin(context: Context) {
+        if (notLoggedIn.get()) {
+            verdictDone.set(true)
+            return
+        }
+        if (!notLoggedIn.compareAndSet(false, true)) {
+            verdictDone.set(true)
+            return
+        }
+        AlaMobileModule.logX(
+            android.util.Log.WARN, TAG,
+            "ACTIVATED (not logged in to paddock): all Java/Native hooks disabled, toast loop started"
+        )
+        startToastLoop(context)
+        verdictDone.set(true)
+    }
+
+    /**
+     * 模块过期后台网络检查（fail-open）：缓存未命中时由 [evaluate] 调用。
+     * 检查回来激活 → 登录门控已随 [activateModuleOutdated] 退出竞争（更新优先于登录）。
+     */
+    private fun startBackgroundCheck(context: Context) {
+        val current = tools.alamobile.mod.BuildConfig.VERSION_CODE
         Thread {
             try {
                 // runBlocking 在专用后台线程：包 15s 超时，网络检查失败/超时 fail-open 不激活。
@@ -186,6 +321,9 @@ object ForceUpdateGate {
     /** 模块过期激活：立标记 + 起 toast 循环。幂等。 */
     private fun activateModuleOutdated(context: Context) {
         if (!moduleOutdated.compareAndSet(false, true)) return
+        // 更新优先于登录：模块过期命中后登录门控退出竞争（isActive 已含
+        // moduleOutdated，hook 反正全禁，Toast 只显示更新文案不叠加）。
+        notLoggedIn.set(true)
         AlaMobileModule.logX(
             android.util.Log.WARN, TAG,
             "ACTIVATED (module outdated): all Java/Native hooks disabled"
@@ -213,6 +351,8 @@ object ForceUpdateGate {
     private fun currentToastText(): String = when {
         gameMismatch.get() && moduleOutdated.get() -> TOAST_TEXT_BOTH
         gameMismatch.get() -> TOAST_TEXT_GAME
+        moduleOutdated.get() -> TOAST_TEXT_MODULE
+        notLoggedIn.get() -> TOAST_TEXT_NOT_LOGIN
         else -> TOAST_TEXT_MODULE
     }
 }

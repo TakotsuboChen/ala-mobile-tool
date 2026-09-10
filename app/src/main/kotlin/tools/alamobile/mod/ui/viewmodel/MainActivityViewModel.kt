@@ -92,5 +92,8 @@ object MainPagerConfig {
     const val PAGE_COUNT = 4
     const val LAST_PAGE_INDEX = PAGE_COUNT - 1
 
+    /** 围场页序号（页序=概览0/配置1/围场2/设置3）。登录门控锁定目标。 */
+    const val PADDOCK_PAGE_INDEX = 2
+
     fun coercePage(page: Int): Int = page.coerceIn(0, LAST_PAGE_INDEX)
 }

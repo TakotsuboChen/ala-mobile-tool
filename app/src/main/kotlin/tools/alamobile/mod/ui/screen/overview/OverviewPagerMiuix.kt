@@ -72,6 +72,7 @@ import tools.alamobile.mod.App
 import tools.alamobile.mod.ConnectionState
 import tools.alamobile.mod.LsposedStatus
 import tools.alamobile.mod.ui.EulaDialog
+import tools.alamobile.mod.ui.LoginGateCoordinator
 import tools.alamobile.mod.ui.SupportDialog
 import tools.alamobile.mod.ui.UpdateDialog
 import tools.alamobile.mod.ui.viewmodel.ConfigViewModel
@@ -130,13 +131,17 @@ fun OverviewPagerMiuix(
     var eulaAccepted by remember {
         mutableStateOf(EulaManager.isAccepted(context))
     }
+    // 冷启动已同意 → 立即向登录门控协调器汇报（登录门控优先级最低，等所有前置弹窗流程）。
+    if (eulaAccepted) {
+        LoginGateCoordinator.eulaDone = true
+    }
     // OverlayDialog show 驱动退出动画：关闭时先把 eulaDialogVisible 翻 false 触发动画，
     // onDismissFinished 回调里再执行真正的状态变更。
     var eulaDialogVisible by remember { mutableStateOf(true) }
     var pendingEulaAction by remember { mutableStateOf<() -> Unit>({ }) }
 
     // ── 更新检查状态 ──
-    // 弹窗优先级：EULA > 激活 > 更新。更新弹窗只在 EULA 已同意时才触发。
+    // 弹窗优先级：EULA > 激活 > 更新 > 登录门控。更新弹窗只在 EULA 已同意时才触发。
     var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
     var showUpdateDialog by remember { mutableStateOf(false) }
     var updateDialogVisible by remember { mutableStateOf(false) }
@@ -178,8 +183,11 @@ fun OverviewPagerMiuix(
                     updateInfo = info
                     showUpdateDialog = true
                     updateDialogVisible = true
+                    LoginGateCoordinator.updateBlocking = true
                 }
             }
+            // 更新检查已出结果（无论有无更新）→ 汇报登录门控协调器。
+            LoginGateCoordinator.updateCheckDone = true
         }
     }
 
@@ -257,6 +265,7 @@ fun OverviewPagerMiuix(
                         pendingEulaAction = {
                             EulaManager.accept(context)
                             eulaAccepted = true
+                            LoginGateCoordinator.eulaDone = true
                         }
                         eulaDialogVisible = false
                     },
@@ -279,7 +288,10 @@ fun OverviewPagerMiuix(
                 UpdateDialog(
                     show = updateDialogVisible,
                     updateInfo = updateInfo!!,
-                    onRequestClose = { updateDialogVisible = false },
+                    onRequestClose = {
+                        updateDialogVisible = false
+                        LoginGateCoordinator.updateBlocking = false
+                    },
                     onDismissFinished = {
                         showUpdateDialog = false
                     }
@@ -409,6 +421,7 @@ private fun ActivationCard(eulaAccepted: Boolean) {
         if (evaluated == LsposedStatus.Status.INACTIVE && eulaAccepted && npatchInstalled) {
             showNonRootDialog = true
             dialogVisible = true
+            LoginGateCoordinator.activationPending = true
         }
         // 超时兜底：2s 等待 + 3s = 5s 总窗口后，如果还没写缓存（INACTIVE 等事件驱动
         // 但 service 一直没绑上），强制固定为 INACTIVE，避免状态一直不固定。
@@ -433,6 +446,7 @@ private fun ActivationCard(eulaAccepted: Boolean) {
                 if (evaluated == LsposedStatus.Status.LSPOSED) {
                     showNonRootDialog = false
                     dialogVisible = false
+                    LoginGateCoordinator.activationPending = false
                 }
             }
             is ConnectionState.Disconnected -> { }
@@ -446,6 +460,7 @@ private fun ActivationCard(eulaAccepted: Boolean) {
         if (eulaAccepted && status == LsposedStatus.Status.INACTIVE && npatchInstalled) {
             showNonRootDialog = true
             dialogVisible = true
+            LoginGateCoordinator.activationPending = true
         }
     }
 
@@ -536,10 +551,12 @@ private fun ActivationCard(eulaAccepted: Boolean) {
                     status = LsposedStatus.evaluate(context)
                 }
                 dialogVisible = false
+                LoginGateCoordinator.activationPending = false
             },
             onDismiss = {
                 pendingAction = { }
                 dialogVisible = false
+                LoginGateCoordinator.activationPending = false
             },
             onDismissFinished = {
                 showNonRootDialog = false

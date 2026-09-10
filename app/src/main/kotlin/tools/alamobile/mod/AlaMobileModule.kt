@@ -297,6 +297,27 @@ class AlaMobileModule : XposedModule() {
                 null
             }
         }
+        // 围场登录门控（2026-09-10）：remoteTokenReader 已注入（三级回落就绪），
+        // 更新失配（①②）均未激活时在此判定未登录 → 零 hook + 循环 Toast。
+        // 必须在 15s 主路径前定案——否则未登录时 hook 照装（违反零 Hook 红线）。
+        // PaddockClient.init 在游戏进程可能未跑过（模块进程 App.onCreate 才跑），
+        // 先补 init（loadAuth 三级回落含 ConfigProvider，本地读无网络）再判定。
+        try {
+            val cfgForLogin = context?.let { ModConfig.readFromTargetProcess(it) }
+            PaddockClient.init(
+                context,
+                cfgForLogin?.paddockServer?.takeIf { it.isNotBlank() }
+            )
+            tools.alamobile.mod.update.ForceUpdateGate.evaluateLoginGate(context)
+            if (tools.alamobile.mod.update.ForceUpdateGate.isActive) {
+                logX(Log.WARN, TAG, "ForceUpdateGate active (login): skipping early unlock/intro hooks")
+                return
+            }
+        } catch (e: Throwable) {
+            // 登录门控自身故障不放行 hook（fail-closed）：未判定 ≠ 允许装 hook。
+            // 15s 主路径的 isActive 检查兜底（未激活才继续），这里只记日志。
+            logX(Log.WARN, TAG, "login gate evaluate failed: ${e.message}")
+        }
 
         // 注册 ConfigReceiver：接收 ConfigActivity 发来的定向广播（带最新配置 JSON），
         // 写入游戏进程自己的 externalFilesDir。Remote Preferences 路线下广播的价值是
@@ -386,9 +407,19 @@ class AlaMobileModule : XposedModule() {
         val hideGamePedals = settings?.hideGamePedals ?: false
 
         // forceLoad + initUnlock（deferred 后同步执行，ShadowHook 已 init）
-        // 启动门控：激活时跳过早期 unlock/intro hooks。
-        if (tools.alamobile.mod.update.ForceUpdateGate.isActive) {
+        // 启动门控：激活时跳过早期 unlock/intro hooks。登录门控（evaluateLoginGate
+        // 在上面 remoteTokenReader 注入点后已**发起**，Provider IPC 异步在途）也
+        // 计入 isActive，但查询出结果前 isActive 仍 false——登录判定未出结果时
+        // 同样禁止装 hook（isLoginVerdictDone=false → 整个 deferred 块 200ms 后
+        // 重走重判，见函数入口的轮询结构）。
+        val gate = tools.alamobile.mod.update.ForceUpdateGate
+        if (gate.isActive) {
             logX(Log.WARN, TAG, "ForceUpdateGate active: skipping early unlock/intro hooks")
+            return
+        }
+        if (!gate.isLoginVerdictDone) {
+            logX(Log.INFO, TAG, "login gate verdict in flight, re-dispatching deferred block")
+            Handler(Looper.getMainLooper()).postDelayed({ doPackageReadyDeferred(param) }, 200)
             return
         }
         logX(Log.INFO, TAG, "NPatch early unlock path: forceLoad + initUnlock (deferred)")
@@ -472,9 +503,10 @@ class AlaMobileModule : XposedModule() {
                 return@postDelayed
             }
             // 门控复查：15s 时判定必然早已完成——15s 块只有在首次判定完成
-            //（verdictDone 单调置位）且未激活时才被调度，isActive 直接读即可。
-            // 激活则跳过全部 15s 路径（overlay/native/上传/日志推送），并占位
-            // 双 ClassLoader 标记防第二个 ClassLoader 副本补装。
+            //（verdictDone 单调置位）且未激活时才被调度，isActive 直接读即可
+            //（含登录门控——evaluateLoginGate 在上面 remoteTokenReader 注入点后
+            // 已定案）。激活则跳过全部 15s 路径（overlay/native/上传/日志推送），
+            // 并占位双 ClassLoader 标记防第二个 ClassLoader 副本补装。
             if (tools.alamobile.mod.update.ForceUpdateGate.isActive) {
                 logX(Log.WARN, TAG, "ForceUpdateGate active: skipping 15s delayed overlay+hooks")
                 markNativeInstalled()
