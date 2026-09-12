@@ -125,7 +125,24 @@ bot：群内匹配码 → 建号事务（车手号=最小未占用正整数）�
 - 密码在申请时一并设置（服务端哈希落 pending），bot 建号时直接使用——
   模块端无 verify 步骤、无校验码回填
 - **重置密码**：群内发「我需要重置密码」严格匹配 → bot 按群身份（member_openid）
-  反查在途 reg_code 重发；单聊不支持（user_openid/member_openid 两体系不互通）
+  反查账号签发一次性重置码；单聊不支持（user_openid/member_openid 两体系不互通）
+- **查询用户名**：群内发「查询用户名」严格匹配 → bot 按群身份（member_openid）
+  反查账号，回复围场用户名；未注册/无群身份各有独立失败文案；单聊不支持（同重置密码）
+
+### Bot 消息规则引擎（2026-09-12 重构）
+
+- **单一事实源 = `qq_bot::action_metas()`**：每个内置动作（`reply`/`reg_code`/`reset_password`/
+  `query_username`）的触发语义、匹配方式（normal/contains/exact）、失败字段与内置默认文案
+  全部定义于此。管理端设置页把整表注入前端（`ACTIONS_META`），**前端不再维护任何镜像**
+  （此前 JS 里 ACTIONS/FAIL_FIELDS/PRESET_FAIL 三份硬编码曾漂移出「切动作预填错文案」）。
+- **新增一个动作 = 两处改动**：① `action_metas()` 加一条 ② 群/单聊 handler 的 `match` 加分支。
+  管理端编辑器自动出现该动作及其失败字段。
+- **失败文案优先级**：该动作的字段（如 `no_user_template`）→ 通用 `fail_template` → 内置默认。
+- **普通回复的身份依赖兜底**：模板含 `{{paddock_name}}`/`{{paddock_id}}`/`{{at_me}}` 而
+  发言者账号查不到时，走 `no_user_template`（未注册）/ `no_identity_template`（无群身份），
+  **绝不把空串渲染进模板**（旧实现会回「用户名是「」」）。
+- 触发词/成功文案/失败文案可管理端编辑；建号事务、openid 唯一约束、码过期等安全边界
+  仍在代码里（配置管文案，代码管动作与防重）。
 
 ### 版本键（v36+）
 
