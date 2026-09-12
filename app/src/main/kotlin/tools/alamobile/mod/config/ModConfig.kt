@@ -1,6 +1,7 @@
 package tools.alamobile.mod.config
 
 import tools.alamobile.mod.util.Logger
+import tools.alamobile.mod.App
 import android.content.Context
 import android.content.Intent
 import android.os.Environment
@@ -785,19 +786,36 @@ object ModConfig {
         //    不依赖游戏进程是否在运行——根治"游戏没运行→广播丢失→下次启动读旧值"。
         //    service 异步绑定，可能此时仍为 null（首次进 ConfigActivity 太快），
         //    失败回退到 filesDir + 广播兜底。
-        val service = tools.alamobile.mod.App.xposedService
-        if (service != null) {
-            try {
-                service.getRemotePreferences(tools.alamobile.mod.App.PREF_GROUP)
-                    .edit()
-                    .putString(tools.alamobile.mod.App.KEY_CONFIG_JSON, json)
-                    .apply()
-                Logger.i("AlaMobileTool", "Config written via remote preferences")
-            } catch (e: Throwable) {
-                Logger.w("AlaMobileTool", "Remote preferences write failed, falling back", e)
+        //
+        //    ⚠️ 必须遍历 App.allServices 而非单例 App.xposedService（2026-09-12 对齐
+        //    token 路径）：LSPosed daemon store 与 NPatch 管理器 store 是**两个物理
+        //    存储**，单 binder 只写其一 → 另一侧读到旧配置。token 的 saveAuth/clearAuth
+        //    早已遍历 allServices，配置写入此前漏了同款修复（信箱通道虽已兜底，但保持
+        //    一致、消除隐蔽缺口）。
+        try {
+            if (App.xposedService == null) {
+                // NPatch 无 daemon 异步推送，此处是模块进程内较晚的绑定时机；
+                // 仍失败才降级"只写信箱/本地"（onServiceBind flush 兜底补写）。
+                try { App.bindNpatchRemoteService(context) } catch (_: Throwable) {}
             }
-        } else {
-            Logger.w("AlaMobileTool", "XposedService not bound yet, using local fallback")
+            val services = App.allServices.toList()
+            if (services.isEmpty()) {
+                Logger.w("AlaMobileTool", "No service bound, config written to mailbox/local only")
+            }
+            for (service in services) {
+                val fw = try { service.frameworkName } catch (_: Throwable) { "?" }
+                try {
+                    service.getRemotePreferences(App.PREF_GROUP)
+                        .edit()
+                        .putString(App.KEY_CONFIG_JSON, json)
+                        .apply()
+                    Logger.i("AlaMobileTool", "Config written via remote preferences ($fw)")
+                } catch (e: Throwable) {
+                    Logger.w("AlaMobileTool", "Remote preferences write failed ($fw), falling back", e)
+                }
+            }
+        } catch (e: Throwable) {
+            Logger.w("AlaMobileTool", "Remote preferences write failed, falling back", e)
         }
 
         // 2. 写模块 filesDir 作持久化备份（模块进程天然可写，service 不可用时兜底）。
@@ -1005,15 +1023,6 @@ object ModConfig {
             remoteJson
         }
     }
-
-    /** 把 Settings 的 position 字段重置为默认（本地目录拿不到 position 时用）。 */
-    @Suppress("unused")
-    private fun withPositionDefaults(s: Settings): Settings = s.copy(
-        pedalPosition = Defaults.PEDAL_POSITION,
-        gearPosition = Defaults.GEAR_POSITION,
-        brakePosition = Defaults.BRAKE_POSITION,
-        singlePedalPosition = Defaults.SINGLE_PEDAL_POSITION
-    )
 
     /** 从 JSON 字符串解析 Settings，供 ConfigProvider 和 readFromTargetProcess 复用。 */
     fun fromJson(json: String): Settings {

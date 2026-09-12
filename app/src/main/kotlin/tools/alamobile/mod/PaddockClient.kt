@@ -761,6 +761,12 @@ object PaddockClient {
             // 可重试类：登录态问题（401）/网络（-1）/网关限流（408/429）/服务端故障（5xx）
             val kept = isRetryableStatus(code)
             // 其余 4xx：服务端明确拒绝，丢弃（不重试）
+            if (kept) {
+                remaining.put(it)   // 保留待下次补传
+            } else if (code in 200..299) {
+                ok++                // 真正上传成功（callsite 用返回值判"队列有进展"）
+            }
+            // 非重试的 4xx：明确拒绝，丢弃且不计入成功（避免日志谎报 drained）
         }
         queueFile().writeText(remaining.toString())
         return ok
