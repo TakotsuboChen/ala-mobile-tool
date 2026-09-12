@@ -90,15 +90,6 @@ class ConfigActivity : ComponentActivity() {
                 allFilesGranted = AllFilesPermission.isGranted()
             }
 
-            if (!allFilesGranted) {
-                MiuixTheme(colors = if (
-                    when (uiState.colorMode) { 1 -> false; 2 -> true; else -> isSystemInDarkTheme() }
-                ) darkColorScheme() else lightColorScheme()) {
-                    PermissionGateScreen()
-                }
-                return@setContent
-            }
-
             val darkMode = when (uiState.colorMode) {
                 1 -> false
                 2 -> true
@@ -106,6 +97,8 @@ class ConfigActivity : ComponentActivity() {
             }
 
             // 照搬 KernelSU MainActivity.kt:122-135
+            // ⚠️ 必须在下面的权限门 return 之前——否则门控页不启用边到边，
+            // TopAppBar 的 statusBar inset 会与窗口行为叠加出错位间距。
             DisposableEffect(darkMode) {
                 enableEdgeToEdge(
                     statusBarStyle = SystemBarStyle.auto(
@@ -121,6 +114,29 @@ class ConfigActivity : ComponentActivity() {
                     window.isNavigationBarContrastEnforced = false
                 }
                 onDispose { }
+            }
+
+            // 权限门视觉统一（2026-09-12）：不再只包 MiuixTheme（那只能借配色，
+            // 借不到毛玻璃/pageScale/导航栏形态），而是和主界面走同一套
+            // CompositionLocal + enableEdgeToEdge，见 [PermissionGateScreen]。
+            if (!allFilesGranted) {
+                val gateSystemDensity = LocalDensity.current
+                val gateDensity = remember(gateSystemDensity, uiState.pageScale) {
+                    Density(gateSystemDensity.density * uiState.pageScale, gateSystemDensity.fontScale)
+                }
+                CompositionLocalProvider(
+                    LocalDensity provides gateDensity,
+                    LocalColorMode provides uiState.colorMode,
+                    LocalEnableBlur provides uiState.enableBlur,
+                    LocalEnableFloatingBottomBar provides uiState.enableFloatingBottomBar,
+                    LocalEnableFloatingBottomBarBlur provides uiState.enableFloatingBottomBarBlur,
+                    LocalEnableNavigationBadge provides uiState.enableNavigationBadge,
+                ) {
+                    MiuixTheme(colors = if (darkMode) darkColorScheme() else lightColorScheme()) {
+                        PermissionGateScreen()
+                    }
+                }
+                return@setContent
             }
 
             val navigator = rememberNavigator(Route.Main)
