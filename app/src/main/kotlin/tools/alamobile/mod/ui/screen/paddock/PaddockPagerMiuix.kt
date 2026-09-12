@@ -451,12 +451,29 @@ private fun VerifyCard(uiState: tools.alamobile.mod.ui.viewmodel.PaddockViewMode
                 )
             }
             TextButton(
+                text = "忘记用户名？",
+                onClick = { actions.setShowQueryName(true) },
+                enabled = !uiState.loading,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            TextButton(
                 text = "忘记密码？",
                 onClick = { actions.setShowReset(true) },
                 enabled = !uiState.loading,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
+    }
+
+    // 查询用户名弹窗：纯说明（用户在群里发指令，bot 按群身份回用户名），仅一个「我已了解」
+    var queryNameDialogMounted by remember { mutableStateOf(false) }
+    if (uiState.showQueryName || queryNameDialogMounted) {
+        queryNameDialogMounted = true
+        QueryUsernameDialog(
+            uiState = uiState,
+            actions = actions,
+            onDismissFinished = { queryNameDialogMounted = false },
+        )
     }
 
     // 重置密码弹窗：常驻组合树（show 驱动），提交成功后由 ViewModel 置 showReset=false 关闭
@@ -470,6 +487,49 @@ private fun VerifyCard(uiState: tools.alamobile.mod.ui.viewmodel.PaddockViewMode
             onDismissFinished = { resetDialogMounted = false },
         )
     }
+}
+
+/**
+ * 查询用户名弹窗：纯说明，无表单。居中粗体标题"查询用户名" + 左对齐正文 +
+ * 唯一蓝色全宽按钮"我已了解"（点击即关，播放退出动画）。
+ * 弹窗常驻组合树（show 驱动）；dismiss 经 ViewModel 置 showQueryName=false 触发退出。
+ */
+@Composable
+private fun QueryUsernameDialog(
+    uiState: tools.alamobile.mod.ui.viewmodel.PaddockViewModel.UiState,
+    actions: PaddockViewModel,
+    onDismissFinished: () -> Unit,
+) {
+    OverlayDialog(
+        show = uiState.showQueryName,
+        onDismissRequest = { actions.setShowQueryName(false) },
+        onDismissFinished = onDismissFinished,
+        content = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = "查询用户名",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    text = "请在模块 QQ 交流群内发送「查询用户名」5 个字，" +
+                        "智能助理会根据你的群身份自动匹配围场账号回复用户名。",
+                    fontSize = 14.sp,
+                )
+                TextButton(
+                    text = "我已了解",
+                    onClick = { actions.setShowQueryName(false) },
+                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+    )
 }
 
 /**

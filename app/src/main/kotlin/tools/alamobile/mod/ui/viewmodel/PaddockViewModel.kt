@@ -42,6 +42,8 @@ class PaddockViewModel(application: android.app.Application) : AndroidViewModel(
         val showReset: Boolean = false,
         val resetCode: String = "",
         val resetPass: String = "",
+        // 忘记用户名弹窗（纯说明，无表单：群里发指令，bot 按群身份回用户名）
+        val showQueryName: Boolean = false,
     )
 
     private val _uiState = MutableStateFlow(UiState(loggedIn = PaddockClient.hasToken()))
@@ -198,6 +200,8 @@ class PaddockViewModel(application: android.app.Application) : AndroidViewModel(
     // ── 忘记密码（S4）──────────────────────────────────────
 
     fun setShowReset(v: Boolean) = _uiState.update { it.copy(showReset = v) }
+
+    fun setShowQueryName(v: Boolean) = _uiState.update { it.copy(showQueryName = v) }
 
     fun submitReset() {
         val s = _uiState.value
