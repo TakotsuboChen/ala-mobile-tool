@@ -261,6 +261,8 @@ object ForceUpdateGate {
                 }
             }.start()
         }
+        // CAS 失败（查询已在途/已完成）时什么都不做——与旧逻辑一致，真正的
+        // 守门在 doPackageReadyDeferred 的 verdictDone/isLoginVerdictDone 轮询里。
     }
 
     /**

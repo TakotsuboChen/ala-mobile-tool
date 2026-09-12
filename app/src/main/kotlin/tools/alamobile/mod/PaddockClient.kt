@@ -13,6 +13,7 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import tools.alamobile.mod.config.CrossPkgMailbox
 import tools.alamobile.mod.util.Logger
 
 /**
@@ -43,6 +44,15 @@ object PaddockClient {
     /** 安装周期标记 prefs（内部存储：升级保留、卸载随应用删除） */
     private const val INSTALL_PREFS = "paddock_install_state"
     private const val KEY_AUTH_WIPE_DONE = "auth_wipe_done_v1"
+
+    /**
+     * 游戏进程门控 token 缓存（内部 prefs：进程死亡保留、卸载随删）。
+     * 写入方只有 [cacheGameToken]（游戏进程身份，任何通道成功恢复 token 时）；
+     * 读取方是 [loadAuth] 第四级回落；清除方是 [clearAuth]（显式登出/新装清态）
+     * 与 [queryLoginStateFromModule] 的权威否决路径。
+     */
+    private const val GATE_CACHE_PREFS = "paddock_gate_token"
+    private const val GATE_CACHE_KEY = "token"
     private const val QUEUE_TTL_MS = 30L * 24 * 3600 * 1000
     private const val RETRY_RESTORE_INTERVAL_MS = 60_000L
     private const val CONNECT_TIMEOUT = 8000
@@ -84,7 +94,8 @@ object PaddockClient {
     }
 
     /**
-     * 新安装（覆盖安装保留、卸载重装触发）时强制清空一次登录态。
+     * 新安装（覆盖安装保留、卸载重装触发）时强制清空一次登录态（**有意设计**：
+     * 装新版 = 全体用户掉登录重新登录一次，用户定案 2026-09-11）。
      *
      * 判据：内部存储 SharedPreferences 标记 [KEY_AUTH_WIPE_DONE]——内部存储
      * 升级保留、卸载随应用删除；而 auth 文件在 **external** files（不随卸载删除，
@@ -190,6 +201,94 @@ object PaddockClient {
                 Logger.log(Log.WARN, TAG, "ConfigProvider token read failed: ${e.message?.take(80)}")
             }
         }
+        // ── 第五级：跨包"信箱"（2026-09-12，游戏进程专用）──
+        // 模块 App 持 AFA 写 `/sdcard/Android/media/<游戏包>/paddock_auth.json`；
+        // 游戏进程同 uid 直读**自己包**該文件（零权限、不经 AMS、不依赖模块存活）。
+        // 这是唯一在三重约束（模块不运行 / ColorOS 关关联启动 / 游戏 stopped state）
+        // 下仍可达的登录态通道。
+        //
+        // ⚠️ **信箱文件"存在即权威"**：存在且有 token = 已登录；存在但无/空 token
+        // = 已登出。模块 App 登出时**写空 token 而非删文件**——这样"登录过又登出"
+        // （文件存在、token 空）与"从未登录"（文件不存在）可区分，前者必须否决
+        // 门控缓存（防反向分裂：模块已登出、游戏凭陈旧缓存误放行——用户红线）。
+        // 信箱不存在时回落到后续通道（含门控缓存）。
+        val ctx0 = appContext
+        var mailboxAuthoritative = false
+        if (remoteTokenReader != null && ctx0 != null) {
+            val raw = CrossPkgMailbox.read(ctx0.packageName, CrossPkgMailbox.AUTH_FILE)
+            if (raw != null) {
+                mailboxAuthoritative = true
+                authToken = try {
+                    JSONObject(raw).optString("token", "").takeIf { it.isNotEmpty() }
+                } catch (_: Throwable) { null }
+                if (authToken == null) {
+                    clearGateCache()
+                    Logger.log(Log.INFO, TAG, "auth: mailbox authoritative → logged OUT (gate cache cleared)")
+                } else {
+                    cacheGameToken(authToken!!)
+                    Logger.log(Log.INFO, TAG, "auth restored from mailbox (authoritative)")
+                }
+            }
+        }
+        if (mailboxAuthoritative) return
+
+        // 第四级回落（2026-09-11，登录门控强保证）：门控 token 缓存。游戏进程
+        // 身份下读模块进程 auth 文件的所有通道都可能被包可见性拦死（"Unknown
+        // authority"，实机两例——尤其模块 App 被 force-stop 后系统直接隐藏它），
+        // 但游戏进程对**自己包名**的内部 prefs 读写 100% 可达——只要本进程曾
+        // 成功恢复过 token（[cacheGameToken]），后续启动就以缓存兜底，绝不误锁。
+        // 失效规则（防反向分裂）：模块进程显式登出/新装清态 → 信箱写空 token
+        // 成为权威（上方已 return），缓存不会把已登出状态捞回来；token 服务端
+        // 失效 → fetchMe needRelogin → clearAuth。
+        if (authToken.isNullOrBlank() && remoteTokenReader != null) {
+            val cached = try {
+                appContext?.getSharedPreferences(GATE_CACHE_PREFS, Context.MODE_PRIVATE)
+                    ?.getString(GATE_CACHE_KEY, null)?.takeIf { it.isNotEmpty() }
+            } catch (_: Throwable) { null }
+            if (cached != null) {
+                authToken = cached
+                Logger.log(Log.INFO, TAG, "auth restored from gate token cache (all channels blocked)")
+            }
+        }
+        // 游戏进程任何通道恢复成功 → 写门控缓存（下次启动哪怕全通道被拦也能兜底）。
+        val restored = authToken
+        if (restored != null && remoteTokenReader != null) {
+            cacheGameToken(restored)
+        }
+    }
+
+    /**
+     * 游戏进程专用：任何通道成功恢复 token 后调用（[loadAuth] 末尾统一调），
+     * 写进门控缓存（游戏进程内部 prefs，读 100% 可达，与模块 App 死活无关）。
+     * 模块进程不写（remoteTokenReader==null = 模块进程，走不到这）。
+     */
+    private fun cacheGameToken(token: String) {
+        try {
+            appContext?.getSharedPreferences(GATE_CACHE_PREFS, Context.MODE_PRIVATE)
+                ?.edit()?.putString(GATE_CACHE_KEY, token)?.apply()
+        } catch (_: Throwable) {}
+    }
+
+    /** 门控缓存清除（clearAuth 与权威否决路径共用）。 */
+    private fun clearGateCache() {
+        try {
+            appContext?.getSharedPreferences(GATE_CACHE_PREFS, Context.MODE_PRIVATE)
+                ?.edit()?.remove(GATE_CACHE_KEY)?.apply()
+        } catch (_: Throwable) {}
+    }
+
+    /**
+     * 写登录态到跨包信箱（两个游戏包各一份）。模块 App 侧需 AFA 才能写他包
+     * media 目录；游戏进程侧写自己目录无需权限。失败静默（返回 false 由调用方
+     * 忽略）——原有通道照常兜底。
+     */
+    private fun writeAuthMailbox(content: String) {
+        val ctx = appContext ?: return
+        for (pkg in CrossPkgMailbox.GAME_PACKAGES) {
+            // 游戏进程只写自己包那一份（避免游戏进程越权写另一个游戏包）。
+            if (remoteTokenReader != null && pkg != ctx.packageName) continue
+            CrossPkgMailbox.write(pkg, CrossPkgMailbox.AUTH_FILE, content)
+        }
     }
 
     /**
@@ -208,6 +307,11 @@ object PaddockClient {
         } catch (e: Throwable) {
             Logger.log(Log.WARN, TAG, "saveAuth failed: ${e.message}")
         }
+        // 跨包信箱写入（2026-09-12）：模块 App 持 AFA 时把 token 写进游戏 media 目录，
+        // 游戏进程冷启动同 uid 直读——唯一在"模块不运行 + ColorOS 关关联启动"下可达的
+        // 登录态通道。未授 AFA 时静默失败（write 返回 false），后续通道照常兜底。
+        // 写的是"有 token"版本，与 clearAuth 的"空 token"版本构成权威存在性信号。
+        writeAuthMailbox(JSONObject().put("token", token).toString())
         // 写入**全部** service（LSPosed lspd + NPatch 管理器 store 是两个物理存储，
         // 游戏进程经 NPatch loader 读管理器 store——只写一个就会出现"登录了但
         // 游戏读到另一个 store 里的残留旧 token"（2026-09-10 实证：上传 401 根因）。
@@ -243,6 +347,16 @@ object PaddockClient {
     fun clearAuth() {
         authToken = null
         authFile().delete()
+        // 跨包信箱写**空 token**（非删文件）——2026-09-12 反向红线修复的关键：
+        // "存在但 token 空" = 权威的"已登出"信号，游戏进程见之即否决门控缓存。
+        // 若改成删文件，则与"从未登录"不可区分，游戏会回落门控缓存把旧 token
+        // 捞回来 → 模块已登出、游戏仍放行（用户红线）。写空还额外规避了"模块
+        // App 无 AFA 时删除失败但写入也可能失败"的不对称风险（两者同一路径）。
+        writeAuthMailbox(JSONObject().put("token", "").toString())
+        // 门控 token 缓存同清（**仅当调用方是游戏进程时有效**）：模块 App 登出时
+        // clearGateCache 清的是模块进程自己的 prefs，够不到游戏进程的缓存——
+        // 那一路由"信箱写空 token"在游戏启动时权威否决（见 loadAuth 第五级）。
+        clearGateCache()
         // 同步清**全部** service：退出登录必须两侧（lspd + NPatch store）都清，
         // 否则游戏进程还能从没清的那个 store 读到残留 token。
         //
@@ -272,30 +386,28 @@ object PaddockClient {
     fun hasToken(): Boolean = !authToken.isNullOrBlank()
 
     /**
-     * 登录态的**权威判定**（游戏进程门控用）——两级回落：
+     * 登录态的**权威判定**（游戏进程门控用）——四级回落：
      *
      * ① ConfigProvider read_token：模块进程读它自己 externalFilesDir 下的 auth
      *    文件（saveAuth/clearAuth 的第一落点，写删都可靠）。NPatch 本地模式下
      *    provider 与游戏同进程同 uid（模块类合并进共存版 APK），进程内 call
      *    必达；返回 false = auth 文件确实没 token = 未登录。
-     * ② remote prefs 回落（仅 LSPosed）：游戏包是官方 APK（改不了 manifest），
-     *    Android 11+ 包可见性下游戏进程无法跨包 resolve 模块的 provider →
-     *    "Unknown authority"，Binder call 根本没发出去（2026-09-10 实机实证，
-     *    模块明明已登录仍被误判未登录）。此时回落读 LSPosed daemon remote
-     *    prefs——读侧权威（"写侧不可靠"指 remove 不落盘，已由空串覆盖+全
-     *    binder 遍历修复，put 落盘可靠，清过的 key 读回空串无残留误判）。
-     *    NPatch 下 remoteTokenReader 是空壳（Bundle.EMPTY），但 NPatch 走不到
-     *    这里（① 必达），fail-closed 语义不变。
+     *    ⚠️ 实机两例（2026-09-11 用户日志）证伪"NPatch 下 ① 必达"：共存版
+     *    游戏 APK 同样改不了 manifest（无 <queries> 声明模块包），Android 11+
+     *    包可见性下游戏进程跨包 resolve 模块 provider 也会 "Unknown authority"
+     *    （Binder call 没发出去）——与 LSPosed 下官版被拦是同一机制。
+     * ② remote prefs 回落：provider 被拦时读 daemon remote prefs（LSPosed 下
+     *    读侧权威；NPatch 下是空壳，读回 null 继续往下）。
+     * ③④ 见 [loadAuth] 的第四级回落与内存 authToken——本函数兜底语义：
+     *    只要任何一个渠道（含游戏进程本地门控缓存）捞到 token 即放行。
      *
-     * ⚠️ 不用 [hasToken]：其内存值可能来自 daemon remote prefs 回落——实测
-     * （2026-09-10）LSPosed daemon 与 NPatch 管理器两侧的 remote prefs **写入
-     * 和删除都不可靠**（put/remove 打成功日志但库里数据不变），退出登录后残留
-     * token 会造成"模块已退出登录、游戏仍判已登录"的分裂。auth 本地文件是
-     * 唯一读写闭环可靠的存储。
+     * ⚠️ ② reader 为 null 时**不是**"未登录"——reader 注入点在 deferred 块
+     *    （ShadowHook init 之后），登录门控可能在其之前发起判定（2026-09-11
+     *    用户日志实锤：reader==null 静默 return false → 误锁，且 CAS 占位后
+     *    永无翻身）。null 一律走 [loadAuth] 全渠道重探（其含缓存兜底）。
      *
      * 阻塞 IPC（Binder call，模块进程可能被冷拉起，首次 100ms~1s），只能
-     * 工作线程调用。两级全失败（模块进程被杀/双通道异常）→ false=未登录
-     * （门控 fail-closed）。
+     * 工作线程调用。全渠道确认无 token → false=未登录（门控 fail-closed）。
      */
     fun queryLoginStateFromModule(): Boolean {
         val ctx = appContext ?: return false
@@ -311,17 +423,22 @@ object PaddockClient {
             Logger.log(Log.WARN, TAG, "queryLoginStateFromModule: ${e.message}")
             null
         }
-        if (viaProvider != null) return viaProvider
-        // ② LSPosed 回落：provider 被包可见性拦截时，remote prefs 是唯一活通道
-        val reader = remoteTokenReader ?: return false
-        return try {
-            val t = reader()?.isNotEmpty() == true
-            Logger.log(Log.INFO, TAG, "queryLoginStateFromModule: provider unreachable, remote prefs fallback → $t")
-            t
-        } catch (e: Throwable) {
-            Logger.log(Log.WARN, TAG, "queryLoginStateFromModule: remote prefs fallback failed: ${e.message}")
-            false
+        if (viaProvider != null) {
+            // ① 可达 = 权威判定（auth 文件是 saveAuth/clearAuth 的第一落点）。
+            // 权威"未登录"（false）时顺手清门控缓存：模块进程可能刚被登出/
+            // 新装清态，缓存若不清，下次 ① 再被拦时会把已登出状态捞回来
+            //（反向分裂：模块未登录、游戏却放行——用户红线）。
+            if (!viaProvider) clearGateCache()
+            return viaProvider
         }
+        // ② remote prefs 回落 + ③ 缓存/内存兜底：全部经 loadAuth 重探（它有
+        //    remote reader、ConfigProvider、门控缓存三级，且对结果有日志）。
+        //    仅在 ① null（通道不可达）时走到——通道不可达 ≠ 未登录，绝不
+        //    静默判死。
+        loadAuth()
+        val t = hasToken()
+        Logger.log(Log.INFO, TAG, "queryLoginStateFromModule: provider unreachable, full re-probe → $t")
+        return t
     }
 
     /**

@@ -706,6 +706,55 @@ object ModConfig {
     }
 
     /**
+     * 把 Settings 序列化为配置 JSON 字符串（单参纯函数）。
+     *
+     * 从 [write] 主体抽出：跨包信箱（[CrossPkgMailbox]）与远端写入需要同一份
+     * JSON，避免两处序列化逻辑漂移（"写出去的配置"与"读回来的配置"必须字节一致）。
+     * 不含 position 三字段（position 由游戏进程持有，见 write 注释）。
+     */
+    fun buildJson(settings: Settings): String = JSONObject().apply {
+        put(KEY_PEDAL_MODE, settings.pedalMode.value)
+        put(KEY_ENABLE_AUTO_DRS, settings.enableAutoDrs)
+        put(KEY_DISABLE_AUTO_GEAR, settings.disableAutoGear)
+        put(KEY_ENABLE_MANUAL_SHIFT, settings.enableManualShift)
+        put(KEY_ENABLE_UNLOCK, settings.enableUnlock)
+        put(KEY_ENABLE_TC, settings.enableTc)
+        put(KEY_ENABLE_ABS, settings.enableAbs)
+        // TC 档位：字符串枚举值持久化。enableTc 上行照写（派生值），
+        // 供旧版本 APK 回滚时读取。
+        put(KEY_TC_MODE, settings.tcMode.value)
+        put(KEY_TC_STRENGTH, settings.tcStrength.value)
+        put(KEY_TC_TIMING, settings.tcTiming.value)
+        // ABS 档位：同 TC 模式。enableAbs 上行照写（派生值）。
+        put(KEY_ABS_MODE, settings.absMode.value)
+        put(KEY_ABS_STRENGTH, settings.absStrength.value)
+        put(KEY_ABS_PRESSURE, settings.absPressure.toDouble())
+        put(KEY_ENABLE_MUSIC_REPLACE, settings.enableMusicReplace)
+        put(KEY_ENABLE_V10_SOUND, settings.enableV10Sound)
+        put(KEY_HIDE_GAME_PEDALS, settings.hideGamePedals)
+        put(KEY_ENABLE_TC_ABS_INDICATOR, settings.enableTcAbsIndicator)
+        put(KEY_PEDAL_DEADZONE, settings.pedalDeadzone.toDouble())
+        put(KEY_PEDAL_TRANSITION, settings.pedalTransition.toDouble())
+        put(KEY_BRAKE_TRANSITION, settings.brakeTransition.toDouble())
+        put(KEY_THROTTLE_TRANSITION, settings.throttleTransition.toDouble())
+        put(KEY_PEDAL_PRIORITY, settings.pedalPriority.value)
+        put(KEY_PEDAL_INVERT, settings.pedalInvert.value)
+        put(KEY_OVERLAY_ALPHA, settings.overlayAlpha.toDouble())
+        put(KEY_OVERLAY_BORDER_WIDTH, settings.overlayBorderWidth.toDouble())
+        put(KEY_OVERLAY_CORNER_RADIUS, settings.overlayCornerRadius.toDouble())
+        put(KEY_THROTTLE_CURVE, settings.throttleCurve.value)
+        put(KEY_BRAKE_CURVE, settings.brakeCurve.value)
+        put(KEY_THROTTLE_CURVE_POINTS, writeCurvePoints(settings.throttleCurvePoints))
+        put(KEY_BRAKE_CURVE_POINTS, writeCurvePoints(settings.brakeCurvePoints))
+        // 不写 position 三字段：position 由游戏进程持有（拖拽时
+        // saveOverlayPosition 写游戏 externalFilesDir），ConfigActivity
+        // 不管 position。广播 JSON 不含 position，ConfigReceiver 收到
+        // 后合并——保留游戏进程已有的 position，只更新这里的非 position 字段。
+        put(KEY_PADDOCK_SERVER, settings.paddockServer)
+        put(KEY_SAVED_AT, System.currentTimeMillis())
+    }.toString(2)
+
+    /**
      * Writes the module settings to the module's filesDir (persistence backup)
      * AND broadcasts the JSON to the target game processes via ConfigReceiver.
      *
@@ -719,47 +768,16 @@ object ModConfig {
      * 绕过 Android 11+ 的包可见性限制。
      */
     fun write(context: Context, settings: Settings) {
-        val json = JSONObject().apply {
-            put(KEY_PEDAL_MODE, settings.pedalMode.value)
-            put(KEY_ENABLE_AUTO_DRS, settings.enableAutoDrs)
-            put(KEY_DISABLE_AUTO_GEAR, settings.disableAutoGear)
-            put(KEY_ENABLE_MANUAL_SHIFT, settings.enableManualShift)
-            put(KEY_ENABLE_UNLOCK, settings.enableUnlock)
-            put(KEY_ENABLE_TC, settings.enableTc)
-            put(KEY_ENABLE_ABS, settings.enableAbs)
-            // TC 档位：字符串枚举值持久化。enableTc 上行照写（派生值），
-            // 供旧版本 APK 回滚时读取。
-            put(KEY_TC_MODE, settings.tcMode.value)
-            put(KEY_TC_STRENGTH, settings.tcStrength.value)
-            put(KEY_TC_TIMING, settings.tcTiming.value)
-            // ABS 档位：同 TC 模式。enableAbs 上行照写（派生值）。
-            put(KEY_ABS_MODE, settings.absMode.value)
-            put(KEY_ABS_STRENGTH, settings.absStrength.value)
-            put(KEY_ABS_PRESSURE, settings.absPressure.toDouble())
-            put(KEY_ENABLE_MUSIC_REPLACE, settings.enableMusicReplace)
-            put(KEY_ENABLE_V10_SOUND, settings.enableV10Sound)
-            put(KEY_HIDE_GAME_PEDALS, settings.hideGamePedals)
-            put(KEY_ENABLE_TC_ABS_INDICATOR, settings.enableTcAbsIndicator)
-            put(KEY_PEDAL_DEADZONE, settings.pedalDeadzone.toDouble())
-            put(KEY_PEDAL_TRANSITION, settings.pedalTransition.toDouble())
-            put(KEY_BRAKE_TRANSITION, settings.brakeTransition.toDouble())
-            put(KEY_THROTTLE_TRANSITION, settings.throttleTransition.toDouble())
-            put(KEY_PEDAL_PRIORITY, settings.pedalPriority.value)
-            put(KEY_PEDAL_INVERT, settings.pedalInvert.value)
-            put(KEY_OVERLAY_ALPHA, settings.overlayAlpha.toDouble())
-            put(KEY_OVERLAY_BORDER_WIDTH, settings.overlayBorderWidth.toDouble())
-            put(KEY_OVERLAY_CORNER_RADIUS, settings.overlayCornerRadius.toDouble())
-            put(KEY_THROTTLE_CURVE, settings.throttleCurve.value)
-            put(KEY_BRAKE_CURVE, settings.brakeCurve.value)
-            put(KEY_THROTTLE_CURVE_POINTS, writeCurvePoints(settings.throttleCurvePoints))
-            put(KEY_BRAKE_CURVE_POINTS, writeCurvePoints(settings.brakeCurvePoints))
-            // 不写 position 三字段：position 由游戏进程持有（拖拽时
-            // saveOverlayPosition 写游戏 externalFilesDir），ConfigActivity
-            // 不管 position。广播 JSON 不含 position，ConfigReceiver 收到
-            // 后合并——保留游戏进程已有的 position，只更新这里的非 position 字段。
-            put(KEY_PADDOCK_SERVER, settings.paddockServer)
-            put(KEY_SAVED_AT, System.currentTimeMillis())
-        }.toString(2)
+        val json = buildJson(settings)
+
+        // 0. 【新通道 · 2026-09-12】跨包"信箱"：写 /sdcard/Android/media/<游戏包>/。
+        //    这是唯一在"模块 App 不运行 + ColorOS 关关联启动 + 游戏 stopped state"
+        //    三重约束下仍可用的写入通道（实机验证：AFA 下可写他包 media，游戏同 uid
+        //    直读自己 media 无需权限）。不经 AMS、不经组件拉起、纯内核文件写。
+        //    未授 AFA 时静默失败（write 返回 false），原有通道照常兜底。
+        for (pkg in GAME_PACKAGES) {
+            CrossPkgMailbox.write(pkg, FILE_NAME, json)
+        }
 
         // 1. 优先走 Remote Preferences（LSPosed daemon SQLite，无视进程存活）。
         //    ConfigActivity（模块进程）经 App.xposedService Binder 到 daemon 写，
@@ -900,6 +918,25 @@ object ModConfig {
             }
         }
 
+        // ⚡ 【新通道 · 2026-09-12】跨包信箱读取：游戏进程读**自己包**的
+        //    /sdcard/Android/media/<自己包>/ala_tool_config.json——同 uid 直读自己媒体
+        //    目录，**无需任何权限**，且不依赖模块进程、不经 AMS、不受 stopped state 影响。
+        //    这是在"模块 App 不运行 + ColorOS 关关联启动"下唯一能拿到最新配置的通道
+        //    （模块 App 持 AFA 写入该文件；实机验证双向读写均成功）。
+        //    与其它三源一起参与 saved_at 新鲜度仲裁（信箱是模块侧权威写入，通常最新）。
+        fun fetchMailbox(): String? = try {
+            val json = tools.alamobile.mod.config.CrossPkgMailbox.read(context.packageName, FILE_NAME)
+            if (json != null && json.isNotEmpty()) {
+                Logger.i(TAG, "readFromTargetProcess: mailbox ok, len=${json.length}")
+                json
+            } else {
+                null
+            }
+        } catch (e: Throwable) {
+            Logger.w(TAG, "readFromTargetProcess: mailbox read failed: ${e.message}")
+            null
+        }
+
         fun savedAt(json: String?): Long = try {
             JSONObject(json ?: return 0L).optLong(KEY_SAVED_AT, 0L)
         } catch (e: Throwable) {
@@ -908,16 +945,26 @@ object ModConfig {
 
         val remoteJson = fetchRemote()
         val providerJson = fetchProvider()
+        val mailboxJson = fetchMailbox()
         val localJson = fetchLocal()
 
         // 最新者胜出（并列时按 remote > provider > local：remote 在 LSPosed 下
         // 经 daemon 双写，传播路径最短）。
+        //
+        // ⚠️ null 源必须**先排除**再比 ts：savedAt(null) 返回 0（哨兵"最旧"），
+        // 若不排除，remoteJson==null 且另两源也无 saved_at（旧格式 JSON，均算出 0）
+        // 时，首条 `0>=0 && 0>=0` 恒真 → bestJson=null → 走"三源全空用默认"分支，
+        // **明明读到的 865 字节配置被丢弃**（2026-09-12 实机：ConfigProvider ok
+        // len=865 的下一行就是 "No config ... using defaults"）。判据是"有没有
+        // 这条通道的数据"（null），不是"数据多旧"（0）——两个语义不能混进同一数轴。
         val remoteTs = savedAt(remoteJson)
         val providerTs = savedAt(providerJson)
+        val mailboxTs = savedAt(mailboxJson)
         val localTs = savedAt(localJson)
         val bestJson = when {
-            remoteTs >= providerTs && remoteTs >= localTs -> remoteJson
-            providerTs >= localTs -> providerJson
+            remoteJson != null && remoteTs >= providerTs && remoteTs >= mailboxTs && remoteTs >= localTs -> remoteJson
+            providerJson != null && providerTs >= mailboxTs && providerTs >= localTs -> providerJson
+            mailboxJson != null && mailboxTs >= localTs -> mailboxJson
             else -> localJson
         }
 
@@ -925,8 +972,9 @@ object ModConfig {
             val winner = when (bestJson) {
                 remoteJson -> "remote prefs"
                 providerJson -> "ConfigProvider"
+                mailboxJson -> "mailbox"
                 else -> "local file"
-            } + " (ts: remote=$remoteTs provider=$providerTs local=$localTs)"
+            } + " (ts: remote=$remoteTs provider=$providerTs mailbox=$mailboxTs local=$localTs)"
             val settings = fromJson(mergePositionFromLocalPublic(bestJson, localJson))
             Logger.i(TAG, "Config via freshness arbitration, winner=$winner pedalMode=${settings.pedalMode}")
             return settings
