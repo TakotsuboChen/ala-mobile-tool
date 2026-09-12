@@ -1,65 +1,74 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-09-12T22:22:53+08:00 · Git HEAD: `8701dbf`（工作 + 持久文档提交后，尚未含本次 handoff 提交）
+生成时间: 2026-09-12T23:52:30+08:00 · Git HEAD: `54d8b78`（模块仓；工作+文档提交后，尚未含本次 handoff 提交）
+paddock 仓 HEAD: `973329d`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: main @ `8701dbf`（2026-09-12 22:20；工作 071215f + 文档 8701dbf 均已 push）
-- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `8701dbf`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA；不一致以 git 实际输出为准
+- 锚点: 模块 main @ `54d8b78`、paddock main @ `973329d`（2026-09-12 23:52；两边均已 push）
+- 漂移检查: `git rev-parse HEAD~1` 是否仍 = 上述 SHA——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA；不一致以 git 实际输出为准
 - 待重探的 [?]: 见下方标记
-- 先读: `docs/CROSS_PROCESS_CHANNELS.md`（跨进程通道全景）+ CLAUDE.md 的 PaddockClient 条目（跨包信箱 + allServices 契约 + 权限门外壳契约）
+- 先读: `docs/PADDOCK_PLAN.md`（契约源，「Bot 消息规则引擎」节）——bot 规则语义的唯一权威
 
 ## 1. 当前目标
-上一目标（权限门控页 UI 与模块主界面统一）已于 2026-09-12 完成编码 + 构建 + 装机。**现无进行中目标**；下一步是 v1.0.4 定版发布（等用户）。
+**已完成**：围场 bot「查询用户名」全链路（模块弹窗 + 服务端动作）+ 管理端规则引擎结构性重构（消除四处语义镜像）。已部署上线 + 逻辑端到端验证。**现无进行中目标**；下一步仅剩 v1.0.4 定版发布（等用户）。
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **权限门控页 UI 统一**（071215f）：`ConfigActivity` 未授权分支此前只包一层 `MiuixTheme` 便 `return@setContent` → 三处断裂（`enableEdgeToEdge` 排在 return 后未生效 / pageScale·blur·底栏 CompositionLocal 未 provide / 页面是手写裸 Column）。改为：`enableEdgeToEdge` 上移到 return 前 + provide 与主界面同套 CompositionLocal；`PermissionGateScreen` 重写为共享外壳（`Scaffold + BlurredBar 毛玻璃 TopAppBar + LazyColumn(overScrollVertical+scrollEndHaptic) + layerBackdrop`，12dp 页边距/12dp 卡间距同概览页），卡片图标 tint 改 `onBackground`、字号对齐，按钮改两个全宽（上=蓝「去授予权限」主操作、下=灰「退出模块」）
-- [V] **文案**：描述改为「若不授权则模块将无法运行」（用户定案）；全仓 grep 无其它引用点
-- [V] **CLAUDE.md 契约**（8701dbf）：PaddockClient 条目 + PermissionGateScreen 文件条目写入「门控页必须与主界面同套外壳 + enableEdgeToEdge 必须在 return 之前」的强制约定
-- [V] 构建/lint/装机（全新 shell）：`compileDebugKotlin` BUILD SUCCESSFUL；`:app:lint` BUILD SUCCESSFUL（62 warnings / 15 条 baseline 失效，**本次改动 0 新增**）；`assembleRelease -x lintVital...` BUILD SUCCESSFUL；`adb install -r` Success（MEIZU 20，USB）
-- [V] 版本号未动（仍 `1.0.4 Alpha 1`）；工作区干净，全部已 push（仅 handoff 提交后含 HANDOFF.md）
+- [V] **模块**：围场页未登录表单加「忘记用户名？」（在「忘记密码？」之上）→ 纯说明弹窗「查询用户名」（居中粗体标题 + 左对齐正文 + 唯一蓝色全宽「我已了解」）。`showQueryName` state + `QueryUsernameDialog`（mounted+show 双变量保退出动画）。提交 `d9eed52`
+- [V] **服务端规则引擎重构**（`522707d`）：新增 `qq_bot::action_metas()` 为**唯一事实源**（动作语义/匹配方式/失败字段/内置默认文案），经设置页整表注入前端 `ACTIONS_META`，**JS 三份镜像（ACTIONS/FAIL_FIELDS/PRESET_FAIL）全删**改为派生。新增动作从此只改「元数据表 + handler match 分支」两处
+- [V] **新动作 `query_username`**：严格匹配触发词 → 按群身份反查回用户名；未注册 `no_user_template` / 无群身份 `no_identity_template`；单聊引导回群；预设 `preset-query-name`
+- [V] **修普通回复身份依赖兜底**：模板含 `{{paddock_name}}/{{paddock_id}}/{{at_me}}` 而账号查不到 → 走失败文案，绝不渲染空串（用户反馈「没注册的回复空用户名」的根因）
+- [V] **修管理端编辑器静默失效**：`actionSwitch` 未写回 `_editingRule`（切动作不落库）；`PRESET_FAIL` 里 `varTag('code')` 在 JS 模板字符串中未求值；失败字段键改按元数据整表清空；播报 `action` 脏值归零；`load_rules` 文案迁移改**按 id** 查预设（原按 `[2]/[3]` 下标，新增预设后漂移）
+- [V] **规则数据已按用户管理端文案设为默认并清理**：用户编辑失败文案写入 `action_metas()` 默认；库里播报 `action` 归零；**冗余规则 `r1789097268017`（旧普通回复「查询用户名」）已删**，现仅 5 条（reg/reset/query-name/两条播报）
+- [V] **构建**（全新 shell）：`./gradlew :app:lint` → EXIT=0（15 条 baseline 失效警告，0 新增）；`cargo check` → EXIT=0（2 既有 warning）；`assembleRelease` BUILD SUCCESSFUL；`adb install -r` → Success（MEIZU 20，USB）
+- [V] **部署**：镜像 `paddock-api:1.0.1` 重建（debain-slim base）→ `~/paddock/docker-compose.vps.yml` up app → `curl /v1/health` → `{"status":"ok","version":"1.0.1"}`
+- [V] **端到端验证**（真实 secret 伪造签名事件 → 线上 webhook，真实 QQ 从未调用过该端点故安全）：从 `app_logs.send_failed.detail.content` 读到 bot 回复正文并逐条核对——① 已注册群身份 → 「您的围场用户名是「Tkein」。」② 未注册 → 「找不到该 QQ 身份对应的车手账号，请核对后重试。」③ 无群身份 → 「无法识别你的群身份…」④⑤ 普通回复已注册/未注册（临时探针规则）→ 分别回用户名与「…请先注册围场通行证。」。临时探针规则、临时 admin_session、临时文件均已清理
+- [V] **用户实机测试确认 ok**（含查名功能），随后按用户指示删除冗余规则
+- [V] 工作区：两仓均 clean，全部已 push；版本号未动（模块仍 `1.0.4 Alpha 1`，paddock 仍 `1.0.1`）
 
 ### 测试/build 输出（真实退出码）
 ```
-./gradlew :app:compileDebugKotlin → BUILD SUCCESSFUL, EXIT=0
-./gradlew :app:lint → BUILD SUCCESSFUL, EXIT=0（0 new）
-./gradlew :app:assembleRelease -x :app:lintVitalAnalyzeRelease -x :app:lintVitalRelease → BUILD SUCCESSFUL, EXIT=0
-adb install -r app-release.apk → Success
+./gradlew :app:lint                      → BUILD SUCCESSFUL, EXIT=0
+./gradlew :app:assembleRelease -x lintVital* → BUILD SUCCESSFUL
+adb install -r app-release.apk           → Success
+cd paddock && cargo check                → EXIT=0（2 warning）
+curl http://127.0.0.1:8080/v1/health     → {"status":"ok","version":"1.0.1"}
 ```
 
 ## 3. 决策与理由
-- **抽共享外壳而非逐项调样式** [V]——根因是 `return@setContent` 的位置挡住了初始化路径（edge-to-edge 未启用），不是配色偏差；照抄概览页结构一次性对齐最省且不易漏。否决：只改颜色/间距（治标，edge-to-edge 与 pageScale 仍缺）
-- **`enableEdgeToEdge` 上移到 return 前** [V]——`DisposableEffect` 是副作用、必须在组合路径上；放在 return 后等于门控页从未执行。否决：在门控页内另起一个 `DisposableEffect`（重复窗口配置，两处易漂移）
-- **门控页 provide 全套 CompositionLocal 而非只 `MiuixTheme`** [V]——`MiuixTheme` 只提供颜色/排版；`LocalDensity`/`LocalEnableBlur` 等自定义 Local 必须显式 provide 才向下传播，"半继承"会丢用户设置
-- **按钮竖排两个全宽** [V]——用户选定方案（选项 A）；主操作（蓝）在上符合 miuix 页面底部的层级感
-- 继承: 信箱通道优于修复进程通道 / 登出写空 token 而非删文件 / 信箱"存在即权威"短路 / AFA 硬性前置 / fetchMe 晚于 verdictDone / 4xx 先存后判(isRetryableStatus 单源) / 零 Hook 判定红线 / 版本号红线——详见 `.handoffs/20260912222253-handoff.md` §3
+- **抽 `action_metas()` 单一事实源 vs 逐处修 bug** [V]——用户选「结构性修复」。根因是动作语义散落 4 文件（Rust preset/builtin_reason、JS 三镜像、admin.rs 校验）互相漂移；治本是让第二份不存在（序列化一份注入前端），而非"记得同步改"。否决：最小修复（下次加动作仍要改多处）
+- **重置密码触发词保持「我需要重置密码」7 字** [V]——用户定案（选项 B）；「查询用户名」5 字随之固定
+- **普通回复身份依赖兜底** [V]——`fail_template` 只在动作内生效，普通回复此前无失败出口；以"模板是否含身份变量"判定，代价小且语义清晰
+- **失败字段按元数据整表清空** [V]——避免切动作残留旧字段被误当"用户已配置"
+- 继承：信箱通道优于修复进程通道 / 登出写空 token 而非删文件 / 信箱"存在即权威"短路 / AFA 硬性前置 / fetchMe 晚于 verdictDone / 4xx 先存后判(isRetryableStatus 单源) / 零 Hook 判定红线 / 版本号红线——详见 `.handoffs/20260912222253-handoff.md` §3
 
 ## 4. 失败的尝试 — 不要再试
-- **MTDataFilesProvider 自授 URI 传配置** → 游戏 stopped state 下 `FileNotFoundException: No content provider`(AOSP 规则:停止状态禁止自动拉起组件) [V]——仅"游戏在后台未划掉"时可用。不要再当"游戏未运行时可写"的通道
-- **`am kill` 杀前台进程** → `am kill` 只杀后台进程，前台时空操作；`kill -9` 被 SELinux 拒(shell uid=2000) [V]——想测"进程死但非 stopped"要先退后台再 `am kill`
-- **给模块加 AFA 后 `appops set` 授权** → shell uid 无 `MANAGE_APP_OPS_MODES`，必须用户在系统设置手动开 [V]
-- **provider + SAF 手动树授权** → 授权可持久化，但 provider 宿主进程不在时 `No content provider`；SAF 需一次用户手势是硬约束 [V]
-- **无线 adb 开飞行模式** → 连接必断（无线调试跑在网络栈上）；断网场景验证必须走 USB [V]。另:每次重连端口都变，`adb connect` 前必须 `adb mdns services` 重发现
-- **本轮：USB 后台抓 logcat 的命令** → 退出码 255 失败 [V]——后台任务在前台命令流里被中断；此类抓取用前台或有明确生命周期的命令
-- 继承(前向有效) [X]: `LocalBringIntoViewSpec` 覆盖治 Pager 焦点跳页 / `evaluateLoginGate` 用 `loginVerdictDone` 初始值 true early return / Remote Preferences `remove()` 清 token / 旧 hook-anyway 路径 / scheduleDraw 治 LTPO / 单变量弹窗挂载 / 磁盘缓存原图字节 / IL2CPP 扫描三坑 / FPSIMD 污染 / 未经同意改版本号 / ConfigProvider 当全模式唯一权威登录通道——详见 `.handoffs/20260912222253-handoff.md` §4
+- **alpine 容器跑本地编译的 Rust 二进制** → `exec /usr/local/bin/paddock-api: no such file or directory`（容器反复 Restarting 255）[V]——本地 `cargo build` 产 glibc 动态链接 ELF，alpine 是 musl，解释器路径不存在。**必须用 debian-slim 作 runtime base**（或本地用 musl target 编译）。本项目 Dockerfile 走 `rust:alpine` 多阶段故无此问题，手搓部署时踩过
+- **psql `-v` 传大 JSON 参数** → `syntax error at or near ":"` [V]——psql 变量插值 `:'rules'` 不被支持。改用 **dollar-quoting（`$json$...$json$`）写整条 SQL 文件 + `-f`**
+- **heredoc 里写 `\047`/转义引号查 sqlite/psql** → shell 转义层层嵌套易错 [V]——直接用双引号包 SSH 命令、单引号写 SQL 字面量
+- 继承 [X]（前向有效）：`LocalBringIntoViewSpec` 覆盖治 Pager 焦点跳页 / `evaluateLoginGate` 用 `loginVerdictDone` 初始值 true early return / Remote Preferences `remove()` 清 token / 旧 hook-anyway 路径 / scheduleDraw 治 LTPO / 单变量弹窗挂载 / 磁盘缓存原图字节 / IL2CPP 扫描三坑 / FPSIMD 污染 / 未经同意改版本号 / ConfigProvider 当全模式唯一权威登录通道
+- 继承 [X]：**MTDataFilesProvider 自授 URI 传配置**（stopped state 下 `No content provider`）/ **`am kill` 杀前台进程**（只杀后台）/ **shell `appops set` 授 AFA**（无权限，须用户手动）/ **无线 adb 开飞行模式**（断连，断网测试走 USB）
+- 详见 `.handoffs/20260912222253-handoff.md` §4
 
 ## 5. 已知坑
-- ⚠️ **本轮的权限门视觉未实机验收** [?]——设备当前应为**已授权**态，门控页不显示；需临时关掉 AFA（设置→应用→Ala Mobile Tool→所有文件访问→不允许）再开模块 App 看观感（期待：毛玻璃 TopAppBar「必要权限」+ 与概览页同款的卡片 + 两个全宽按钮）
-- ⚠️ **配置热更新仍走广播** [?]——冷启动读信箱已解决；运行中靠 `ConfigReceiver` 广播改 native `g_config`。ColorOS 关关联启动 + 游戏不在前台时广播可能丢（此场景由信箱覆盖）。用户明确说"暂时保持现状"
-- ⚠️ **信箱残留探针文件** [?]——`/sdcard/Android/media/<游戏包>/` 下有三个测试残留（`ala_probe_from_game.txt`/`ala_probe_from_module.json`），非代码产物，可手动删，无功能影响
+- ⚠️ **权限门视觉未实机验收** [?](继承)——设备当前**已授权**态，门控页不显示；需临时关 AFA 再开模块 App 看观感
+- ⚠️ **配置热更新仍走广播** [?](继承)——ColorOS 关关联启动 + 游戏不在前台时广播可能丢（信箱覆盖冷启动）。用户明确说"暂时保持现状"
+- ⚠️ **信箱残留探针文件** [?](继承)——`/sdcard/Android/media/<游戏包>/` 下 `ala_probe_*` 残留，可手动删，无功能影响
 - ⚠️ **永久 4xx 先提示后静默丢弃** [?](继承,待用户确认)——`isRetryableStatus` 丢弃判据导致约 30s 的"善意的假话"
-- ⚠️ **上轮弹窗改动未实机视觉验收** [?](继承)——注册弹窗新文案+跳群、忘记密码新正文、未登录页下拉无指示器
-- ⚠️ **对话纪律** [V](继承)——1mid-turn 消息逐条消化 2旧快照不当现在时断言 3装机前先验设备上 APK 版本 4调查日志前先对齐"几次"计数 5修 UI 时序问题先拉触摸时间线
+- ⚠️ **上轮弹窗改动未实机视觉验收** [?](继承)——注册弹窗新文案+跳群、忘记密码新正文、未登录页下拉无指示器；本轮「查询用户名」弹窗用户已实机确认 ok
+- ⚠️ **bot 投递未端到端验证** [?]——本地模拟仅验证到"回复正文正确"，真实群投递需在群里发指令确认（`msg_id` 伪造被 QQ 拒绝是预期）
+- ⚠️ **paddock runtime base 与本地构建工具链耦合** [?]——手搓部署链（本地 build→gz→scp→容器内 build）依赖 debian-slim；若改回仓内 Dockerfile（rust:alpine 多阶段）则无此约束，但需 VPS 有构建能力（当前 OOM 不行）
+- ⚠️ **对话纪律** [V](继承)——1 mid-turn 消息逐条消化 2 旧快照不当现在时断言 3 装机前先验设备上 APK 版本 4 调查日志前先对齐"几次"计数 5 修 UI 时序问题先拉触摸时间线
 - ⚠️ 继承: 导出探活广播链 ROM 限流边界 / lint baseline 15 条失效 / NPatch 管理 binder 时序 / 双仓赛道中文名两份硬编码 / ABSdiag 降频 / 闪退未定案——详见 `.handoffs/20260912222253-handoff.md` §5
 
 ## 6. 下一步（有序）
-1. **（设备侧）验收权限门观感**：临时关闭 AFA → 打开模块 App 确认与主界面观感一致 → 再开回来
-2. **v1.0.4 正式发布待用户定版**（版本号红线）：Release Notes 应含——权限门控页 UI 统一 + 跨包信箱通道 + AFA 权限门 + 配置仲裁 null 源短路修复 + 反向红线修复（登出空 token）+ `drainQueue` 计数 + 配置写入遍历 allServices + 前几轮门控/两级回落/丢圈保护
-3. (可选)清理设备上信箱探针残留文件
-4. (可选,继承)ABSdiag/TCdiag 降频 / 游戏闪退 crash 现场定案
+1. **（可选）群里真实投递测试**：在 CAMDA 群发「查询用户名」确认 bot 回复（本地模拟只验证到正文）
+2. **（设备侧）验收权限门观感**：临时关闭 AFA → 打开模块 App 确认与主界面观感一致 → 再开回来
+3. **v1.0.4 正式发布待用户定版**（版本号红线）：Release Notes 应含——权限门控页 UI 统一 + 跨包信箱通道 + AFA 权限门 + 配置仲裁 null 源短路修复 + 反向红线修复（登出空 token）+ `drainQueue` 计数 + 配置写入遍历 allServices + 围场页「忘记用户名」+ bot 查询用户名动作
+4. （可选,继承）清理设备信箱探针残留文件 / ABSdiag·TCdiag 降频 / 游戏闪退 crash 现场定案
 
 ## 7. 留给用户的开放问题
-- 信箱通道是否需要在游戏侧也加"配置热更新"路径（现走广播，ColorOS 下可能丢）？用户已说"暂时保持现状"
-- 永久 4xx 的处理: 先提示后静默丢弃(现状)vs 无限重试(不丢但可能堵队头)
+- 信箱通道是否给游戏侧也加"配置热更新"路径（现走广播）？用户已说"暂时保持现状"
+- 永久 4xx 的处理：先提示后静默丢弃（现状）vs 无限重试
 - v1.0.4 正式版版本号与发布时机
-- 官版游戏（无 AFA 声明）是否也要加权限门？当前只有模块 App 需要 AFA，游戏侧读自己目录零权限——预期无需改动，但未实机验证官版全链路
+- 官版游戏（无 AFA 声明）是否也要加权限门？预期无需改动，但未实机验证官版全链路
