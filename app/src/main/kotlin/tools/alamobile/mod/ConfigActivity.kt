@@ -11,8 +11,12 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -23,7 +27,9 @@ import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import tools.alamobile.mod.ui.AboutScreen
 import tools.alamobile.mod.ui.MainScreen
+import tools.alamobile.mod.ui.PermissionGateScreen
 import tools.alamobile.mod.ui.UiMode
+import tools.alamobile.mod.util.AllFilesPermission
 import tools.alamobile.mod.ui.navigation3.LocalNavigator
 import tools.alamobile.mod.ui.navigation3.Route
 import tools.alamobile.mod.ui.navigation3.rememberNavigator
@@ -64,6 +70,35 @@ class ConfigActivity : ComponentActivity() {
             val viewModel = viewModel<MainActivityViewModel>()
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
             val selectedMainPage by viewModel.selectedMainPage.collectAsStateWithLifecycle()
+
+            // 「所有文件访问」必要权限门（2026-09-12）：未授权时满屏不可跳过，
+            // 用户去设置页开完开关**返回模块**自动进主界面。resumeKey 在每次
+            // ON_RESUME 自增，作为下面 remember 的 key 触发重查（LifecycleResumeEffect
+            // 在 Compose 里对同一 composable 只在首次进入时跑，无法感知外部设置页归来，
+            // 故用 Activity 生命周期回调驱动 key）。
+            var allFilesGranted by remember { mutableStateOf(AllFilesPermission.isGranted()) }
+            var resumeTick by remember { mutableIntStateOf(0) }
+            DisposableEffect(Unit) {
+                val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                    if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) resumeTick++
+                }
+                val owner = this@ConfigActivity
+                owner.lifecycle.addObserver(observer)
+                onDispose { owner.lifecycle.removeObserver(observer) }
+            }
+            LaunchedEffect(resumeTick) {
+                allFilesGranted = AllFilesPermission.isGranted()
+            }
+
+            if (!allFilesGranted) {
+                MiuixTheme(colors = if (
+                    when (uiState.colorMode) { 1 -> false; 2 -> true; else -> isSystemInDarkTheme() }
+                ) darkColorScheme() else lightColorScheme()) {
+                    PermissionGateScreen()
+                }
+                return@setContent
+            }
+
             val darkMode = when (uiState.colorMode) {
                 1 -> false
                 2 -> true
