@@ -44,6 +44,8 @@ class PaddockViewModel(application: android.app.Application) : AndroidViewModel(
         val resetPass: String = "",
         // 忘记用户名弹窗（纯说明，无表单：群里发指令，bot 按群身份回用户名）
         val showQueryName: Boolean = false,
+        // 围场指南弹窗：手动查看 + 首次自动弹出（已登录主页未读过时）共用同一状态
+        val showGuide: Boolean = false,
     )
 
     private val _uiState = MutableStateFlow(UiState(loggedIn = PaddockClient.hasToken()))
@@ -202,6 +204,8 @@ class PaddockViewModel(application: android.app.Application) : AndroidViewModel(
     fun setShowReset(v: Boolean) = _uiState.update { it.copy(showReset = v) }
 
     fun setShowQueryName(v: Boolean) = _uiState.update { it.copy(showQueryName = v) }
+
+    fun setShowGuide(v: Boolean) = _uiState.update { it.copy(showGuide = v) }
 
     fun submitReset() {
         val s = _uiState.value

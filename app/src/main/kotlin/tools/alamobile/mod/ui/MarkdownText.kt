@@ -1,5 +1,6 @@
 package tools.alamobile.mod.ui
 
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -39,15 +40,27 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *
  * @param maxHeightFraction 内容最大高度占设备当前方向屏幕高度的比例。
  *   内容不超过此高度时全部展开，超过时变为可滚动。默认 0.6（60%）。
+ * @param textSizeSp 正文字号（sp）。默认沿用 MiuixTheme.body2；调用方可传显式值
+ *   （如需要与 EULA 条款正文一致的 14sp 观感）。
+ * @param scrollState 外部提供的滚动状态。传入后调用方可用 `scrollState.value >=
+ *   maxValue` 检测"是否已读到底"（围场指南弹窗的阅读门控用）；不传则内部自建。
  */
 @Composable
 fun MarkdownText(
     markdown: String,
     modifier: Modifier = Modifier,
-    maxHeightFraction: Float = 0.6f
+    maxHeightFraction: Float = 0.6f,
+    textSizeSp: Float? = null,
+    scrollState: ScrollState? = null,
 ) {
     val blocks = remember(markdown) { parseMarkdown(markdown) }
-    val scrollState = rememberScrollState()
+    val internalScrollState = rememberScrollState()
+    val state = scrollState ?: internalScrollState
+    // 显式字号优先；未指定时回落到主题 body2（保持 UpdateDialog 既有观感）。
+    val bodyFontSize = textSizeSp?.sp ?: MiuixTheme.textStyles.body2.fontSize
+    // 正文行高 1.5×：默认行距下多行中文挤成一坨，标题/段落/列表的层级不可读。
+    // 行内换行只靠行高区分（块间距区分块，行高区分行），两者缺一都会"糊"。
+    val bodyLineHeight = bodyFontSize * 1.5f
     val screenHeight = LocalWindowInfo.current.containerDpSize.height
     val maxContentHeight = screenHeight * maxHeightFraction
 
@@ -55,9 +68,23 @@ fun MarkdownText(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(max = maxContentHeight)
-            .verticalScroll(scrollState)
+            .verticalScroll(state)
     ) {
         blocks.forEachIndexed { index, block ->
+            // 块间距按类型分级——统一 6dp 时"标题像是正文的一部分"。规则：
+            // 标题上方大留白（24dp）划出章节边界；标题下方小留白（8dp）紧贴正文；
+            // 列表项之间只留 4dp（同一组）；列表与上一段之间 8dp；其余块 12dp。
+            val prev = blocks.getOrNull(index - 1)
+            val topSpace = when {
+                index == 0 -> 0.dp
+                block is MarkdownBlock.Heading -> 24.dp
+                prev is MarkdownBlock.Heading -> 8.dp
+                block is MarkdownBlock.ListItem && prev is MarkdownBlock.ListItem -> 4.dp
+                block is MarkdownBlock.ListItem -> 8.dp
+                block is MarkdownBlock.Divider -> 16.dp
+                else -> 12.dp
+            }
+            if (topSpace > 0.dp) Spacer(modifier = Modifier.height(topSpace))
             when (block) {
                 is MarkdownBlock.Heading -> {
                     Text(
@@ -70,7 +97,8 @@ fun MarkdownText(
                 is MarkdownBlock.Paragraph -> {
                     Text(
                         text = block.text,
-                        fontSize = MiuixTheme.textStyles.body2.fontSize,
+                        fontSize = bodyFontSize,
+                        lineHeight = bodyLineHeight,
                         color = MiuixTheme.colorScheme.onSurface
                     )
                 }
@@ -78,7 +106,8 @@ fun MarkdownText(
                     val prefix = if (block.ordered) "${block.index}. " else "• "
                     Text(
                         text = AnnotatedString(prefix) + block.text,
-                        fontSize = MiuixTheme.textStyles.body2.fontSize,
+                        fontSize = bodyFontSize,
+                        lineHeight = bodyLineHeight,
                         color = MiuixTheme.colorScheme.onSurface
                     )
                 }
@@ -93,9 +122,6 @@ fun MarkdownText(
                 is MarkdownBlock.Divider -> {
                     Spacer(modifier = Modifier.height(8.dp))
                 }
-            }
-            if (index < blocks.lastIndex) {
-                Spacer(modifier = Modifier.height(6.dp))
             }
         }
     }
@@ -153,7 +179,7 @@ private fun parseMarkdown(markdown: String): List<MarkdownBlock> {
             val size = when (level) {
                 1 -> 20
                 2 -> 17
-                else -> 15
+                else -> 16
             }
             blocks.add(MarkdownBlock.Heading(
                 text = parseInline(content),

@@ -3,9 +3,11 @@ package tools.alamobile.mod.ui.screen.paddock
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import tools.alamobile.mod.PaddockGuide
 import tools.alamobile.mod.ui.navigation3.LocalNavigator
 import tools.alamobile.mod.ui.navigation3.Route
 import tools.alamobile.mod.ui.viewmodel.PaddockViewModel
@@ -39,6 +41,23 @@ fun PaddockPager(
         if (uiState.loggedIn && uiState.needsAvatar) {
             viewModel.markAvatarDone()
             navigator.push(Route.Avatar)
+        }
+    }
+
+    // 围场指南自动弹出（用户要求）：仅「已登录 + 落在围场主页（root，非二级页）+
+    // 未读过当前版本」时。两个必须的排除：
+    //   ① 注册后首次登录会先跳头像上传页（backStack 变深 → navAtRoot=false）→ 不弹；
+    //      从头像页返回主页（navAtRoot 复为 true）才弹。
+    //   ② needsAvatar 在头像跳转前仍为 true → 直接跳过，杜绝"跳到头像页那一帧
+    //      自动弹指南"的时序竞争（guide 效果与 Avatar 跳转效果同批重组，靠此值
+    //      稳定排除）。needsAvatar 清 false 后本效果重启，此时 backStack 已变深，
+    //      仍被 navAtRoot 挡住；等返回主页才真正弹。
+    val context = LocalContext.current
+    LaunchedEffect(isCurrentPage, navAtRoot, uiState.loggedIn, uiState.needsAvatar) {
+        if (isCurrentPage && navAtRoot && uiState.loggedIn && !uiState.needsAvatar &&
+            !PaddockGuide.isSeen(context)
+        ) {
+            viewModel.setShowGuide(true)
         }
     }
 

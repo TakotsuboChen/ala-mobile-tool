@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.Leaderboard
 import androidx.compose.material.icons.rounded.Logout
+import androidx.compose.material.icons.rounded.MenuBook
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.Visibility
@@ -55,6 +56,8 @@ import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import tools.alamobile.mod.PaddockClient
+import tools.alamobile.mod.PaddockGuide
+import tools.alamobile.mod.ui.PaddockGuideDialog
 import tools.alamobile.mod.ui.navigation3.LocalNavigator
 import tools.alamobile.mod.ui.navigation3.Route
 import tools.alamobile.mod.ui.theme.LocalEnableBlur
@@ -182,6 +185,25 @@ fun PaddockPagerMiuix(
             onDismissFinished = { actions.dismissRegDialog() },
         )
     }
+
+    // 围场指南弹窗：常驻组合树（mounted+show 双变量保退出动画）。
+    // 手动点卡片 / 已登录主页首次自动弹出，共用 uiState.showGuide。
+    // 锁死：弹窗内点外面无操作，必须点「我已了解」（正文读到底才可点）。
+    var guideDialogMounted by remember { mutableStateOf(false) }
+    if (uiState.showGuide || guideDialogMounted) {
+        guideDialogMounted = true
+        PaddockGuideDialog(
+            show = uiState.showGuide,
+            markdown = PaddockGuide.GUIDE_MARKDOWN,
+            // 点「我已了解」→ 落「已读」标记（本次会话起不再自动弹，版本更新会重弹）；
+            // 关弹窗只翻 show=false 触发退出动画，「已读」判定与"关没关"无关。
+            onAccept = {
+                PaddockGuide.markSeen(context)
+                actions.setShowGuide(false)
+            },
+            onDismissFinished = { guideDialogMounted = false },
+        )
+    }
 }
 
 @Composable
@@ -298,6 +320,18 @@ private fun PaddockContent(
                     Icon(Icons.Rounded.SportsEsports, modifier = Modifier.padding(end = 6.dp), contentDescription = null, tint = colorScheme.onBackground)
                 },
                 onClick = { actions.toastDev() },
+            )
+        }
+
+        // 围场指南（独立卡）：随时点开，弹窗锁死需读完点「我已了解」
+        Card(modifier = Modifier.fillMaxWidth()) {
+            ArrowPreference(
+                title = "围场指南",
+                summary = "了解围场的运作机制",
+                startAction = {
+                    Icon(Icons.Rounded.MenuBook, modifier = Modifier.padding(end = 6.dp), contentDescription = null, tint = colorScheme.onBackground)
+                },
+                onClick = { actions.setShowGuide(true) },
             )
         }
 
