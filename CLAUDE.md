@@ -199,6 +199,7 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - `app/src/main/kotlin/tools/alamobile/mod/util/AllFilesPermission.kt` — AFA（MANAGE_EXTERNAL_STORAGE）查询与设置页跳转。
 - `app/src/main/kotlin/tools/alamobile/mod/ui/PermissionGateScreen.kt` — 未授 AFA 时的满屏不可跳过「必要权限」门（与主页面共用同一套 Scaffold/BlurredBar/LazyColumn 外壳）。
 - `docs/CROSS_PROCESS_CHANNELS.md` — 跨进程数据通道调研结论（NPatch store 架构 / ColorOS 管控 / 跨包文件裁决 / 现有 11 条通道审计 / 已确认 bug 清单）。**改任何跨进程通道前先读它**。
+- `docs/NPATCH_CACHE_CRASH_NOTES.md` — 「游戏启动即崩、关作用域也崩、过一阵自愈」的用户故障调查记录：根因 = **NPatch 的 origin-apk 缓存无完整性校验/无 fsync/无锁**（`OriginApkHelper.prepareOriginApk:45` 仅 `Files.exists`），坏缓存常驻 → 每次启动以坏文件建 `Resources` → AOSP 静默吞成 null → `LoadedApk.getAssets()` NPE → 系统包成「Unable to instantiate application」。**与模块/PairIP/作用域/重启均无关**（崩溃在模块加载之前）。用户处置 = 清 NPatch 数据重注入 / 卸载重装；含给用户话术 + 给 NPatch 上游的 issue 草稿。**用户报同类闪退先读它**。
 - `app/src/main/kotlin/tools/alamobile/mod/MusicPlayer.kt` — main menu music replacement player.
 - `app/src/main/kotlin/tools/alamobile/mod/IntroSoundPlayer.kt` — V10 engine sound player.
 - `app/src/main/resources/META-INF/xposed/module.prop` — libxposed module metadata.
