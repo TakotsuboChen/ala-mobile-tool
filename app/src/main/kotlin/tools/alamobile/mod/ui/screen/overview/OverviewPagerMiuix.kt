@@ -167,30 +167,37 @@ fun OverviewPagerMiuix(
         officialStatus = official
         coexistenceStatus = coexistence
 
-        // 等 EULA 同意后再检查更新
-        if (eulaAccepted) {
-            isCheckingUpdate = true
-            val result = UpdateChecker.checkLatest(UpdatePreferences.getChannel(context))
-            isCheckingUpdate = false
-            if (result is UpdateCheckResult.HasUpdate) {
-                val info = result.info
-                // 记录已知最新 versionCode：游戏进程 ForceUpdateGate 秒判缓存的写入源
-                info.latestVersionCode?.let {
-                    tools.alamobile.mod.update.ForceUpdateGate.recordLatestVersionCode(context, it)
-                }
-                if (info.latestVersionCode != null &&
-                    info.latestVersionCode > BuildConfig.VERSION_CODE
-                ) {
-                    // 强制升级：不再检查跳过标记，有新版本必弹
-                    updateInfo = info
-                    showUpdateDialog = true
-                    updateDialogVisible = true
-                    LoginGateCoordinator.updateBlocking = true
-                }
-            }
-            // 更新检查已出结果（无论有无更新）→ 汇报登录门控协调器。
-            LoginGateCoordinator.updateCheckDone = true
-        }
+        // 更新检查不在此处跑：EULA 首次未同意时本 LaunchedEffect 跑完即死，若把
+        // 检查内联在这里，全新安装路径永远不会触发更新检查（实测 2026-09-13：
+        // stored=-1 → 同意后无任何 LaunchedEffect 重启 → updateCheckDone 恒 false
+        // → 登录门控弹窗永不出现）。改为独立的 LaunchedEffect(eulaAccepted)，与
+        // 激活弹窗（下方 :461）同范式，同意 EULA 后补跑。
+    }
+
+    // 启动更新检查（2026-09-13 重构）：EULA 已同意后跑一次，出结果汇报登录门控。
+    // 触发条件与「启动时」语义对齐——冷启动已同意时首帧即触发，未同意时等用户同意。
+    LaunchedEffect(eulaAccepted) {
+        if (!eulaAccepted) return@LaunchedEffect
+        // 检查期间挡住登录门控（更新优先于登录），出结果后解锁——与「用户手动检查
+        // 到更新」的既有 updateBlocking 语义一致（见 LoginGateCoordinator 注释）。
+        LoginGateCoordinator.updateBlocking = true
+        runStartupUpdateCheck(
+            context = context,
+            setChecking = { isCheckingUpdate = it },
+            onUpdate = { info ->
+                updateInfo = info
+                showUpdateDialog = true
+                updateDialogVisible = true
+                // updateBlocking 已为 true；更新弹窗 onRequestClose 会翻 false。
+            },
+            onDone = {
+                LoginGateCoordinator.updateCheckDone = true
+                // 检查完成：只要更新弹窗没在展示（onUpdate 未触发 → 无新版本），
+                // 就解除更新阻塞，放行登录门控。有更新时保持 true，由 UpdateDialog
+                // 的 onRequestClose 翻 false。
+                if (!showUpdateDialog) LoginGateCoordinator.updateBlocking = false
+            },
+        )
     }
 
     Scaffold(
@@ -382,6 +389,65 @@ fun OverviewPagerMiuix(
     }
 }
 
+/**
+ * 启动自动更新检查的一段共享逻辑（2026-09-13 引入，修复「全新安装后登录弹窗不弹」）：
+ * 检查当前渠道的更新，出结果后回调 [onDone] 一次，供登录门控置 updateCheckDone。
+ *
+ * `UpdateChecker.checkLatest` 内部已并发请求官方 API 与镜像站（gh-proxy），
+ * 取先到者，总超时 15s——多镜像源都在这里覆盖，无需在本函数再加通道回落。
+ *
+ * @param setChecking 更新中标志回调（概览页的「检查更新」按钮态）。
+ * @param onUpdate 命中「当前渠道有新版本」时回调（置弹窗状态）。
+ * @param onDone 检查彻底出结果时回调一次（无论成功/失败/超时）——登录门控的
+ *   updateCheckDone 汇报点，**必须保证恰好调用一次**。
+ */
+private suspend fun runStartupUpdateCheck(
+    context: android.content.Context,
+    setChecking: (Boolean) -> Unit,
+    onUpdate: (UpdateInfo) -> Unit,
+    onDone: () -> Unit,
+) {
+    setChecking(true)
+    val channel = UpdatePreferences.getChannel(context)
+    val t0 = android.os.SystemClock.elapsedRealtime()
+    val result = UpdateChecker.checkLatest(channel)
+    val elapsed = android.os.SystemClock.elapsedRealtime() - t0
+    // ⚠️ 禁止用 result::class.simpleName——release 构建 R8 会把 sealed 子类名混淆成
+    // "qm2" 这类乱码（2026-09-13 实测），诊断日志必须用稳定字面量。
+    tools.alamobile.mod.util.Logger.i(
+        "UpdateCheck", "startup check channel=$channel → ${resultLabel(result)} in ${elapsed}ms"
+    )
+    setChecking(false)
+
+    when (result) {
+        is UpdateCheckResult.HasUpdate -> {
+            val info = result.info
+            // 记录已知最新 versionCode：游戏进程 ForceUpdateGate 秒判缓存的写入源
+            info.latestVersionCode?.let {
+                tools.alamobile.mod.update.ForceUpdateGate.recordLatestVersionCode(context, it)
+            }
+            if (info.latestVersionCode != null && info.latestVersionCode > BuildConfig.VERSION_CODE) {
+                // 强制升级：不再检查跳过标记，有新版本必弹
+                onUpdate(info)
+            }
+        }
+        is UpdateCheckResult.NoUpdate -> tools.alamobile.mod.util.Logger.i(
+            "UpdateCheck", "startup check: no release on channel=$channel"
+        )
+        is UpdateCheckResult.Failed -> tools.alamobile.mod.util.Logger.w(
+            "UpdateCheck", "startup check failed (network), fail-open"
+        )
+    }
+    onDone()
+}
+
+/** 更新检查结果的稳定字面量（R8 会混淆 sealed 子类名，见调用点注释）。 */
+private fun resultLabel(r: UpdateCheckResult): String = when (r) {
+    is UpdateCheckResult.HasUpdate -> "HasUpdate"
+    is UpdateCheckResult.NoUpdate -> "NoUpdate"
+    is UpdateCheckResult.Failed -> "Failed"
+}
+
 @Composable
 private fun ActivationCard(eulaAccepted: Boolean) {
     val context = LocalContext.current
@@ -552,6 +618,7 @@ private fun ActivationCard(eulaAccepted: Boolean) {
                     // 本次会话状态固定为 NONROOT，下次冷启动检测到 LSPosed 再覆盖。
                     status = LsposedStatus.evaluate(context)
                 }
+                // 确认（=用户已处理）：立即解除登录门控阻塞，不必等退出动画。
                 dialogVisible = false
                 LoginGateCoordinator.activationPending = false
             },

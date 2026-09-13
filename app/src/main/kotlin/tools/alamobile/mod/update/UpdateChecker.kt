@@ -1,8 +1,10 @@
 package tools.alamobile.mod.update
 
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.SerialName
@@ -79,65 +81,118 @@ object UpdateChecker {
 
     private const val REPO = "TakotsuboChen/ala-mobile-tool"
 
-    // GitHub 官方 API 和镜像站，同时请求取先到的
-    // 稳定版通道用 /releases/latest（只返回非 pre-release）
-    // 预览版通道用 /releases?per_page=1（含 pre-release）
-    // 注意：kkgithub.com 的 /api/v3/ 路径已不可用（404），
-    // 改用 gh-proxy.com 代理 api.github.com。
-    private fun apiUrl(channel: Int) = if (channel == UpdatePreferences.CHANNEL_STABLE) {
-        "https://api.github.com/repos/$REPO/releases/latest"
+    /**
+     * GitHub API 路径（稳定版通道 /latest 只返回非 pre-release；预览版通道
+     * ?per_page=1 含 pre-release）。镜像站把完整 URL 作为路径段转发。
+     */
+    private fun apiPath(channel: Int) = if (channel == UpdatePreferences.CHANNEL_STABLE) {
+        "repos/$REPO/releases/latest"
     } else {
-        "https://api.github.com/repos/$REPO/releases?per_page=1"
+        "repos/$REPO/releases?per_page=1"
     }
-    private fun mirrorUrl(channel: Int) = if (channel == UpdatePreferences.CHANNEL_STABLE) {
-        "https://gh-proxy.com/https://api.github.com/repos/$REPO/releases/latest"
-    } else {
-        "https://gh-proxy.com/https://api.github.com/repos/$REPO/releases?per_page=1"
+
+    /**
+     * 全部候选源（2026-09-13 实测于目标设备网络，见 docs/UPDATE_CHECK_MIRRORS.md）：
+     * 官方 API + 各镜像站。**全部并发请求，首个成功响应胜出，其余立即丢弃**
+     * ——单源最快则总耗时等于该源耗时（实测官方 0.7~1.0s、gh-proxy 0.71s）。
+     *
+     * ⚠️ 只保留实测返回 200 的源：ghproxy.net/zwy.one/nxnow.top 返回 403
+     * （releases API 被镜像站拒绝）、ghfast.top/dgithub.xyz 超时、moeyy/
+     * gitmirror/99988866 等域名已失效——它们只会白占并发名额。
+     */
+    private val sources = listOf(
+        "https://api.github.com",
+        "https://gh.catmak.name/https://api.github.com",
+        "https://ghproxy.monkeyray.net/https://api.github.com",
+        "https://gh-proxy.com/https://api.github.com",
+    )
+
+    private fun candidateUrls(channel: Int): List<String> {
+        val path = apiPath(channel)
+        return sources.map { "$it/$path" }
     }
 
     private val json = Json { ignoreUnknownKeys = true }
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
+        // 竞速场景下败者协程的阻塞调用不会被取消（OkHttp execute 不可中断），
+        // 只能等超时自然结束——压短超时避免败者线程长时间占着 Dispatchers.IO。
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(12, TimeUnit.SECONDS)
         // 显式走系统代理：OkHttp 默认不配 ProxySelector 时，在 Clash/Surge TUN
         // 模式下可能绕过系统代理，导致"挂全局梯子也下不动"。
         .proxySelector(ProxySelector.getDefault())
         .build()
 
     /**
-     * 检查最新 Release，GitHub 官方和镜像站竞速。
+     * 检查最新 Release：所有候选源并发竞速，**首个成功响应立即胜出，其余丢弃**。
      *
-     * 策略：同时请求两个源，等两个都完成（总超时 15s），取第一个成功响应
-     * （有 Release 或 404 都算成功响应）。只有两个源都网络失败/超时才返回 Failed。
+     * 2026-09-13 重写（双源版仍有 1.3~2.8s 延迟）：
+     * - 旧实现用 `withTimeoutOrNull { off.await() } + { mir.await() }` **顺序**等待
+     *   两个源，慢源决定总时长（注释写着 race 但代码不是）。
+     * - 中间版用 Channel 取首个成功响应，但只有官方 + gh-proxy 两源，且官方
+     *   在部分网络（如带 HK 代理的 PC 测试环境）慢 → 仍不够快。
+     * - 本版：**4 源并发**（官方 + 3 个实测稳定返回 OK 的镜像），竞速协程跑在
+     *   **独立 CoroutineScope**（不是 coroutineScope——后者 join 全部子协程，
+     *   实测导致总耗时恒等于最慢源）。首个「成功响应」（拿到 Release 或明确
+     *   404）胜出，`raceScope.cancel()` 立即丢弃其余，**总耗时 = 最快源耗时**。
+     * - 15s 是总兜底（所有源都卡住时），正常路径远小于它。
      *
      * @param channel 更新通道：0=稳定版（仅 Release），1=预览版（含 Pre-release）。
      * @return [UpdateCheckResult]：有更新 / 无更新 / 检查失败。
      */
     suspend fun checkLatest(channel: Int = UpdatePreferences.CHANNEL_STABLE): UpdateCheckResult = withContext(Dispatchers.IO) {
-        coroutineScope {
-            val isList = channel != UpdatePreferences.CHANNEL_STABLE
+        val isList = channel != UpdatePreferences.CHANNEL_STABLE
+        val urls = candidateUrls(channel)
+        // ⚠️ 关键：请求 launch 到独立 scope，**不用 coroutineScope**——后者会 join
+        //    所有子协程才返回，导致总耗时 = 最慢源（实测 5 轮全部如此：总耗时
+        //    永远等于最慢源的耗时，非最快）。独立 scope 才能「首个胜出立即返回」。
+        val raceScope = CoroutineScope(Dispatchers.IO)
+        val results = Channel<Pair<Boolean, GitHubRelease?>>(urls.size)
+        urls.forEach { url ->
+            raceScope.launch {
+                val t = android.os.SystemClock.elapsedRealtime()
+                val r = fetchRelease(url, isList)
+                val el = android.os.SystemClock.elapsedRealtime() - t
+                val host = url.substringAfter("://").substringBefore('/')
+                val kind = when {
+                    r.second != null -> "OK"
+                    r.first -> "404"
+                    else -> "FAIL"
+                }
+                tools.alamobile.mod.util.Logger.i("UpdateCheck", "  src $host → $kind in ${el}ms")
+                results.send(r)
+            }
+        }
 
-            val official = async { fetchRelease(apiUrl(channel), isList) }
-            val mirror = async { fetchRelease(mirrorUrl(channel), isList) }
+        var winner: Pair<Boolean, GitHubRelease?>? = null
+        try {
+            withTimeoutOrNull(15_000) {
+                repeat(urls.size) {
+                    val r = results.receive()
+                    // 成功响应 = 拿到 Release (second!=null) 或明确 404 (first=true)
+                    if (r.first || r.second != null) {
+                        winner = r
+                        return@withTimeoutOrNull
+                    }
+                    // 网络失败：继续等下一个源
+                }
+            }
+        } finally {
+            // 拿到赢家（或超时）后立即取消整个竞速 scope：败者协程不再被等待。
+            // OkHttp execute() 不可中断，败者线程会在自身超时后自然消亡，但不阻塞返回。
+            raceScope.cancel()
+            results.close()
+        }
 
-            // 各自独立 await，超时 15s；超时的那个返回 (false, null)
-            val offResult = withTimeoutOrNull(15_000) { official.await() } ?: (false to null)
-            val mirResult = withTimeoutOrNull(15_000) { mirror.await() } ?: (false to null)
-
-            // 优先取有 Release 的结果，其次取 404（无更新），最后才算失败
-            val withRelease = listOf(offResult, mirResult).firstOrNull { it.second != null }
-            if (withRelease != null) {
-                val info = parseRelease(withRelease.second!!)
+        when {
+            winner?.second != null -> {
+                val info = parseRelease(winner!!.second!!)
                 if (info != null) UpdateCheckResult.HasUpdate(info)
                 else UpdateCheckResult.Failed
-            } else if (offResult.first || mirResult.first) {
-                // 至少一个 404 = 无符合通道的 Release
-                UpdateCheckResult.NoUpdate
-            } else {
-                // 两个都网络失败
-                UpdateCheckResult.Failed
             }
+            winner?.first == true -> UpdateCheckResult.NoUpdate
+            else -> UpdateCheckResult.Failed  // 所有源都网络失败/超时
         }
     }
 

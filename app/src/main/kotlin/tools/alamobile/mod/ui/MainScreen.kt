@@ -123,6 +123,10 @@ fun MainScreen(
     // 关不掉，onDismissFinished 不触发，两个按钮看起来都"没反应"（实测踩坑）。
     LaunchedEffect(gatePrecondition, gateLocked) {
         if (gatePrecondition && !gateLocked && !gateDialogMounted) {
+            tools.alamobile.mod.util.Logger.i(
+                "MainScreen",
+                "login gate dialog MOUNTED (precondition satisfied)"
+            )
             gateDialogMounted = true
             gateDialogShow = true
         }
