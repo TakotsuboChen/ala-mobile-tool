@@ -67,8 +67,14 @@ fun PaddockGuideDialog(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                // weight(1f, fill = false)：正文是"可让渡空间"的一方——卡片总高超过
+                // DialogContentLayout 的 2/3 屏硬上限时，让正文先收缩并滚动，而不是把
+                // 按钮压扁。无此项时 Column 会把所有"无 weight 的子项"按比例压缩，
+                // 按钮从 40dp 最小高被挤成十几 dp 的窄条（平板实机实测 14.5dp）。
+                // fill=false 保证正文短时弹窗仍按内容收拢，不撑满 2/3 屏。
                 MarkdownText(
                     markdown = markdown,
+                    modifier = Modifier.weight(1f, fill = false),
                     maxHeightFraction = 0.55f,
                     textSizeSp = 14f,
                     scrollState = scrollState,
