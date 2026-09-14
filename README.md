@@ -28,7 +28,7 @@
 
 ### Overlay 控件
 
-图标按钮可拖动，单击切换 Overlay 控件显示/隐藏，长按模块图标按钮进入编辑模式，拖拽移动 + 四角缩放各 Overlay 控件大小：
+图标按钮可拖动，单击切换 Overlay 控件显示/隐藏，长按模块图标按钮进入编辑模式（屏幕渐暗 + 居中操作提示），拖拽移动 + 四角圆点缩放各 Overlay 控件大小，长按 3 秒重置：
 
 <img src="docs/images/overlay-edit.gif" width="360" alt="Overlay 编辑演示">
 
@@ -72,9 +72,12 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 - 通过 Native Hook 静音游戏开场 `introSound`（真 `AudioSource.set_volume`），独立于主菜单音乐替换
 
 #### 布局编辑
-- 长按工具按钮进入编辑模式
-- 拖拽移动 + 四角缩放各 Overlay 位置
-- 长按编辑层重置到出厂默认位置
+- 长按工具按钮进入编辑模式（编辑中单击按钮无效，退出编辑同样靠长按）
+- 进入时屏幕 0.3 秒渐暗至 75%，屏幕中心显示三行操作提示；退出时渐亮恢复
+- 拖拽移动 + 四角圆点缩放各 Overlay 位置
+- 编辑中在控件中心竖排标注「油门」「刹车」，便于分辨（仅双踏板模式）
+- 长按 3 秒重置到出厂默认位置
+- 退出编辑后控件显示/隐藏状态还原到进入前的样子
 - 单踏板 / 双踏板模式的位置分别持久化，互不干扰
 
 #### Overlay 视觉属性
@@ -323,7 +326,9 @@ Ala Mobile Tool (LSPosed 模块 APK)
 ├── ToolButtonView          # 工具按钮（Canvas View）
 ├── TcAbsIndicatorView      # TC/ABS 介入指示灯（Canvas View）
 ├── OverlayManager          # WindowManager 覆盖层管理
-├── OverlayEditView         # 编辑模式拖拽/缩放层
+├── OverlayEditView         # 编辑模式拖拽/缩放层（铺满整屏，矩形为内部状态）
+├── EditHintView            # 编辑模式屏幕居中三行操作提示
+├── EditLayerFactory        # 编辑层创建（铺满整屏 + 初始可见/透明态）
 ├── MusicPlayer             # 主菜单音乐播放器（MediaPlayer + 轮询）
 ├── IntroSoundPlayer        # V10 引擎声浪播放器（MediaPlayer + 轮询）
 ├── ConfigProvider          # 跨进程配置 IPC（ContentProvider）
