@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -408,6 +409,9 @@ private fun BoardRow(
             fontSize = if (rank <= 3) 22.5.sp else 15.sp,
             color = colorScheme.onBackground.copy(alpha = 0.6f),
             textAlign = TextAlign.Center,
+            // 数字名次用等宽，让 10 与 11 这类两位数在 32dp 槽位内宽度一致；
+            // 前三名是 emoji，若也切等宽字体会回落到单色/异形字形，故只对数字生效。
+            fontFamily = if (rank <= 3) null else FontFamily.Monospace,
             modifier = Modifier.width(32.dp),
         )
         AvatarOrPlaceholder(avatarUrl)
@@ -419,6 +423,12 @@ private fun BoardRow(
         )
         Text(
             text = value,
+            // 分数/圈速右对齐列：等宽数字（tabular figures 的字体级替代方案）。
+            // 系统 sans（Roboto/OPPO Sans/Flyme Sans）默认比例数字——"1" 窄、"8" 宽，
+            // 于是 5 位数分（10000 分）与 4 位数分（1234 分）右对齐时数字宽度参差，
+            // 整列右缘看着不齐。等宽字体令每个数字字形同宽，右对齐即得到"小数点对齐"
+            // 的整列观感（圈速 1:02.345 与 1:22.345 的秒数位严格对齐）。
+            fontFamily = FontFamily.Monospace,
             fontSize = 15.sp,
             color = colorScheme.onBackground,
         )
