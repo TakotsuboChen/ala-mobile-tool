@@ -229,7 +229,9 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
             } catch (_: Throwable) {
                 // 配置读失败不阻塞 service binding
             }
-            // LogReceiver 通过 manifest 静态注册，系统在广播到达时自动拉起模块进程。
+            // LogReceiver 日志推送链已于 2026-09-14 删除：游戏进程日志改写到
+            // /sdcard/Android/media/<游戏包>/，模块 App 持 AFA 跨包直读导出，
+            // 不再需要广播推送（游戏闪退时也能导出）。
             doServiceBinding()
         }
     }

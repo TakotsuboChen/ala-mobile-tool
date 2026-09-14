@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.add
@@ -72,7 +71,6 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
-import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.OverlaySpinnerPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -104,7 +102,7 @@ fun SettingsPagerMiuix(
 
     // 「用户协议」点击后清除同意状态并当场弹协议。
     var showEulaReconfirm by remember { mutableStateOf(false) }
-    // OverlayDialog show 驱动退出动画：关闭时先把 eulaDialogVisible 翻 false 触发动画，
+    // EulaDialog 的 show 驱动退出动画：关闭时先把 eulaDialogVisible 翻 false 触发动画，
     // onDismissFinished 回调里再执行真正的状态变更。
     var eulaDialogVisible by remember { mutableStateOf(true) }
     var pendingEulaAction by remember { mutableStateOf<() -> Unit>({ }) }
@@ -114,25 +112,16 @@ fun SettingsPagerMiuix(
         mutableStateOf(UpdatePreferences.getChannel(context))
     }
 
-    // 「确保游戏在运行中」确认弹窗（2026-09-08 V5）：点导出必弹（纯文字引导，
-    // 无权限探活——UsageStats/广播往返方案均被实机证伪）。
-    // 两变量拆分（CLAUDE.md 弹窗契约）：mounted 控制挂载，dialogShow 驱动
-    // show 参数——关闭时先翻 dialogShow=false 播退出动画，onDismissFinished
-    // 里才翻 mounted=false 摘除。单变量混用两职责会跳过退出动画（用户强调
-    // 过多次：弹窗必须有动画）。
-    // 点"继续导出" → 关弹窗 → 转圈遮罩（屏蔽操作）→ awaitFreshLogs 等 3s：
-    // 游戏推来新日志（缓存 mtime 更新）→ 继续导出+分享；3s 没等到 → 收圈 +
-    // Toast「请先启动游戏！」，**不导出**（禁止回落旧缓存，2026-09-08 定案）。
-    var gameDialogMounted by remember { mutableStateOf(false) }
-    var gameDialogShow by remember { mutableStateOf(false) }
+    // 日志导出：直接读 `/sdcard/Android/media/<游戏包>/`（模块 App 持 AFA 跨包直读），
+    // **无「确保游戏在运行中」确认弹窗、无"等待新鲜日志"门控**（2026-09-14 定案）：
+    // 旧门控在游戏闪退/无法运行时恰好阻止导出崩溃现场，与"导出日志用于排查"
+    // 的目的背道而驰。media 直读与游戏是否运行、广播是否可达无关。
     var exportLoadingVisible by remember { mutableStateOf(false) }
     var exportLoadingShownAt by remember { mutableStateOf(0L) }
 
     /**
-     * 转圈遮罩最短显示 800ms：游戏活着时推送+导出链 <1s 完成，遮罩一闪而过
-     * 等于没看到（用户反馈"没有转圈动画"）。成功路径也兜住最短时长，让
-     * "正在导出"的状态可感知；失败路径（3s 超时）天然超时长。
-     * ⚠️ 局部函数须先声明后使用，故置于 startExportWithLoading 之前。
+     * 转圈遮罩最短显示 800ms：导出链通常 <1s，遮罩一闪而过等于没看到。
+     * ⚠️ 局部函数须先声明后使用，故置于 startExport 之前。
      */
     suspend fun holdMinLoadingThenHide() {
         val elapsed = System.currentTimeMillis() - exportLoadingShownAt
@@ -140,16 +129,10 @@ fun SettingsPagerMiuix(
         exportLoadingVisible = false
     }
 
-    fun startExportWithLoading() {
+    fun startExport() {
         exportLoadingVisible = true
         exportLoadingShownAt = System.currentTimeMillis()
         scope.launch {
-            val fresh = LogExporter.awaitFreshLogs(context)
-            if (!fresh) {
-                holdMinLoadingThenHide()
-                Toast.makeText(context, "请先启动游戏！", Toast.LENGTH_SHORT).show()
-                return@launch
-            }
             val uri = withContext(Dispatchers.IO) {
                 LogExporter.export(context)
             }
@@ -157,7 +140,7 @@ fun SettingsPagerMiuix(
             if (uri != null) {
                 LogExporter.share(context, uri)
             } else {
-                Toast.makeText(context, "请先启动游戏！", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "导出失败，未找到日志文件", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -248,8 +231,7 @@ fun SettingsPagerMiuix(
                                     )
                                 },
                                 onClick = {
-                                    gameDialogMounted = true
-                                    gameDialogShow = true
+                                    startExport()
                                 }
                             )
                         }
@@ -373,56 +355,6 @@ fun SettingsPagerMiuix(
             },
             onDismissFinished = {
                 pendingEulaAction()
-            }
-        )
-    }
-
-    // 「确保游戏在运行中」确认弹窗：标题居中粗体、正文左对齐（弹窗排版铁律）。
-    // 左灰"取消"右蓝"继续导出"。
-    if (gameDialogMounted) {
-        OverlayDialog(
-            show = gameDialogShow,
-            onDismissRequest = { gameDialogShow = false },
-            onDismissFinished = { gameDialogMounted = false },
-            content = {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = "确保游戏在运行中",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 12.dp),
-                    )
-                    Text(
-                        text = "请确认游戏已在运行，否则无法导出日志。启动游戏并至少等待 15 秒，再返回此处导出日志。",
-                        fontSize = 14.sp,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 12.dp),
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        TextButton(
-                            text = "取消",
-                            onClick = { gameDialogShow = false },
-                            modifier = Modifier.weight(1f),
-                        )
-                        Spacer(modifier = Modifier.width(20.dp))
-                        TextButton(
-                            text = "继续导出",
-                            onClick = {
-                                gameDialogShow = false
-                                startExportWithLoading()
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary(),
-                        )
-                    }
-                }
             }
         )
     }

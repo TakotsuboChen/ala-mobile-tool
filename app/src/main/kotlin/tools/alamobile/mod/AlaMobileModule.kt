@@ -329,7 +329,6 @@ class AlaMobileModule : XposedModule() {
             try {
                 val receiver = ConfigReceiver()
                 val filter = android.content.IntentFilter(ConfigReceiver.ACTION_CONFIG_UPDATE)
-                filter.addAction(ConfigReceiver.ACTION_REQUEST_LOGS)
                 // RECEIVER_EXPORTED：广播来自模块进程（不同应用），跨应用派发，
                 // 必须用 EXPORTED 标志（Android 13+ 强制要求）。用 ContextCompat
                 // 重载：内部按 SDK_INT 自动分发旧/新 API，且对 lint 的
@@ -654,30 +653,6 @@ class AlaMobileModule : XposedModule() {
                 // 第一个 ClassLoader 自己的 onPackageReady 流程不被自己拦掉
                 markNativeInstalled()
                 logX(Log.INFO, TAG, "Native hooks installed (isAvailable=${NativeBridge.isAvailable})")
-
-                // 游戏进程启动后把自己的日志推到模块进程缓存，
-                // 供 ConfigActivity 的"导出并分享日志"读取（跨进程文件不可直接读）。
-                // 放在 15s 延迟末尾确保日志已产生一定量。
-                try {
-                    val extDir = ctx?.getExternalFilesDir(null)
-                    if (extDir != null) {
-                        val javaLogFile = java.io.File(extDir, "ala_tool.log")
-                        val nativeLogFile = java.io.File(extDir, "ala_tool_native.log")
-                        val javaLog = if (javaLogFile.exists()) javaLogFile.readText() else ""
-                        val nativeLog = if (nativeLogFile.exists()) nativeLogFile.readText() else ""
-                        if (javaLog.isNotEmpty() || nativeLog.isNotEmpty()) {
-                            // 通过 setComponent 显式广播把完整日志分片推到模块进程的 LogReceiver。
-                            // LSPosed 下 ContentProvider 和定向广播都因包可见性不可达，
-                            // Remote Preferences 在 Hook 进程只读。显式组件广播不查包可见性，
-                            // 绕过 Android 11+ 限制和 AOSP 隐式广播跳过后台静态 receiver 逻辑。
-                            // 日志分片传输（每片 256KB），接收端拼接完整日志——不截断。
-                            val pushed = tools.alamobile.mod.config.LogReceiver.send(ctx!!, javaLog, nativeLog)
-                            logX(Log.INFO, TAG, "Pushed game logs via chunked broadcast (java=${javaLog.length} native=${nativeLog.length} success=$pushed)")
-                        }
-                    }
-                } catch (e: Throwable) {
-                    logX(Log.WARN, TAG, "Push game logs failed: ${e.message}")
-                }
             } catch (e: Throwable) {
                 logX(Log.ERROR, TAG, "Failed to install native hooks: ${e.message}")
             }

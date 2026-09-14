@@ -22,10 +22,16 @@ static pthread_mutex_t g_log_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /**
  * 从 /proc/self/cmdline 推导包名，拼日志文件路径：
- * /sdcard/Android/data/<pkg>/files/ala_tool_native.log
+ * /sdcard/Android/media/<pkg>/ala_tool_native.log
  *
  * strip :suffix（子进程），与 unlock_hook.c 原 npatch_log 同理。
- * 游戏进程对自己的 externalFilesDir 天然可写，NPatch + LSPosed 都适用。
+ *
+ * ⚠️ 2026-09-14 迁移：路径从 `Android/data/<pkg>/files/` 改到 `Android/media/<pkg>/`。
+ * 原因：`Android/media` 不在 scoped storage 受限区，模块 App 持 AFA
+ *（MANAGE_EXTERNAL_STORAGE）后可**跨包直读**，导出日志不再依赖游戏进程
+ * 广播推送，也不必以"推送是否到达"反推游戏是否在运行（游戏闪退后仍可导出
+ * 现场）。游戏进程写**自己包**的 media 目录 = 同 uid，无需任何权限。
+ * 详见 [CrossPkgMailbox]（Java 侧同类通道）。
  */
 static void resolve_log_path(void) {
     if (g_log_path[0] != '\0') return;
@@ -39,8 +45,12 @@ static void resolve_log_path(void) {
     // strip :suffix (子进程)
     char *colon = strchr(cmdline, ':');
     if (colon) *colon = '\0';
+    // 确保 /sdcard/Android/media/<pkg>/ 存在（父目录 Android/media 由系统预建）
+    char dir[224];
+    snprintf(dir, sizeof(dir), "/sdcard/Android/media/%s", cmdline);
+    mkdir(dir, 0777);
     snprintf(g_log_path, sizeof(g_log_path),
-             "/sdcard/Android/data/%s/files/ala_tool_native.log", cmdline);
+             "/sdcard/Android/media/%s/ala_tool_native.log", cmdline);
 }
 
 /**

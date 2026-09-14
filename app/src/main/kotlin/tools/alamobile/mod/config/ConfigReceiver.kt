@@ -30,7 +30,6 @@ class ConfigReceiver : BroadcastReceiver() {
 
     companion object {
         const val ACTION_CONFIG_UPDATE = "tools.alamobile.mod.CONFIG_UPDATE"
-        const val ACTION_REQUEST_LOGS = "tools.alamobile.mod.REQUEST_LOGS"
         const val EXTRA_JSON = "json"
         private const val FILE_NAME = "ala_tool_config.json"
         private const val TAG = "AlaMobileTool"
@@ -42,14 +41,6 @@ class ConfigReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        // REQUEST_LOGS：模块进程导出日志前请求游戏进程重新推送最新日志。
-        // 不带 JSON，不需要写配置，只推送日志文件。
-        if (intent.action == ACTION_REQUEST_LOGS) {
-            Logger.i(TAG, "ConfigReceiver: REQUEST_LOGS received — pushing fresh logs")
-            pushGameLogs(context)
-            return
-        }
-
         if (intent.action != ACTION_CONFIG_UPDATE) return
         val json = intent.getStringExtra(EXTRA_JSON)
         if (json.isNullOrEmpty()) {
@@ -165,39 +156,8 @@ class ConfigReceiver : BroadcastReceiver() {
             // TC/ABS 介入指示灯开关——无需 native 同步（开关只控制 Java 层
             // TcAbsIndicatorView 的创建），OverlayManager.notifyConfigChanged
             // 重建时读最新 JSON 创建/移除 view。
-
-            // 游戏进程把自己的日志文件内容推到模块进程，
-            // 供 ConfigActivity 的"导出并分享日志"读取（跨进程文件不可直接读）。
-            pushGameLogs(context)
         } catch (e: Throwable) {
             Logger.e(TAG, "ConfigReceiver: write failed", e)
-        }
-    }
-
-    /**
-     * 游戏进程把自己的日志文件内容推到模块进程，
-     * 供 ConfigActivity 的"导出并分享日志"读取（跨进程文件不可直接读）。
-     * 通过 setComponent 显式广播分片推送（LSPosed + NPatch 通用）。
-     */
-    private fun pushGameLogs(context: Context) {
-        try {
-            val extDir = context.getExternalFilesDir(null)
-            if (extDir != null) {
-                val javaLogFile = java.io.File(extDir, "ala_tool.log")
-                val nativeLogFile = java.io.File(extDir, "ala_tool_native.log")
-                val javaLog = if (javaLogFile.exists()) javaLogFile.readText() else ""
-                val nativeLog = if (nativeLogFile.exists()) nativeLogFile.readText() else ""
-                // native 崩溃自捕文件（crash_hook.c 落盘）——闪退后用户重启游戏
-                // 推送配置时即可带走，不用等导出时跨进程读。
-                val nativeCrashFile = java.io.File(extDir, "ala_tool_crash_native.log")
-                val nativeCrashLog = if (nativeCrashFile.exists()) nativeCrashFile.readText() else ""
-                if (javaLog.isNotEmpty() || nativeLog.isNotEmpty() || nativeCrashLog.isNotEmpty()) {
-                    val pushed = LogReceiver.send(context, javaLog, nativeLog, nativeCrashLog)
-                    Logger.i(TAG, "ConfigReceiver: pushed game logs via broadcast (java=${javaLog.length} native=${nativeLog.length} nativeCrash=${nativeCrashLog.length} success=$pushed)")
-                }
-            }
-        } catch (e: Throwable) {
-            Logger.w(TAG, "ConfigReceiver: push game logs failed: ${e.message}")
         }
     }
 }

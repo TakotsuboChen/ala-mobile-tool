@@ -17,9 +17,9 @@
 // - 单次触发：进入 handler 先置重入标志，handler 内再崩直接自杀。
 // - 体积上限：追加模式，超 512KB 截断保留后半（与 Java 版同策略）。
 //
-// 落盘位置：/sdcard/Android/data/<游戏包>/files/ala_tool_crash_native.log
-//（与 ala_tool_native.log 同目录——native_log 已实证游戏进程对该目录可写，
-// LogExporter 策略 3 可读到它）。
+// 落盘位置：/sdcard/Android/media/<游戏包>/ala_tool_crash_native.log
+//（与 ala_tool_native.log 同目录——media 不在 scoped storage 受限区，模块 App
+// 持 AFA 后可跨包直读，游戏闪退后仍能导出，不依赖广播推送）。
 // ═══════════════════════════════════════════════════════════════════════════
 #include "crash_hook.h"
 
@@ -248,7 +248,8 @@ static void crash_handler(int sig, siginfo_t *info, void *uctx) {
 void crash_catcher_install(void) {
     if (g_installed) return;
 
-    // 落盘路径：与 native_log 同目录（/proc/self/cmdline 推导包名）
+    // 落盘路径：与 native_log 同目录（/proc/self/cmdline 推导包名）——
+    // /sdcard/Android/media/<pkg>/（2026-09-14 从 Android/data/files 迁移）
     char cmdline[256] = {0};
     int fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
     if (fd >= 0) {
@@ -258,14 +259,17 @@ void crash_catcher_install(void) {
             cmdline[n] = '\0';
             char *colon = strchr(cmdline, ':');
             if (colon) *colon = '\0';  // strip :suffix 子进程
+            char dir[224];
+            snprintf(dir, sizeof(dir), "/sdcard/Android/media/%s", cmdline);
+            mkdir(dir, 0777);
             snprintf(g_crash_path, sizeof(g_crash_path),
-                     "/sdcard/Android/data/%s/files/ala_tool_crash_native.log", cmdline);
+                     "/sdcard/Android/media/%s/ala_tool_crash_native.log", cmdline);
         }
     }
     if (g_crash_path[0] == '\0') {
-        // cmdline 读取失败：退到游戏 externalFilesDir 无法定位，用裸路径兜底
+        // cmdline 读取失败：退到裸路径兜底
         snprintf(g_crash_path, sizeof(g_crash_path),
-                 "/sdcard/Android/data/files/ala_tool_crash_native.log");
+                 "/sdcard/Android/media/ala_tool_crash_native.log");
     }
 
     const int signals[] = { SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT, SIGTRAP };

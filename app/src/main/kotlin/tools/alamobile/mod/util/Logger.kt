@@ -1,6 +1,7 @@
 package tools.alamobile.mod.util
 
 import android.content.Context
+import android.os.Environment
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Process
@@ -15,9 +16,14 @@ import java.util.Locale
  *
  * **两个进程各自写各自的日志文件**：
  * - 模块进程（ConfigActivity）：`filesDir/ala_tool.log`
- * - 游戏进程（AlaMobileModule）：`externalFilesDir/ala_tool.log`
+ * - 游戏进程（AlaMobileModule）：`/sdcard/Android/media/<游戏包>/ala_tool.log`
  *
- * 导出时由 [LogExporter] 通过 `createPackageContext` 合并两个文件。
+ * ⚠️ 游戏进程日志 2026-09-14 从 `externalFilesDir`（`Android/data/<pkg>/files/`）
+ * 迁到 `Android/media/<pkg>/`：`Android/media` 不在 scoped storage 受限区，
+ * 模块 App 持 AFA（MANAGE_EXTERNAL_STORAGE）后可**跨包直读导出**——游戏闪退后
+ * 仍能带出日志，不再依赖游戏进程广播推送（旧链路要求游戏活着且广播可达）。
+ * 游戏进程写**自己包**的 media 目录 = 同 uid，无需任何权限。
+ * 导出由 [LogExporter] 直接读两个路径合并。
  *
  * 历史说明：曾有 logEnabled 开关控制文件写入（2026-09-06 移除）。排查游戏进程
  * 闪退时发现关日志 = 丢现场，且用户不会主动开日志——诊断数据必须默认全量，
@@ -58,15 +64,31 @@ object Logger {
      * 初始化日志目录。
      *
      * @param context 进程 Context
-     * @param isModuleProcess true=模块进程（用 filesDir），false=游戏进程（用 externalFilesDir）
+     * @param isModuleProcess true=模块进程（用 filesDir），false=游戏进程（用
+     *   `/sdcard/Android/media/<游戏包>/`，模块 App 持 AFA 后可跨包直读导出）
      */
     fun init(context: Context, isModuleProcess: Boolean) {
         logDir = if (isModuleProcess) {
             context.filesDir
         } else {
-            context.getExternalFilesDir(null) ?: context.filesDir
+            // 游戏进程：优先 /sdcard/Android/media/<游戏包>/（模块 App 持 AFA 可跨包直读）。
+            // 目录创建失败（罕见）回落 externalFilesDir，日志仍在本进程可读区，
+            // 仅丧失跨包直读能力。
+            val mediaDir = gameMediaDir(context)
+            if (mediaDir.mkdirs() || mediaDir.isDirectory) {
+                mediaDir
+            } else {
+                context.getExternalFilesDir(null) ?: context.filesDir
+            }
         }
     }
+
+    /**
+     * 游戏进程日志目录：`/sdcard/Android/media/<游戏包>/`。
+     * 模块 App 导出时用同一路径跨包读取（需 AFA）。
+     */
+    fun gameMediaDir(context: Context): File =
+        File(Environment.getExternalStorageDirectory(), "Android/media/${context.packageName}")
 
     /**
      * 核心日志方法：同时打 logcat + 写文件。

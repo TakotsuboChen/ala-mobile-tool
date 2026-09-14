@@ -10,7 +10,7 @@ extern "C" {
  *
  * 安装 SIGSEGV/SIGABRT/SIGBUS/SIGILL/SIGFPE 的 sigaction handler：
  * 崩溃现场（信号 + 寄存器 + PC 相对模块偏移）落盘
- * /sdcard/Android/data/<游戏包>/files/ala_tool_crash_native.log，
+ * /sdcard/Android/media/<游戏包>/ala_tool_crash_native.log，
  * 然后链式转发旧 handler（Unity/系统可能装过，绝不能吞）。
  *
  * 背景（用户日志实证 2026-09-06）：游戏进程在 LLV.Awake 场景加载窗口
