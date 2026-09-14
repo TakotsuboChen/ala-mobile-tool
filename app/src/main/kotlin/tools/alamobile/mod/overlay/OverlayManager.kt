@@ -3,6 +3,7 @@ package tools.alamobile.mod.overlay
 import tools.alamobile.mod.util.Logger
 import android.app.Activity
 import android.content.Context
+import android.graphics.Color
 import android.graphics.Point
 import android.os.Handler
 import android.os.Looper
@@ -23,6 +24,18 @@ import tools.alamobile.mod.config.ModConfig
 class OverlayManager(context: Context) {
 
     companion object {
+        // 进出编辑模式的过渡时长（ms）。编辑框淡入/整屏变暗同步使用。
+        private const val FADE_DURATION_MS = 300L
+
+        // 我们自己添加的 view 的 tag 集合。用于把变暗层插到"游戏内容之后、
+        // 我们自己的控件之前"——见 placeDimAboveGameContent。
+        private val OWN_TAGS = setOf(
+            "ala_tool_toggle",
+            "pedal_overlay", "brake_overlay", "gear_shift_overlay", "tc_abs_indicator",
+            "pedal_overlay_edit", "brake_overlay_edit", "gear_shift_overlay_edit",
+            "overlay_dim", "overlay_edit_hint"
+        )
+
         // 配置变更回调入口：ConfigReceiver 写完 JSON 后调此方法，
         // post 到主线程触发 OverlayManager 重建 overlay。共存版双 ClassLoader
         // 下，第二个 ClassLoader 不构造 OverlayManager（isNativeInstalled 守卫
@@ -61,6 +74,12 @@ class OverlayManager(context: Context) {
     private var pedalEditView: OverlayEditView? = null
     private var brakeEditView: OverlayEditView? = null
     private var gearEditView: OverlayEditView? = null
+    // 编辑模式的整屏变暗层。z 序紧贴游戏内容之后、我们自己的控件之前：
+    // 只压暗游戏画面，被编辑的踏板/换挡控件与编辑框保持原亮度。
+    // **不消费触摸**——长按工具按钮退出编辑模式的手势必须能穿过它到达按钮。
+    private var dimView: View? = null
+    // 编辑模式的屏幕居中提示层（三行操作说明）。独立全屏透明层，不消费触摸。
+    private var hintView: EditHintView? = null
     private val density = appContext.resources.displayMetrics.density
 
     // 可重读的配置：每次 show/toggle 都重新读 JSON，避免 by lazy 缓存
@@ -103,13 +122,13 @@ class OverlayManager(context: Context) {
         settings = resolveLatestSettings()
         removeGamingOverlays()
         addGamingOverlays()
-        // addGamingOverlays 创建时 visibility=GONE，按当前 overlaysVisible 重设。
-        val newVisibility = if (overlaysVisible) View.VISIBLE else View.GONE
-        pedalView?.visibility = newVisibility
-        brakeView?.visibility = newVisibility
-        gearView?.visibility = newVisibility
-        indicatorView?.visibility = newVisibility
-        // 重建后 editView 是新实例，若在编辑模式要重新设 VISIBLE。
+        // addGamingOverlays 创建时 visibility=GONE，按当前状态重设。
+        // **编辑模式下必须 VISIBLE**（applyOverlayVisibility 内已含该判据）：
+        // 编辑模式不改 overlaysVisible，若只按 overlaysVisible 判定，编辑中改
+        // 边框参数触发重建会把控件本体设回 GONE——表现为"只剩编辑框、控件
+        // 消失，要退出重进才恢复"。
+        applyOverlayVisibility()
+        // 重建后 editView 是新实例，若在编辑模式要重新设 VISIBLE + 重播淡入。
         if (editMode) updateEditModeVisibility()
     }
 
@@ -203,6 +222,11 @@ class OverlayManager(context: Context) {
     }
 
     private fun toggleOverlays() {
+        // 编辑模式中屏蔽单击：单击 = 展开/折叠控件，会与编辑模式打架
+        // （折叠会连带退出编辑、重建控件、控件本体闪现消失）。编辑模式的
+        // 唯一入口/出口都是长按工具图标。
+        if (editMode) return
+
         // 每次 toggle 都重读配置并重建控件：配置页改 pedalMode（关/单/双）、
         // curve（线性/拟真）、enableManualShift 后，用户点工具按钮重新展开，
         // 控件必须反映最新值。原实现用 pedalView==null 判空跳过重建，导致
@@ -212,45 +236,199 @@ class OverlayManager(context: Context) {
         addGamingOverlays()
 
         overlaysVisible = !overlaysVisible
-        val newVisibility = if (overlaysVisible) View.VISIBLE else View.GONE
-        pedalView?.visibility = newVisibility
-        brakeView?.visibility = newVisibility
-        gearView?.visibility = newVisibility
-        indicatorView?.visibility = newVisibility
+        applyOverlayVisibility()
         if (!overlaysVisible) {
             editMode = false
             updateEditModeVisibility()
         }
     }
 
+    /**
+     * 按当前状态设置控件本体（踏板/换挡/指示灯）的可见性。
+     *
+     * 编辑模式中一律强制可见——要看得见控件才能拖它；退出编辑模式后回到
+     * "进入编辑之前"的状态（由 [overlaysVisible] 表达）：用户从隐藏状态长按
+     * 进编辑，退出后控件必须重新隐藏。旧实现退出路径完全不碰可见性，进编辑
+     * 时设的 VISIBLE 就永久留下了（用户实测"退出后控件本体还留着"）。
+     */
+    private fun applyOverlayVisibility() {
+        val v = if (editMode || overlaysVisible) View.VISIBLE else View.GONE
+        pedalView?.visibility = v
+        brakeView?.visibility = v
+        gearView?.visibility = v
+        indicatorView?.visibility = v
+    }
+
     private fun toggleEditMode() {
+        if (editMode) {
+            // ── 退出编辑模式 ──
+            // ⚠️ 这里**绝不能重建控件**。旧实现在进出两个方向都调
+            // removeGamingOverlays() + addGamingOverlays()：退出时旧编辑层
+            // 被 removeView 立刻摘掉，新建的层是 GONE——于是"淡出"动画作用在
+            // 刚出生就已不可见的层上，用户看到的退出是**瞬间恢复**（而不是
+            // 0.3s 渐亮）。进场方向恰好能淡入，因为新层随即被置 VISIBLE 再
+            // 0→1 播放。退出方向保持现有图层，只翻转 editMode 让
+            // syncEditMode 播 1→0。
+            editMode = false
+            applyOverlayVisibility()
+            updateEditModeVisibility()
+            return
+        }
+
+        // ── 进入编辑模式 ──
+        // 进场重建一次：让编辑层反映最新配置（pedalMode/curve/换挡开关）。
         settings = ModConfig.readFromTargetProcess(appContext)
         removeGamingOverlays()
         addGamingOverlays()
 
-        // Make sure the underlying overlays are visible so the edit layer is
-        // meaningful, but do not change the usage-visible state.
-        pedalView?.visibility = View.VISIBLE
-        brakeView?.visibility = View.VISIBLE
-        gearView?.visibility = View.VISIBLE
-        indicatorView?.visibility = View.VISIBLE
-        editMode = !editMode
+        // 编辑模式中控件必须可见，但**不改变 overlaysVisible**——那是用户的
+        // 展开/折叠意图，退出编辑后要按它（配合 applyOverlayVisibility）还原。
+        editMode = true
+        applyOverlayVisibility()
         updateEditModeVisibility()
     }
 
     private fun updateEditModeVisibility() {
-        pedalEditView?.let { view ->
-            view.visibility = if (editMode) View.VISIBLE else View.GONE
-            view.bringToFront()
+        syncEditMode()
+    }
+
+    /**
+     * 把编辑模式的视觉状态同步到实际 view，并带 0.5s 淡入/淡出。
+     *
+     * **不能简单地用 visibility 开关**：`visibility=GONE` 会让 view 立刻消失，
+     * 没有任何过渡。做法是进场先置 VISIBLE 再靠 alpha 0→1 淡入；退场靠
+     * alpha 1→0 淡出，**动画结束后**才置 GONE。
+     *
+     * ⚠️ 收尾置 GONE 用 Handler.postDelayed 而不是 `withEndAction`：本方法把
+     * 变暗层 / 提示层 / 多个编辑框依次用一个 ViewPropertyAnimator 驱动，
+     * `animate()` 返回的是**同一实例**（每个 view 各自一个，但同一 view 上
+     * 重复链式调用会覆盖）——历史实测 `withEndAction` 的收尾在"退出瞬间恢复"
+     * 的路径上没被执行（用户实测退出时无渐亮、瞬间恢复，且编辑层没有正确
+     * 置 GONE）。改成显式延时按下 targetAlpha 收尾，逻辑直接可读。
+     *
+     * ⚠️ 退场后必须真的置 GONE，不能停在 "alpha=0 但 VISIBLE"：编辑层会
+     * 吃掉触摸事件，导致退出编辑模式后游戏踏板点不动。GONE 的 view 不参与
+     * 命中测试。
+     *
+     * 变暗层只压暗游戏画面（z 序紧贴游戏内容之上、游戏控件之下），被编辑的
+     * 控件与编辑框保持明亮。**z 序不是简单插到 index 0**：Unity 的画面走
+     * SurfaceView，会被合成器提到窗口 View 之上，index 0 的层实际上位于
+     * SurfaceView 之下——变暗层必须紧贴游戏内容 View 之后。
+     */
+    private fun syncEditMode() {
+        val parent = root ?: return
+
+        val editViews = listOfNotNull(pedalEditView, brakeEditView, gearEditView)
+        if (editMode) editViews.forEach { it.visibility = View.VISIBLE }
+
+        // 双踏板控件的「油门」/「刹车」标识只在编辑模式显示。⚠️ 必须在
+        // 进场重建之后调用——进场路径会重建 PedalOverlayView，新实例的
+        // editLabels 为 false；本方法在 toggleEditMode/rebuild 末尾都会跑到，
+        // 所以这里统一翻正是唯一可靠的写入点。
+        pedalView?.setEditLabelsVisible(editMode)
+        brakeView?.setEditLabelsVisible(editMode)
+
+        editViews.forEach { animateFade(it, if (editMode) 1f else 0f, isEditLayer = true) }
+        // 编辑层必须在控件与变暗层之上，否则边框/四角会被压暗或挡住。
+        if (editMode) editViews.forEach { it.bringToFront() }
+
+        if (editMode) {
+            val dim = ensureDimView(parent)
+            placeDimAboveGameContent(parent, dim)
+            val hint = ensureHintView(parent)
+            hint.bringToFront()
+            animateFade(dim, 1f, isEditLayer = false)
+            animateFade(hint, 1f, isEditLayer = false)
+        } else {
+            dimView?.let { animateFade(it, 0f, isEditLayer = false) }
+            hintView?.let { animateFade(it, 0f, isEditLayer = false) }
         }
-        brakeEditView?.let { view ->
-            view.visibility = if (editMode) View.VISIBLE else View.GONE
-            view.bringToFront()
+    }
+
+    /**
+     * alpha 动画 + 收尾。进编辑模式：VISIBLE + 0→1；退编辑模式：1→0，动画
+     * 结束后置 GONE（编辑层用；变暗层/提示层永远保持 VISIBLE，只动 alpha）。
+     */
+    private fun animateFade(view: View, target: Float, isEditLayer: Boolean) {
+        view.animate().cancel()
+        view.animate().alpha(target).setDuration(FADE_DURATION_MS).start()
+        if (target == 0f && isEditLayer) {
+            // 延时收尾必须与动画时长同步；期间又切回编辑模式时，editMode
+            // 已为 true，不能误置 GONE。
+            view.postDelayed({
+                if (!editMode && view.alpha == 0f) view.visibility = View.GONE
+            }, FADE_DURATION_MS)
         }
-        gearEditView?.let { view ->
-            view.visibility = if (editMode) View.VISIBLE else View.GONE
-            view.bringToFront()
+    }
+
+    /**
+     * 变暗层紧贴"游戏内容 View"之后（即它上面的第一个位置）。
+     *
+     * Unity 画面由 SurfaceView 承载，合成器会把 SurfaceView 提到同一窗口
+     * 所有 View 之上，故窗口里比 SurfaceView 索引更高的普通 View 仍会盖在
+     * 画面上——变暗层放在游戏内容之后即可压暗画面，又不会盖住我们自己后加
+     * 的控件与编辑框。
+     *
+     * 判断方式：子 view 里索引最小、且带我们自己的 tag 的那个，其前面就是
+     * 游戏内容。我们所有 view 都是 addGamingOverlays/addToggleButton 最后
+     * 追加的，所以这个位置等于"游戏内容之后"。
+     */
+    private fun placeDimAboveGameContent(parent: ViewGroup, dim: View) {
+        // dim 自己也在 parent 里，先移除再算，避免自我干扰。
+        if (dim.parent === parent) parent.removeView(dim)
+        var insertAt = parent.childCount
+        for (i in 0 until parent.childCount) {
+            val tag = parent.getChildAt(i).tag as? String
+            if (tag != null && tag in OWN_TAGS) {
+                insertAt = i
+                break
+            }
         }
+        parent.addView(dim, insertAt, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ))
+    }
+
+    private fun ensureDimView(parent: ViewGroup): View {
+        dimView?.takeIf { it.parent === parent }?.let { return it }
+        val dim = View(appContext).apply {
+            tag = "overlay_dim"
+            setBackgroundColor(Color.argb(191, 0, 0, 0)) // 75% 黑
+            // 编辑模式中因配置变更重建时直接以已变暗状态出现，避免每改一次
+            // 参数就重播一次 0.3s 渐暗。
+            alpha = if (editMode) 1f else 0f
+            isClickable = false
+            isFocusable = false
+            // 不接受触摸：事件穿透到下层（长按工具按钮退出编辑模式的手势
+            // 必须能穿过它）。
+            isEnabled = false
+        }
+        dimView = dim
+        parent.addView(dim, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ))
+        return dim
+    }
+
+    /**
+     * 屏幕正中的三行操作提示。独立全屏透明层，"屏幕中心"就是它自己的几何
+     * 中心——不依赖父容器裁剪，也不受编辑框位置影响。
+     */
+    private fun ensureHintView(parent: ViewGroup): View {
+        hintView?.takeIf { it.parent === parent }?.let { return it }
+        val hint = EditHintView(appContext).apply {
+            tag = "overlay_edit_hint"
+            // 同上：编辑模式中重建时直接可见，不重播淡入。
+            alpha = if (editMode) 1f else 0f
+        }
+        hintView = hint
+        parent.addView(hint, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ))
+        return hint
     }
 
     private fun addGamingOverlays() {
@@ -305,7 +483,7 @@ class OverlayManager(context: Context) {
                 topMargin = gearPosition.topPx(screenHeight)
             }
             root?.addView(gearView, gearParams)
-            addGearEditLayer(gearParams)
+            addGearEditLayer()
         }
 
         // 按 pedalMode 创建踏板 view：OFF 不创建，SINGLE 创建一个双分区 view，
@@ -330,7 +508,7 @@ class OverlayManager(context: Context) {
                     topMargin = singlePosition.topPx(screenHeight)
                 }
                 root?.addView(pedalView, pedalParams)
-                addPedalEditLayer(pedalParams, singlePosition, ModConfig.KEY_SINGLE_PEDAL_POSITION)
+                addPedalEditLayer(singlePosition, ModConfig.KEY_SINGLE_PEDAL_POSITION)
             }
             ModConfig.PedalMode.DUAL -> {
                 pedalView = PedalOverlayView(
@@ -348,7 +526,7 @@ class OverlayManager(context: Context) {
                     topMargin = pedalPosition.topPx(screenHeight)
                 }
                 root?.addView(pedalView, pedalParams)
-                addPedalEditLayer(pedalParams, pedalPosition, ModConfig.KEY_PEDAL_POSITION)
+                addPedalEditLayer(pedalPosition, ModConfig.KEY_PEDAL_POSITION)
 
                 brakeView = PedalOverlayView(
                     appContext, settings,
@@ -365,106 +543,53 @@ class OverlayManager(context: Context) {
                     topMargin = brakePosition.topPx(screenHeight)
                 }
                 root?.addView(brakeView, brakeParams)
-                addBrakeEditLayer(brakeParams)
+                addBrakeEditLayer()
             }
         }
     }
 
-    private fun addPedalEditLayer(
-        pedalParams: FrameLayout.LayoutParams,
-        runtimePosition: OverlayPosition,
-        positionKey: String
-    ) {
+    private fun addPedalEditLayer(runtimePosition: OverlayPosition, positionKey: String) {
         val pedal = pedalView ?: return
-        val minPx = (48 * density).toInt()
-
-        pedalEditView = OverlayEditView(
+        val parent = root ?: return
+        pedalEditView = createEditLayer(
             appContext,
+            parent,
             pedal,
-            minPx,
-            minPx,
+            "pedal_overlay_edit",
             // 长按重置到出厂默认（OverlayPosition.DEFAULT_*），不再用运行时
             // 已保存的 position——否则"重置"只是回到当前已保存值，用户感知
             // 无变化。出厂默认是固定值，重置才有意义。
             OverlayPosition.DEFAULT_PEDAL,
-            runtimePosition
- // 运行时 position 作为初始布局（与 target view 对齐）
-        ) { left, top, width, height ->
-            saveOverlayPosition(positionKey, left, top, width, height)
-        }
-        pedalEditView?.apply {
-            tag = "pedal_overlay_edit"
-            visibility = View.GONE
-        }
-        root?.addView(
-            pedalEditView,
-            FrameLayout.LayoutParams(
-                pedalParams.width,
-                pedalParams.height
-            ).apply {
-                leftMargin = pedalParams.leftMargin
-                topMargin = pedalParams.topMargin
-            }
+            positionKey,
+            startVisible = editMode
         )
     }
 
-    private fun addBrakeEditLayer(brakeParams: FrameLayout.LayoutParams) {
+    private fun addBrakeEditLayer() {
         val brake = brakeView ?: return
-        val minPx = (48 * density).toInt()
-
-        brakeEditView = OverlayEditView(
+        val parent = root ?: return
+        brakeEditView = createEditLayer(
             appContext,
+            parent,
             brake,
-            minPx,
-            minPx,
+            "brake_overlay_edit",
             OverlayPosition.DEFAULT_BRAKE,
-            settings.brakePosition
-        ) { left, top, width, height ->
-            saveOverlayPosition(ModConfig.KEY_BRAKE_POSITION, left, top, width, height)
-        }
-        brakeEditView?.apply {
-            tag = "brake_overlay_edit"
-            visibility = View.GONE
-        }
-        root?.addView(
-            brakeEditView,
-            FrameLayout.LayoutParams(
-                brakeParams.width,
-                brakeParams.height
-            ).apply {
-                leftMargin = brakeParams.leftMargin
-                topMargin = brakeParams.topMargin
-            }
+            ModConfig.KEY_BRAKE_POSITION,
+            startVisible = editMode
         )
     }
 
-    private fun addGearEditLayer(gearParams: FrameLayout.LayoutParams) {
+    private fun addGearEditLayer() {
         val gear = gearView ?: return
-        val minPx = (48 * density).toInt()
-
-        gearEditView = OverlayEditView(
+        val parent = root ?: return
+        gearEditView = createEditLayer(
             appContext,
+            parent,
             gear,
-            minPx,
-            minPx,
+            "gear_shift_overlay_edit",
             OverlayPosition.DEFAULT_GEAR,
-            settings.gearPosition
-        ) { left, top, width, height ->
-            saveOverlayPosition(ModConfig.KEY_GEAR_POSITION, left, top, width, height)
-        }
-        gearEditView?.apply {
-            tag = "gear_shift_overlay_edit"
-            visibility = View.GONE
-        }
-        root?.addView(
-            gearEditView,
-            FrameLayout.LayoutParams(
-                gearParams.width,
-                gearParams.height
-            ).apply {
-                leftMargin = gearParams.leftMargin
-                topMargin = gearParams.topMargin
-            }
+            ModConfig.KEY_GEAR_POSITION,
+            startVisible = editMode
         )
     }
 
@@ -495,6 +620,8 @@ class OverlayManager(context: Context) {
         parent.findViewWithTag<View>("pedal_overlay_edit")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("brake_overlay_edit")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("gear_shift_overlay_edit")?.let { parent.removeView(it) }
+        parent.findViewWithTag<View>("overlay_dim")?.let { parent.removeView(it) }
+        parent.findViewWithTag<View>("overlay_edit_hint")?.let { parent.removeView(it) }
         pedalView = null
         brakeView = null
         gearView = null
@@ -502,6 +629,8 @@ class OverlayManager(context: Context) {
         pedalEditView = null
         brakeEditView = null
         gearEditView = null
+        dimView = null
+        hintView = null
     }
 
     private fun removeExisting() {
@@ -514,6 +643,8 @@ class OverlayManager(context: Context) {
         parent.findViewWithTag<View>("pedal_overlay_edit")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("brake_overlay_edit")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("gear_shift_overlay_edit")?.let { parent.removeView(it) }
+        parent.findViewWithTag<View>("overlay_dim")?.let { parent.removeView(it) }
+        parent.findViewWithTag<View>("overlay_edit_hint")?.let { parent.removeView(it) }
         pedalView = null
         brakeView = null
         gearView = null
@@ -522,6 +653,8 @@ class OverlayManager(context: Context) {
         pedalEditView = null
         brakeEditView = null
         gearEditView = null
+        dimView = null
+        hintView = null
     }
 
     private fun findCurrentActivity(): Activity? {

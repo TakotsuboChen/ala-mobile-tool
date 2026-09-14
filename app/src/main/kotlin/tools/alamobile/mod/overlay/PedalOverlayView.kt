@@ -125,6 +125,12 @@ class PedalOverlayView(
         color = Color.WHITE
         style = Paint.Style.FILL
     }
+    // 双踏板模式下在控件居中位置竖排标注的「油门」/「刹车」。SINGLE 不用。
+    private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 48f
+        textAlign = Paint.Align.CENTER
+    }
     // 整层合成透明度（overlayAlpha → paint alpha）。
     private val layerPaint = Paint().apply {
         alpha = alphaOf(settings.overlayAlpha)
@@ -146,6 +152,19 @@ class PedalOverlayView(
     // raw = 手指实际位移归一值（0..1），用于 onDraw 绘制，保证视觉跟手。
     private var rawThrottle = 0f
     private var rawBrake = 0f
+    // 是否显示「油门」/「刹车」居中标识。**只在编辑模式显示**——平时玩游戏
+    // 不需要这两字遮住踏板，OverlayManager 进出编辑模式时翻转它。
+    private var editLabels = false
+
+    /**
+     * 翻转「油门」/「刹车」标识的可见性（编辑模式专用）。
+     * 状态未变化时直接返回，避免每帧 syncEditMode 都触发重绘。
+     */
+    fun setEditLabelsVisible(visible: Boolean) {
+        if (editLabels == visible) return
+        editLabels = visible
+        invalidate()
+    }
     // mapped = 曲线变换后送 native 的值（0..1），可能 raw≠mapped。
     private var mappedThrottle = 0f
     private var mappedBrake = 0f
@@ -297,7 +316,31 @@ class PedalOverlayView(
             }
         }
 
+        // ⚠️ 结束 saveLayer 之后再画「油门」/「刹车」标识——它在 layer 内画的话
+        // 会连透明度设置一起承担（用户要求标识始终不透明）。layerPaint 的
+        // alpha 是整层合成参数（见类注释），restoreToCount 之前画的任何东西
+        // 都受它影响，包括文字。
         canvas.restoreToCount(sc)
+
+        // 双踏板模式（THROTTLE/BRAKE）：**仅编辑模式**下在控件居中位置竖排
+        // 标注角色名，帮助用户在编辑时分辨哪个是油门哪个是刹车。平时游玩
+        // 不显示——两字白字压在踏板上是纯干扰。单踏板一个控件兼管两者，不标。
+        val label = when (role) {
+            PedalRole.THROTTLE -> if (editLabels) "油门" else null
+            PedalRole.BRAKE -> if (editLabels) "刹车" else null
+            PedalRole.SINGLE -> null
+        }
+        if (label != null) {
+            val cx = w / 2f
+            val cy = h / 2f
+            // 竖排 = 逐字沿垂直方向堆叠，整串文字以控件中心为几何中心。
+            val n = label.length
+            val lineH = labelPaint.textSize * 1.15f
+            for (i in 0 until n) {
+                val baseline = cy + (i - (n - 1) / 2f) * lineH + labelPaint.textSize / 2f
+                canvas.drawText(label[i].toString(), cx, baseline, labelPaint)
+            }
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
