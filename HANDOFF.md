@@ -1,64 +1,58 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-09-14T22:33:00+08:00 · Git HEAD: `94b1691`（本文件为后续 handoff 提交，其 parent）
+生成时间: 2026-09-14T23:40:00+08:00 · Git HEAD: `7388ba6`（本文件为后续 handoff 提交，其 parent）
 paddock 仓 HEAD: `973329d`（本会话未动）
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: 模块 main @ `94b1691`（2026-09-14 22:31）
-- 漂移检查: `git rev-parse HEAD~1`（模块仓）是否仍 = `94b1691`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA；不一致以 git 实际输出为准
+- 锚点: 模块 main @ `7388ba6`（2026-09-14 23:39）
+- 漂移检查: `git rev-parse HEAD~1`（模块仓）是否仍 = `7388ba6`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA；不一致以 git 实际输出为准
 - 待重探的 [?]: 见下方标记
-- 先读: `app/src/main/kotlin/tools/alamobile/mod/PaddockClient.kt` 的 `wipeAuthIfFreshInstall`（进程门）/ `flushAuthToMailbox`（本会话产出的核心修复）
+- 先读: `app/src/main/kotlin/tools/alamobile/mod/util/LogExporter.kt`（media 直读导出，本会话重写）
 
 ## 1. 当前目标
-**已完成**：修复 NPatch 全新流程下「第一次开游戏误显示未登录 + 第二次开游戏登录态读到了却提示网络异常」。**现无进行中目标。**
+**已完成**：日志导出改为 AFA 跨包直读 `/sdcard/Android/media/<游戏包>/`，并删除「确保游戏在运行中」确认弹窗 + `awaitFreshLogs` 门控 + 整条游戏→模块日志推送链。**现无进行中目标。**
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **根因定案（两个 bug 同源）**：模块 App 与游戏进程**都**执行 `wipeAuthIfFreshInstall`，各持自己包的 `INSTALL_PREFS`。NPatch「清数据」把两进程内部 prefs 一并清掉 →「清数据」与「卸载重装」物理上不可区分 → 模块 App 登录写好权威信箱（60B）后，游戏进程首次冷启动也判「新安装」→ `clearAuth` 把信箱清成 12B 空 token → 信箱"存在即权威"否决 daemon 里明明存在的 token → 误判已登出（零 hook + 循环 Toast）。第二现象是同一空信箱的下游：门控走 ConfigProvider 读到 token 放行，但 `fetchMe` 用被否决的 `authToken=null` → 兜底文案 `TOAST_TEXT_OFFLINE`（"网络连接异常…"）。
-- [V] **实机取证（修复前）**：`build/logs/logcat_paddock_repro_20260914_213821.log` — 21:40:48 模块 App `Mailbox write OK (60B)`；21:41:03 游戏进程 14871 `fresh install detected` → `Mailbox write OK (12B)` → `auth: mailbox authoritative → logged OUT` → `ACTIVATED (not logged in)`。21:41:19 游戏进程 18304 `gate pass` 与 `网络连接异常` 同时出现，中间夹 `Mailbox read OK (12B)` → `logged OUT`。
-- [V] **修复后对照**：`build/logs/logcat_paddock_fix_20260914_222000.log` — 反例指纹全清零：`logged OUT` 0 / `网络连接异常` 0 / `no token (laps` 0 / `ACTIVATED (not logged in` 0。两次游戏启动（PID 2765 / 5925）均 `auth restored from mailbox (authoritative)` + `gate pass` + 问候「已成功连接到围场，欢迎 1 号车手 Takotsubo!」。游戏进程**从未**打印 `fresh install detected`（P0 生效）；模块 App PID 5112 打出 `Mailbox write OK (60B)`（P1 生效）。
-- [V] **进程身份判据自证**：PID 2969/5112（模块 App）打出 `no remote reader injected (module process expected)`，PID 2765/5925（游戏）从不打——`remoteTokenReader != null` 与"谁是游戏进程"在实机日志中完全对齐。
-- [V] **已提交**：修复切片 `6f77b66` + CLAUDE.md 约定 `94b1691`，均已 push。
-- [V] **构建/lint**：`:app:lint --rerun-tasks` EXIT=0（62 warnings 全为既有基线）；`:app:assembleRelease`（跳过 `lintVital*` 环境崩溃）成功并装机验证。
-- [V] 工作区 clean，与 origin/main 同步（`94b1691`）。
+- [V] **改动已提交推送**：`bee9554`（工作切片：media 迁移 + 删弹窗/门控/推送链）、`7388ba6`（CLAUDE.md/README 同步）。
+- [V] **构建/lint**：`:app:lint --rerun-tasks` **EXIT=0**（58 warnings 全为既有基线；比上次少 4，因删了 LogReceiver）；`:app:assembleRelease -x lintVital*`（环境崩溃规避）成功；`:app:compileDebugKotlin` 成功。
+- [V] **实机端到端验证（用户操作，2026-09-14 23:25）**：用户「调模块配置→杀模块→进游戏→杀游戏→打开模块导出」。模块 pid 8544 于 23:25:40 导出（`exported 190435 bytes`），内容含游戏 pid 989 于 23:25:30 的最新日志（`pedalMode=SINGLE` 变更 + overlay 重建），**游戏已被杀（signal 9，23:25:36）、导出仍成功**——正是旧门控会拒绝的场景。导出文件 `build/logs/ala_tool_log_20260914_232540.txt`（已 pull 本地）。
+- [V] **media 目录落盘实证**：游戏重启后 `/sdcard/Android/media/com.Takotsubo.AlamobileFormula/` 出现 `ala_tool.log`/`ala_tool_native.log`/`ala_tool_crash_native.log`，owner uid 10271（= 游戏进程，非模块），证实游戏进程写自己 media 目录成功。
+- [V] 工作区 clean，与 origin/main 同步（`7388ba6`）。
 
 ### 测试/build 输出（本次交接 run 的真实输出）
 ```
 $ ./gradlew :app:lint --rerun-tasks   → EXIT=0
-BUILD SUCCESSFUL in 1m 39s
-Lint found 62 warnings, 4 hints (and 3 errors and 15 warnings filtered by baseline lint-baseline.xml)
-
-$ git status --short --branch -uall → ## main...origin/main（clean）
+BUILD SUCCESSFUL in 1m 58s
+Lint found 58 warnings, 4 hints (and 3 errors and 15 warnings filtered by baseline)
 ```
 
 ## 3. 决策与理由
-- **P0 用进程身份门关闭游戏进程的 fresh-install 清理** [V]——游戏进程没有独立安装周期语义，它清信箱纯属误伤；`remoteTokenReader != null` 是既有模式里的可靠进程指纹（NPatch 下两进程包名相同，靠进程名判不出来）。否决方案：改 `INSTALL_PREFS` 命名加包名后缀——治不了「NPatch 清数据」这一触发源，游戏进程下次冷启动仍会另建标记再清一次。
-- **P1 在 daemon flush 点同步补写信箱而非新增独立时机** [V]——`App.onServiceBind` 是"模块 App 冷启动且 service 已绑"的既有收敛点，会话修复正好复用其触发（模块 App 21:21:46 启动 → 21:21:49 游戏启动，3s 内信箱已被补写）。否决方案：在 `loadAuth` 里由游戏进程反向补写——违反 P0 的"写侧只归模块 App"收敛，且游戏进程无 AFA 时根本写不进他包 media。
-- **`flushAuthToMailbox` 在 token 为空时 no-op** [V]——保住反向红线：绝不能用空 token 覆盖权威的「已登出」信号。调用点放在 `peekAuthToken() ?: return` 之后，helper 内再兜一层。
-- **两修合为一片提交** [V]——P0/P1 是"存在即权威"设计被两头（不该写的写坏了 / 该写的没写全）各撕开一次的缺口，分开提交会让中间态仍不自洽。
+- **日志通道从 `Android/data/<pkg>/files/` 迁到 `Android/media/<pkg>/`** [V]——media 不在 scoped storage 受限区，模块 App 持 AFA 可跨包直读；游戏进程写自己包 media = 同 uid 零权限。否决：维持 data 目录 + 广播推送——正是旧方案，闪退时导不出（本次要修的痛点）。
+- **整条删除弹窗 + `awaitFreshLogs` 门控 + LogReceiver 推送链** [V]——门控在游戏闪退/被杀时恰好阻止导出崩溃现场，与"导出日志用于排查"的目的相悖；media 直读与游戏是否运行无关。否决：只删弹窗保留门控——门控仍在闪退场景拒绝导出。
+- **导出返回 null 语义改为"未找到日志文件"** [V]——旧 `null` 会 Toast「请先启动游戏！」，现改为「导出失败，未找到日志文件」（不再暗示需要游戏）。
+- **`Logger.gameMediaDir` 新增为 public** [V]——供 LogExporter 复用同一路径计算，避免两处硬编码 `/sdcard/Android/media/...` 漂移。
 
 ## 4. 失败的尝试 — 不要再试
-- **[X] 加"仲裁版本号 + 早退豁免"（踏板）** [V]——单向仲裁下对方的值已被丢弃，版本号只能触发"重发当前（错误的 0）值"。已整套回退。
-- **[X] 只改 `resetPedalState` 给刹车 view 补送油门（踏板）** [V]——刹车 view 手上没有油门的真值，补送出来仍是 0，需"重建式"才有。
-- **[X] 用"刹车抬起后第一条油门 MOVE 的间隔"当延迟判据（踏板）** [V]——那只是"手指下一次动"的时间，混入用户行为。
-- 继承死路 [X]（详 `.handoffs/20260914210237-handoff.md` §4 与 `.handoffs/20260914223116-handoff.md`）：`coroutineScope{}` 内多源竞速 / 只加源数改 scope / `result::class.simpleName` 记日志 / 声称装机未执行 `adb install` / `***text***` 粗斜体 / `MarkdownText` 表格 / alpine 跑 glibc ELF / psql `-v` 传大 JSON / 旧快照覆盖 configs 表 / `LocalBringIntoViewSpec` / `evaluateLoginGate` 初始 true early return / Remote Preferences `remove()` 清 token / scheduleDraw 治 LTPO / 单变量弹窗挂载 / 磁盘缓存原图字节 / `screencap` 裁图目测尺寸。
+- **[X] 认为游戏进程启动~15s 崩溃是模块改动引入** [V]——实为我在**锁屏（Asleep）状态下 monkey 冷启动**游戏所致；crash 记录 `located=0`/`pc=+0x0`（崩点不在模块内）。用户正常操作那轮（pid 989）**零崩溃**，signal 9 是用户手动杀。不要把它当回归。
+- **[X] 用锁屏态 monkey 拉起游戏做验证** [V]——屏幕 Asleep 时冷启动 Unity 会 SIGSEGV（pid 18250/18717 两次），污染日志。验证前先 `KEYCODE_WAKEUP` 亮屏。
+- 继承死路 [X]（详 `.handoffs/20260914233905-handoff.md` §4 及更早归档）：踏板"版本号早退豁免"/"单向补送"/"MOVE 间隔判据" / `coroutineScope{}` 内多源竞速 / `result::class.simpleName` 记日志 / 声称装机未执行 `adb install` / `***text***` 粗斜体 / MarkdownText 表格 / alpine 跑 glibc ELF / psql `-v` 传大 JSON / `LocalBringIntoViewSpec` / `evaluateLoginGate` 初始 true early return / Remote Preferences `remove()` 清 token / scheduleDraw 治 LTPO / 单变量弹窗挂载 / 磁盘缓存原图字节 / `screencap` 裁图目测尺寸 / `git rebase -i`。
 
 ## 5. 已知坑
-- ⚠️ **踏板日志无法反映"静默恢复"** [?](继承)——`pedal[*] MOVE` 只在对应 view 自身触摸事件时打印，跨 view 补送不可见。排查同类问题别只 grep MOVE 时间戳，要看状态机终止态。
-- ⚠️ **同类坑仍在 `EulaDialog`/`UpdateDialog` 潜伏** [?](继承)——无 weight 的可滚动正文 + 按钮同列，平板可能重演窄条。修法见 CLAUDE.md 弹窗排版铁律。
-- ⚠️ **踏板修复未在反馈用户真机做"修复后仍能复现"的对照** [?](继承)——反馈用户已口头确认"好了"，但日志只能证明"0 个抬起未恢复"。
-- ⚠️ **权限门视觉未实机验收 / bot 投递未端到端验证 / 信箱探针残留 / 永久 4xx 先提示后丢弃 / OkHttp 败者不可中断** [?](继承)——均未动。
-- ⚠️ **`clearAuth` 的 `no service bound, daemon stores NOT cleared` 是设计内 digest** [V](本会话新)——NPatch 清数据后模块 App 首启、AFA 未授时必现一次；此时 daemon 侧确无残留（信箱写失败与 daemon 无关），随后的登录写会覆盖。**不要把它当故障指纹**。
-- ⚠️ **对话纪律** [V](继承)——1 mid-turn 消息逐条消化 2 旧快照不当现在时断言 3 装机前先验设备 APK 版本 4 调查日志前先对齐"几次"计数 5 修 UI 时序先拉触摸时间线 6 日志判不了的结论不要用日志去反驳用户体感。
+- ⚠️ **旧 `Android/data/<pkg>/files/` 下的日志为历史残留** [?]——迁移后不清理，新日志只写 media。用户报"日志没更新"先确认看的是 media 目录。
+- ⚠️ **日志迁移未在官版（com.Vince）单测** [?]——仅共存版实机验证；LogExporter 对两包名都遍历，理论对称。
+- ⚠️ **同进程双路径** [?]——Logger 游戏进程优先 media，`mkdirs` 失败才回落 externalFilesDir；未见失败案例，但回落时导出会读不到（LogExporter 只读 media）。
+- ⚠️ **同类弹窗坑仍在 `EulaDialog`/`UpdateDialog` 潜伏** [?](继承)——无 weight 的可滚动正文 + 按钮同列，平板可能重演窄条。修法见 CLAUDE.md 弹窗排版铁律。
+- ⚠️ **`clearAuth` 的 `no service bound, daemon stores NOT cleared` 是设计内 digest** [V](继承)——NPatch 清数据后首启必现一次，不是故障指纹。
+- ⚠️ **对话纪律** [V](继承)——1 逐条消化 mid-turn 消息 2 旧快照不当现在时 3 装机前验设备 APK 版本 4 调查日志先对齐"几次"计数 5 修 UI 时序先拉触摸时间线 6 日志判不了的结论不要用日志反驳用户体感 7 **别在用户锁屏时操作设备**。
 
 ## 6. 下一步（有序）
-1. （可选，等用户决定）给 NPatch #147 补 `bug` 标签——网页表单重提，或等维护者补。
-2. （可选）同法加固 `EulaDialog`/`UpdateDialog` 正文 weight（见 §5）。
-3. （可选）验收权限门控页 / 真实群验证 bot 投递 / 清理信箱探针残留 / ABSdiag·TCdiag 降频。
-4. （可选）让反馈用户日志确认出现 `pedal[DUAL] rearbitrate@...` 行——独立证实其装的是踏板修复版。
+1. （可选）官版（com.Vince）跑一遍导出验证两包名对称。
+2. （可选）清理旧 `Android/data/<pkg>/files/` 残留日志文件（或在迁移说明里告知用户）。
+3. （可选）同法加固 `EulaDialog`/`UpdateDialog` 正文 weight（见 §5）。
+4. （可选）验收权限门控页 / 真实群验证 bot 投递 / ABSdiag·TCdiag 降频。
 
 ## 7. 留给用户的开放问题
-- 本次围场修复是否要正式发版（涉及版本号，需用户定）？还是先转 release APK 私发验证？
-- 踏板修复那行低频诊断 `pedal[DUAL] rearbitrate@...` 长期保留还是下个版本删掉？
-- 信箱「存在即权威」的写方收敛是否够——是否要从根上改为由服务端 401 判定登出（需权衡反向红线）？
-- EulaDialog / UpdateDialog 是否加同样 weight 加固？
+- 本次日志导出改造是否要正式发版（涉及版本号，需用户定）？还是先转 release APK 私发验证？
+- 旧 `Android/data/<pkg>/files/` 残留日志要不要主动清理（用户设备上会一直躺着）？
+- 那两条锁屏态 SIGSEGV（`located=0`，libil2cpp 空指针）是否需要单独追（可能与模块无关，属 Unity 冷启动）？
