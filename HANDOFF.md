@@ -52,6 +52,5 @@ BUILD SUCCESSFUL in 2s
 4. （可选）验收权限门控页 / 真实群验证 bot 投递 / ABSdiag·TCdiag 降频。
 
 ## 7. 留给用户的开放问题
-- 排行榜等宽字体 + 日志导出 media 直读两处改动是否正式发版（涉及版本号，需用户定）？还是先转 release APK 私发验证？
 - 旧 `Android/data/<pkg>/files/` 残留日志要不要主动清理（用户设备上会一直躺着）？
 - 那两条锁屏态 SIGSEGV（`located=0`，libil2cpp 空指针）是否需要单独追（可能与模块无关，属 Unity 冷启动）？
