@@ -322,6 +322,13 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
                     .putString(KEY_PADDOCK_TOKEN, token)
                     .apply()
                 Logger.i(TAG, "App: flushed paddock token to remote prefs")
+                // 跨包信箱**必须与 daemon 同步补写**（2026-09-14 实机修复）：信箱是
+                // 游戏进程登录态的权威通道，唯一写点在 saveAuth/clearAuth。若信箱曾
+                // 被清空（旧版游戏进程误触发的 fresh-install 清理）而 daemon 仍有
+                // token，只补 daemon 的话游戏进程下次启动看到空信箱就权威否决 daemon
+                // → "登录态读到了（门控走 Provider 放行）却提示网络异常（fetchMe 用
+                // 被否决的 authToken=null）"。每次 daemon flush 时把信箱对齐写入。
+                PaddockClient.flushAuthToMailbox()
             } catch (e: Throwable) {
                 Logger.w(TAG, "App: flush paddock token failed", e)
             }

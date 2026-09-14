@@ -105,6 +105,15 @@ object PaddockClient {
      */
     private fun wipeAuthIfFreshInstall(ctx: Context) {
         try {
+            // ⚠️ **仅模块 App 进程执行**（2026-09-14 实机修复）。游戏进程没有独立
+            // 安装周期语义，却持有**自己包**的 INSTALL_PREFS 标记与"自己包"的
+            // wipe 判据；NPatch「清数据」会把两个进程的内部 prefs 一并清掉（"清
+            // 数据"与"卸载重装"在物理上不可区分）→ 模块 App 登录写好信箱后，游戏
+            // 进程首次冷启动也会判定"新安装"并 clearAuth，把刚建立的权威信箱
+            // 清成空 token（实机 21:41:03：Mailbox write OK(60B) 之后游戏进程
+            // 写 12B 空 token，信箱"存在即权威"→ 误判已登出，零 hook + 循环
+            // Toast）。游戏进程只做 loadAuth 读侧，写侧统一归模块 App。
+            if (remoteTokenReader != null) return
             val prefs = ctx.getSharedPreferences(INSTALL_PREFS, Context.MODE_PRIVATE)
             if (prefs.getBoolean(KEY_AUTH_WIPE_DONE, false)) return
             // 无条件全渠道清（不只看本地文件）：残留 token 可能只在 daemon
@@ -525,6 +534,21 @@ object PaddockClient {
 
     /** 当前内存 token（flush 兜底用），不读文件。 */
     fun peekAuthToken(): String? = authToken
+
+    /**
+     * 模块 App 侧：把已恢复的登录态补写回跨包信箱（[App.onServiceBind] 兜底调用）。
+     *
+     * 动机（2026-09-14 实机）：信箱是游戏进程登录态的权威通道，但它的唯一写点在
+     * [saveAuth]/[clearAuth]。若信箱曾在旧版逻辑下被清空（如游戏进程误触发的
+     * fresh-install 清理），此后模块 App 仅 daemon 仍有 token、信箱一直是空的——
+     * 游戏进程"存在即权威"看到空 token 就否决 daemon，登录态被单方面压掉。
+     * 模块 App 冷启动时（本地文件有 token）补一次信箱，与 daemon flush 同一时机，
+     * 把两侧重新对齐。写的是"有 token"版本；token 为空时 no-op（不覆盖权威"已登出"）。
+     */
+    fun flushAuthToMailbox() {
+        val t = authToken ?: return
+        writeAuthMailbox(JSONObject().put("token", t).toString())
+    }
 
     /**
      * 阻塞登录。成功返回 reg_seq/needs_avatar；失败返回错误文案（服务端原样带回）。
