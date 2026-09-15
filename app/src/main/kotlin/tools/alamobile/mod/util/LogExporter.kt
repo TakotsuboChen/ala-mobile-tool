@@ -14,6 +14,8 @@ import java.util.Locale
 /**
  * 日志导出工具：收集模块进程 + 游戏进程的 Java/native 日志，
  * 合并到 cacheDir/logs/ 下，用 FileProvider 生成 URI 供 ShareSheet 分享。
+ * 另附 NPatch 框架日志（同目录 `npatch/log/`）——覆盖「模块根本没加载起来」的
+ * 开屏闪退现场，见 [npatchLogFiles]。
  *
  * 读取策略：**模块 App 持 AFA（MANAGE_EXTERNAL_STORAGE）直接跨包读**
  * `/sdcard/Android/media/<游戏包>/`（2026-09-14 定案）。游戏进程把
@@ -37,6 +39,15 @@ object LogExporter {
     private const val NATIVE_LOG_FILE = "ala_tool_native.log"
     private const val NATIVE_CRASH_FILE = "ala_tool_crash_native.log"
     private const val MODULE_CRASH_FILE = "ala_tool_crash.log"
+
+    // NPatch 本地模式的框架日志：`<gameMediaDir>/npatch/log/<yyyyMMdd>.log`。
+    // 它记录的是**模块加载之前**的启动期事件（cache 命中/重建、LoadedApk source
+    // 模式、崩溃栈），是「游戏开屏闪退但模块日志全空」场景的唯一现场——
+    // 模块导出只读自己那两个 log 文件，此前这类问题必须向用户讨要第二份文件。
+    // 目录可能多天累积，只取最新几个（列表本身也是对外证据，见下）。
+    private const val NPATCH_LOG_DIR = "npatch/log"
+    private const val NPATCH_LOG_MAX_FILES = 3
+    private const val NPATCH_MARKER = "] Loaded patch config"
 
     // 导出只保留最近 24h 的条目。日志文件是 append 累积的（跨会话滚动保留），
     // 全量导出会把几天前的旧会话全部带上（实测一份导出里 68% 是已修复版本的
@@ -138,6 +149,35 @@ object LogExporter {
             foundAny = true
         }
 
+        // 3. NPatch 框架日志——「模块加载之前」的启动期现场。放在自家日志之后：
+        // 模块正常工作时它多是噪声；只有开屏闪退（游戏进程从未跑到模块初始化、
+        // 上面各段为空）时它才是唯一证据。两个包都试。
+        for (pkg in GAME_PACKAGES) {
+            val files = npatchLogFiles(pkg)
+            if (files.isEmpty()) continue
+            // 先列出文件名——「最近有没有新日志」本身是对外证据（例：游戏卡死时
+            // crash_hook 无信号、无高层异常，只有断流时间线；见 LAP_HOOK_NOTES 类场景）
+            sb.append("=== NPatch 框架日志 (${files.size} 个文件) ===\n")
+            Logger.d("AlaMobileTool", "LogExporter: NPatch 段 $pkg 命中 ${files.size} 个: " +
+                    files.joinToString { it.name })
+            for (f in files) {
+                sb.append("  【${f.name}】\n")
+                try {
+                    // NPatch 行首形如 `[2026-09-15T16:25:13.576][pkg:pid;tid]`，与
+                    // TS_PREFIX 兼容；崩溃例外栈是普通续行，会跟随其所属条目。
+                    val text = filterRecent(f.readText())
+                    sb.append(text)
+                    Logger.d("AlaMobileTool",
+                            "LogExporter: NPatch ${f.name} — ${text.length} 字符")
+                } catch (e: Throwable) {
+                    Logger.w("AlaMobileTool", "LogExporter: NPatch ${f.name} 读取失败: ${e.message}")
+                    sb.append("[读取失败: ${e.message}]\n")
+                }
+                sb.append('\n')
+            }
+            foundAny = true
+        }
+
         if (!foundAny) {
             // 所有来源都没读到：生成提示信息而非返回 null
             Logger.w("AlaMobileTool", "LogExporter: no log files found")
@@ -160,6 +200,28 @@ object LogExporter {
             "${context.packageName}.fileprovider",
             outFile
         )
+    }
+
+    /**
+     * NPatch 框架日志文件：`<gameMediaDir>/npatch/log/` 下的 `*.log`，按 mtime 降序、最多
+     * [NPATCH_LOG_MAX_FILES] 个（目录跨天累积，全量会把几周前无关会话一起带上）。
+     *
+     * 排除任何内含 `Loaded patch config` 的文件——那是**本次启动成功导致模块真正
+     * 运行**后写下的（该行由 LSPApplication 在模块装载阶段打印，不可能是崩溃现场）。
+     * 排除后留下的即「有过启动但模块从未活下来」的会话，正是开屏闪退要的证据。
+     */
+    private fun npatchLogFiles(pkg: String): List<File> {
+        val dir = File(gameMediaDir(pkg), NPATCH_LOG_DIR)
+        val all = dir.listFiles { f: File -> f.isFile && f.name.endsWith(".log") } ?: return emptyList()
+        return all.sortedByDescending { it.lastModified() }
+            .filterNot { containsTargetMarker(it) }
+            .take(NPATCH_LOG_MAX_FILES)
+    }
+
+    private fun containsTargetMarker(file: File): Boolean = try {
+        file.readLines().any { it.contains(NPATCH_MARKER) }
+    } catch (_: Throwable) {
+        false // 读不了（含恰好被游戏写入）就别排除，宁可多带
     }
 
     private fun appendLogFile(sb: StringBuilder, header: String, file: File) {
