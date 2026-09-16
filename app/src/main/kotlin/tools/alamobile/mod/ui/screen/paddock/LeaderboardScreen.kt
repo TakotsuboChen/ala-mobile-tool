@@ -46,7 +46,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -68,6 +68,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.preference.OverlaySpinnerPreference
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
@@ -262,7 +263,7 @@ fun LeaderboardScreen() {
                             rank = i + 1,
                             avatarUrl = e.avatarUrl,
                             name = e.username,
-                            value = "${e.points} 分",
+                            value = "${e.points}",
                             rowShape = boardRowShape(i, entries.size),
                             alpha = boardAlpha.value,
                             modifier = Modifier.animateItem(
@@ -358,6 +359,32 @@ private fun rankLabel(rank: Int): String = when (rank) {
     else -> "$rank"
 }
 
+/**
+ * 榜单数字列（名次/积分/圈速）的等宽数字样式：只开 OpenType `tnum` 特性，
+ * 不动字体、不动字号，叠在主题样式上使用 `MiuixTheme.textStyles.main.merge(TabularDigits)`。
+ *
+ * ## 为什么不用 `FontFamily.Monospace`
+ *
+ * 那是 `GenericFontFamily("monospace")`，Compose 解析它时走
+ * `Typeface.create("monospace", NORMAL)` —— 一次**运行时按族名查询**，命中哪个文件
+ * 由 ROM 的字体配置决定。ColorOS 16 实测：`cmd font dump` 报 `monospace` 指向
+ * DroidSansMono，但应用内实际渲染的不是它——榜行数字的相邻字形 advance 实测为
+ * `1→15px`、`5→23px`、`4→24px`（DroidSansMono 恒为 0.6em），逐项吻合 ColorOS 的
+ * `SysFont-Regular`。即族名被 ROM 重定向到系统 sans，等宽落空（Flyme 12 同样失效）。
+ *
+ * ## 为什么 tnum 能解决、且只影响这一处
+ *
+ * `tnum`（tabular numbers）是**字体自带**的数字变体：不换字体，只把数字换成字体里
+ * 那套等宽字形。对"ROM 把 monospace 换成哪个 sans"免疫——实测 ColorOS 的
+ * SysFont-Regular / OPSans-En-Regular / Roboto-Regular 的 GSUB 表里都带 tnum。
+ * 字体不带该特性时静默忽略，退化为今天的比例数字，不会更差。
+ *
+ * ⚠️ 只在本文件内使用：**不要挂到主题的 textStyles 上**——那会让全模块的数字
+ * （版本号、档位、偏移量…）都变等宽，观感突兀（已试过，用户明确否决）。
+ * 等宽是**榜单列对齐**的排版需求，不是全局字体风格。
+ */
+private val TabularDigits = TextStyle(fontFeatureSettings = "tnum")
+
 /** 空榜单行（与数据行同样的底色/圆角，保持连体卡观感）。 */
 @Composable
 private fun BoardEmptyRow(alpha: Float = 1f) {
@@ -409,9 +436,10 @@ private fun BoardRow(
             fontSize = if (rank <= 3) 22.5.sp else 15.sp,
             color = colorScheme.onBackground.copy(alpha = 0.6f),
             textAlign = TextAlign.Center,
-            // 数字名次用等宽，让 10 与 11 这类两位数在 32dp 槽位内宽度一致；
-            // 前三名是 emoji，若也切等宽字体会回落到单色/异形字形，故只对数字生效。
-            fontFamily = if (rank <= 3) null else FontFamily.Monospace,
+            // 数字名次也要等宽，让 10 与 11 这类两位数在 32dp 槽位内宽度一致。
+            // 前三名是 emoji——tnum 只作用于数字字形，对 emoji 无副作用，故无需分支。
+            // 详见 [TabularDigits] 的注释：为何不能用 FontFamily.Monospace。
+            style = MiuixTheme.textStyles.main.merge(TabularDigits),
             modifier = Modifier.width(32.dp),
         )
         AvatarOrPlaceholder(avatarUrl)
@@ -423,12 +451,19 @@ private fun BoardRow(
         )
         Text(
             text = value,
-            // 分数/圈速右对齐列：等宽数字（tabular figures 的字体级替代方案）。
-            // 系统 sans（Roboto/OPPO Sans/Flyme Sans）默认比例数字——"1" 窄、"8" 宽，
-            // 于是 5 位数分（10000 分）与 4 位数分（1234 分）右对齐时数字宽度参差，
-            // 整列右缘看着不齐。等宽字体令每个数字字形同宽，右对齐即得到"小数点对齐"
-            // 的整列观感（圈速 1:02.345 与 1:22.345 的秒数位严格对齐）。
-            fontFamily = FontFamily.Monospace,
+            // 分数/圈速右对齐列：数字必须等宽（tabular figures），否则"1"窄"8"宽，
+            // 右对齐后整列右缘参差、圈速的秒数位对不上。
+            //
+            // ⚠️ 不能用 `fontFamily = FontFamily.Monospace`——它是 GenericFontFamily，
+            // Compose 走 `Typeface.create("monospace", NORMAL)` 即【运行时按族名查询】，
+            // 命中哪个文件由 ROM 决定。ColorOS 16 实测把 monospace 重定向到系统 sans
+            // （`cmd font dump` 报 DroidSansMono，但实测 advance 为 15/23/24px 随字形变化，
+            // 逐项吻合 SysFont-Regular），等宽诉求落空。
+            //
+            // tnum 是**字体自带**的数字变体（OpenType feature），不换字体、只换数字字形，
+            // 对"ROM 换成哪个 sans"免疫——ColorOS 的 SysFont/OPSans/Roboto 都带 tnum。
+            // 字体不带该特性时被静默忽略，退化为今天的行为，不会更差。
+            style = MiuixTheme.textStyles.main.merge(TabularDigits),
             fontSize = 15.sp,
             color = colorScheme.onBackground,
         )
