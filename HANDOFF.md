@@ -1,74 +1,71 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-09-17T01:34:21+08:00 · Git HEAD: `0ede3d1`（本文件为后续 handoff 提交，其 parent）
+生成时间: 2026-09-17T21:13:18+08:00 · Git HEAD: `c520d10`（本文件为后续 handoff 提交，其 parent）
 paddock 仓 HEAD: `973329d`（本会话未动）
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: 模块 main @ `0ede3d1`（2026-09-17 01:34）
-- 漂移检查: `git rev-parse HEAD~1`（模块仓）是否仍 = `0ede3d1`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA；不一致以 git 实际输出为准
+- 锚点: 模块 main @ `c520d10`（2026-09-17 21:13）
+- 漂移检查: `git rev-parse HEAD~1`（模块仓）是否仍 = `c520d10`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA；不一致以 git 实际输出为准
 - 待重探的 [?]: 见下方标记
-- 先读: `docs/NPATCH_CACHE_CRASH_NOTES.md`（**用户报"开屏闪退"先读它**）+ `app/src/main/kotlin/tools/alamobile/mod/util/LogExporter.kt`
+- 先读: CLAUDE.md「编辑模式（长按工具图标出入）的几条非显然约定」条目（本会话已更新为 ①-⑩）+ `app/src/main/kotlin/tools/alamobile/mod/overlay/OverlayManager.kt`
 
 ## 1. 当前目标
-**已完成**：排行榜数字列等宽改用 OpenType `tnum`（替代失效的 `FontFamily.Monospace`）+ 去掉积分值"分"后缀。**现无进行中目标。**
+**已完成**：编辑模式三连修（退出后踏板残留可拖拽 / 进场变暗闪黑 / 编辑中切踏板模式退出后黑屏常驻）+ 长按重置改语义（长按空白处 2s 恢复当前显示单/双踏板，替代长按控件 3s）+ 编辑模式游戏全屏禁触。**现无进行中目标。**
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **工作已提交推送**：`b2dd08b`（fix: 榜单 tnum）、`0ede3d1`（docs: CLAUDE.md+README 同步）。两次 push 均成功。
-- [V] **门槛**：`:app:lint` exit=0（58 warnings/4 hints，与开工基线持平；baseline 另过滤 3 errors+14 warnings）；`:app:assembleRelease -x lintVital*` exit=0；日志红线自查 clean（改动文件 0 处直用 `Log.x`）。
-- [V] **已装机**：`adb install -r .../app-release.apk` → `Success`，设备 OnePlus `OPD2413`（ColorOS 16.0.9.400 / A16，serial `e98a35cb`）。版本号**未改动**（1.0.4 Alpha 1 / 104100）。
-- [V] **用户实机验收通过**（`/handoff OK 了`）——等宽生效、观感可接受。
+- [V] **工作已提交推送**：`55f1bae`（fix: 编辑模式三修）、`c520d10`（docs: CLAUDE.md+README 同步）。两次 push 均成功。
+- [V] **门槛**：`:app:lint` exit=0；`:app:assembleRelease -x lintVital*` exit=0。日志红线未新增违规（改动全在 overlay，日志走 Logger）。
+- [V] **已装机**：`adb install -r .../app-release.apk` → `Success`，设备 OnePlus `OPD2413`（serial `e98a35cb`）。版本号**未改动**（1.0.4 Alpha 1 / 104100）。
+- [V] **用户实机验收通过**（`/handoff ok`）——三修 + 长按空白 2s + 全屏禁触均过。
 - [V] 工作区 clean（除本 HANDOFF.md 与归档文件）。
-- [V] **`FontFamily` import 已从 LeaderboardScreen 移除**；`TabularDigits` 为文件级 `private val`。
+- [V] Bug1 根因有日志实锤链：dim 层孤儿化 = removeGamingOverlays 清了 dimView/hintView 引用但没摘 view → rebuild 时 ensureXxx 新建第二份层，旧层 alpha=1 永久盖屏（退出后无任何淡出日志佐证）。
 
 ### 测试/build 输出（本次交接 run 的真实输出，含退出码）
 ```
-$ ./gradlew :app:lint        → exit=0, BUILD SUCCESSFUL（58 warnings, 4 hints）
+$ ./gradlew :app:lint        → exit=0, BUILD SUCCESSFUL
 $ ./gradlew :app:assembleRelease -x :app:lintVitalAnalyzeRelease -x :app:lintVitalRelease
                              → exit=0, BUILD SUCCESSFUL
 $ adb install -r .../app-release.apk → Success
 ```
 
 ## 3. 决策与理由
-- **等宽改用 `tnum` 而非 `FontFamily.Monospace`** [V]——后者是 `GenericFontFamily("monospace")`，Compose 走 `Typeface.create("monospace", NORMAL)` = **运行时按族名查询**，由 ROM 决定命中文件。ColorOS 16 实测重定向到系统 sans（`cmd font dump` 报 DroidSansMono，但榜行数字相邻字形 advance 实测 `1→15px / 5→23px / 4→24px`，逐项吻合 `SysFont-Regular`；Flyme 12 同样失效）。`tnum` 是字体自带数字变体，对"ROM 换成哪个 sans"免疫。否决：内置字体文件进 APK（APK +200~500KB，字形风格与用户名割裂）。
-- **作用域刻意收在榜单行内，不挂主题 `textStyles`** [V]——挂主题后版本号/档位/偏移量等无关数字一并变等宽，用户明确否决（"别的界面的数字也变成等宽了，太难看"）。等宽是**榜单列对齐**的排版需求，不是全局字体风格。已把这条写进 CLAUDE.md 防回归。
-- **前三名 emoji 不再做 `rank <= 3` 分支** [V]——`tnum` 是数字字形替换特性，emoji 走另一套字形表，套上零影响；省一个会腐烂的条件。
-- **删积分"分"后缀** [V]——用户要求，且与纯数字的圈速列统一。
+- **退场收尾守卫语义状态而非动画终值** [V]——`animateFade` 的 `alpha == 0f` 判据删掉（动画末帧走 Choreographer，与同时到期的 postDelayed 差 0~1 帧，alpha≈0.03 恒不为 0 → 永不置 GONE → 编辑层 alpha≈0 常驻吃触摸 = Bug1"退出后仍可拖拽"）。`!editMode` 守卫已覆盖"退出中途重进"。
+- **dim/hint 层"不摘除 + 不清引用"成对** [V]——rebuild 路径清引用会让 ensureXxx 新建第二份层（孤儿 view 盖屏 = Bug3 黑屏）；防抖（编辑中改参数不重播渐暗）靠复用旧层（alpha 已是 1，1→1 空动画）。编辑层三 tag 仍摘除并清引用（真死 view）。
+- **dim/hint 新建层初值恒 `alpha = 0f`** [V]——旧 `if (editMode) 1f else 0f` 在进场路径恒命中 1f 分支（toggleEditMode 先置位再走到这）→ 1→1 空动画 = Bug2 进场闪黑。
+- **编辑模式触摸三路分流** [V]——本层矩形→拖拽；空白→消费（全屏禁触实现点）；兄弟矩形/工具按钮→return false 穿透（工具按钮穿透 = 退出编辑模式唯一出口，被吃掉用户锁死）。空白判定 `isBlankArea` 是**聚合式**（遍历全部编辑层矩形 + 工具按钮）——触摸只派给 z 序最高层，单层自判会把兄弟矩形当空白吃掉。
+- **长按重置语义改为"长按空白处 2s 恢复当前显示踏板"** [V]——用户要求；重置范围 = 踏板两套（油门+刹车编辑层都 reset），换挡控件不在范围（与文案一致）；走 `resetToDefault` → 既有 `updateTarget → onChanged` 落盘链路。文案引用 `LONG_PRESS_RESET_MS` 常量联动，不再硬编码。
+- **长按取消阈值 = 3×touchSlop 欧氏距离** [V]——touchSlop（≈8dp）是"拖拽开始"语义，手指静止生理抖动逐帧累积必超 1×slop → "经常触发不了长按"（用户实测，猜测正确）。3×slop（≈24dp）放行全部抖动、保留取消能力。控件内拖拽升级仍用 1×slop，未动。
 
 ## 4. 失败的尝试 — 不要再试
-- **[X] 全局挂 `tnum` 到主题 `textStyles`** [V]——技术有效但产品错误：全模块数字变等宽，用户明确否决。等宽只对"纵向比较同一列数字"有价值。
-- **[X] 用 `FontFamily.Monospace` 做等宽** [V]——被 ROM 族名重定向吃掉，ColorOS/Flyme 双双失效（见 §3 定量证据）。
-- **[X] 指望 miuix `Text` 转发 `fontFeatureSettings`** [V]——`Text-Nvy7gAk` 只有 fontFamily/fontSize/fontWeight 等白名单形参，无该参数。必须走 `style = ...merge(...)`。
-- **[X] 靠 `hasFontAttributes()` 早退解释失效** [V]——它只决定是否做 fallback SpanStyle；`applySpanStyle` 施加该特性在其**之后**，判据 `!= null && != ""`，与早退无关。已排除。
-- **[X] 用 `app_process`/`dalvikvm` 跑 on-device Typeface 探针** [V]——`Assertion failed: src == nullptr && gDefaultTypeface == nullptr`（Linux 路径下 native typeface init 失败）；`dalvikvm` 另缺 `Log.println_native`。别在设备上跑独立 JVM 探针。
-- **[X] 用 `tail` 截断 gradle 输出验门槛** [V]（继承）——会吞真实退出码；改 `> /tmp/x.txt 2>&1; echo exit=$?`。
-- **[X] 预设 adb 传输方式** [V]（继承）——见 §5。
-- 继承死路 [X]（详 `.handoffs/20260917013355-handoff.md` §4 及更早归档）：编辑层尺寸=控件尺寸+clipChildren 修四角 / 变暗层插 index 0 / `withEndAction` 做淡出收尾 / 提示文字画在编辑框 onDraw / `setShadowLayer` 加阴影 / `result::class.simpleName` 记日志 / 锁屏态 monkey 拉起 / 复用 `Logger.gameMediaDir` / 踏板"单向补送"·"MOVE 间隔判据" / `coroutineScope{}` 内多源竞速 / `***text***` 粗斜体 / MarkdownText 表格 / Remote Preferences `remove()` 清 token / `scheduleDraw` 治 LTPO / 单变量弹窗挂载 / 磁盘缓存原图字节。
+- **[X] `animateFade` 收尾加 `view.alpha == 0f` 判据** [V]——动画末帧与 postDelayed 竞序，alpha 恒差最后一点，判据永不成立。守卫语义状态（`!editMode`）而非视觉终值。
+- **[X] dim/hint 层初值写 `alpha = if (editMode) 1f else 0f`** [V]——进场路径 editMode 已先置位，条件恒真 → 新层初值 1 + 1→1 空动画 = 闪黑。"防重播"不靠初值靠复用。
+- **[X] `removeGamingOverlays` 清 dimView/hintView 引用** [V]——view 还挂在树上，清引用 = 孤儿 view + 丢失唯一引用，退出后黑屏常驻（日志实锤：rebuildFromConfigChange ×8 连发后退出无淡出日志）。"清引用"必须只对真正被摘的 view 做。
+- 继承死路 [X]（详 `.handoffs/20260917213000-handoff.md` §4 及更早归档）：编辑层尺寸=控件尺寸+clipChildren 修四角 / 变暗层插 index 0 / `withEndAction` 做淡出收尾 / 提示文字画在编辑框 onDraw / `setShadowLayer` 加阴影 / `result::class.simpleName` 记日志 / 锁屏态 monkey 拉起 / 复用 `Logger.gameMediaDir` / 踏板"单向补送"·"MOVE 间隔判据" / `coroutineScope{}` 内多源竞速 / `***text***` 粗斜体 / MarkdownText 表格 / Remote Preferences `remove()` 清 token / `scheduleDraw` 治 LTPO / 单变量弹窗挂载 / 磁盘缓存原图字节 / 全局挂 `tnum` 到主题 textStyles / `FontFamily.Monospace` 做等宽 / miuix `Text` 转发 `fontFeatureSettings` / `hasFontAttributes()` 早退解释失效 / on-device Typeface 探针 / `tail` 截断 gradle 输出验门槛。
 
 ## 5. 已知坑
-- ⚠️ **读图会触发网关层 token 爆炸（本会话实证）** [V]——`Read` 把图放在 `tool_result` 内，本机网关 NewAPI（`newapi.takotsubo.cloud`）在 Anthropic→OpenAI 降级时把整个 base64 序列化成**纯文本**（`case "tool_result"` 分支 `Marshal` + `SetStringContent`；上游修复 PR QuantumNous/new-api#4873 **仍未合并**），BPE 切词 → 单图 ~12 万 token（transcript 铁证：增量 121641 ÷ b64 331092 = 2.72 字符/token）。**运维已在前置 OpenResty 加 LuaJIT 拦截器修复**（复测 465KB 全屏图 nested 路径 1080 vs 顶级 1023，已持平）。⚠️ 这是**网关侧补丁**，换网关即复现；读图仍建议先降采样到长边 ≤1568px。详见记忆 `read-image-token-explosion-gateway-bug`。
-- ⚠️ **`Read` 图片不提示文件大小** [V]——先 `ls -l` 看字节数；本机有 PIL 12.3 / numpy 2.2 可降采样/裁剪。
-- ⚠️ **adb 设备必是本机、用户口中的"用户"必是远端** [V]（继承）——两集合不相交；**不预设有线/无线**，每次先 `adb devices -l`。见记忆 `adb-device-is-always-mine-users-are-remote`。
+- ⚠️ **读图会触发网关层 token 爆炸** [V]（继承）——网关侧 OpenResty LuaJIT 拦截器已修（换网关即复现）；读图先降采样到长边 ≤1568px。详见记忆 `read-image-token-explosion-gateway-bug`。
+- ⚠️ **adb 设备必是本机、用户口中的"用户"必是远端** [V]（继承）——不预设有线/无线，每次先 `adb devices -l`。
 - ⚠️ **LogExporter 的 3 行诊断日志的去留未定** [?]（继承）——现保留；建议降为只留"命中 N 个"一行。
 - ⚠️ **NPatch 段未在真实 NPatch 环境端到端验证** [?]（继承）——只做了造数据单元级验证。
 - ⚠️ **`Logger.gameMediaDir` / `LogExporter.gameMediaDir` 是两份实现** [?]（继承）——路径字面量两处漂移，可选收拢。
 - ⚠️ **旧 `Android/data/<pkg>/files/` 下日志为历史残留** [?]（继承）——不清理；用户报"日志没更新"先确认看的是 media 目录。
 - ⚠️ **日志迁移未在官版（com.Vince）单测** [?]（继承）——仅共存版实机验证。
 - ⚠️ **同类弹窗坑仍在 `EulaDialog`/`UpdateDialog` 潜伏** [?]（继承）——无可滚动正文 `weight` 时平板可能重演窄条按钮。
-- ⚠️ **编辑模式重构后仅共存版 + 双踏板模式实机走过** [?]（继承）——SINGLE 模式、换挡控件编辑层、官版包名未单独回归。
-- ⚠️ **榜单 tnum 只在 ColorOS 16 平板（OnePlus OPD2413）验过** [?]——未在 Flyme / 官版包名 / 其他 ROM 回归；字体不带 `tnum` 时会静默退化为比例数字（不更差，但也就没修好）。
+- ⚠️ **编辑模式本会话改动仅共存版 + SINGLE 模式实机验证** [?]——DUAL 双编辑层交互（聚合空白判定跨层让路）、换挡控件编辑层、官版包名未单独回归；3×slop 取消阈值也只在 OPD2413 单设备验过。
+- ⚠️ **榜单 tnum 只在 ColorOS 16 平板验过** [?]（继承）——未在 Flyme / 官版包名 / 其他 ROM 回归。
 - ⚠️ **对话纪律** [V]（继承）——1 逐条消化 mid-turn 消息 2 旧快照不当现在时 3 装机前验设备 APK 版本 4 调查日志先对齐"几次"计数 5 修 UI 时序先拉触摸时间线 6 日志判不了的结论不要用日志反驳用户体感 7 别在用户锁屏时操作设备 8 **动用户设备状态前先说明**。
 
 ## 6. 下一步（有序）
-1. （可选）其它 ROM 回归榜单 tnum（Flyme / 官版包名 `com.Vince`）。
-2. （可选）决定 LogExporter 3 行诊断日志留几行，改完重跑 `:app:lint` + 装机（继承）。
-3. （可选）回归 SINGLE 模式与换挡控件的编辑层（继承，尚未单测）。
-4. （可选）官版（com.Vince）跑一遍日志导出，验证两包名对称（继承）。
-5. （可选）加固 `EulaDialog`/`UpdateDialog` 正文 `weight`（继承）。
-6. （可选）验收权限门控页 / 真实群验证 bot 投递 / ABSdiag·TCdiag 降频（继承）。
+1. （可选）DUAL 模式回归编辑模式（聚合空白判定、双编辑层穿透、跨层拖拽互不干扰）。
+2. （可选）换挡控件编辑层回归（空白长按不重置换挡——设计如此，验证用户是否接受）。
+3. （可选）官版（com.Vince）回归编辑模式 + 日志导出两包名对称（继承）。
+4. （可选）决定 LogExporter 3 行诊断日志留几行，改完重跑 `:app:lint` + 装机（继承）。
+5. （可选）其它 ROM 回归榜单 tnum（Flyme 等，继承）。
+6. （可选）加固 `EulaDialog`/`UpdateDialog` 正文 `weight`（继承）。
 
 ## 7. 留给用户的开放问题
-- 榜单等宽在 Flyme / 其他 ROM 上要不要一并回归？（继承相关）
+- 3×slop 取消阈值在别的设备/ROM 上手感如何？要不要做成配置项？（继承相关：长按手感类参数）
 - 3 行诊断日志保留几行？（继承）
 - 旧 `Android/data/<pkg>/files/` 残留日志要不要主动清理？（继承）
 - 那两条锁屏态 SIGSEGV（`located=0`，疑与模块无关，属 Unity 冷启动）是否要单独追？（继承）
