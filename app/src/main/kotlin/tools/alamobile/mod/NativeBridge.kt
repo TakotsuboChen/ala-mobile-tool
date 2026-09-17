@@ -267,6 +267,24 @@ object NativeBridge {
     )
 
     /**
+     * 自锁型超车按键 hooks 安装（不动 init() 参数签名，与 initLap/initIntro 同模式）。
+     * hook HybridComponent.EnableOTK/DisableOTK —— 玩家 OTK 输入的唯一汇聚点
+     *（屏幕按钮与手柄力学都经此），把「按住」改成「点一下切换」。游戏自己的
+     * 合法性判定（ERS 是否解锁 / 电量是否够）完全不动。
+     */
+    @JvmStatic
+    external fun initOvertake(
+        enableLatchOvertake: Boolean,
+        touchPressOtk: Long,
+        touchReleaseOtk: Long,
+        disableOtk: Long
+    )
+
+    /** 运行时开关自锁型超车按键（配置广播到达后调用，不重装 hook）。 */
+    @JvmStatic
+    external fun setOvertakeLatch(active: Boolean)
+
+    /**
      * 计时赛有效圈速监听 hooks 安装（log-only，无 UI）。
      * - IRDSLevelLoadVariables.Awake：捕获 LLV 单例 → 读 trackToRace 赛道名
      *   （16 条 GP 赛道自动识别）。
@@ -430,6 +448,35 @@ object NativeBridge {
     fun setDRSActiveSafe(active: Boolean) {
         if (!isAvailable) return
         try { setDRSActive(active) } catch (e: Throwable) { Logger.w(TAG, "setDRSActive failed", e) }
+    }
+
+    /**
+     * 运行时同步「自锁型超车按键」开关（不重装 hook，同 [setDRSActiveSafe] 模式）。
+     * hook 恒装上，开关在 native 回调内判定。
+     */
+    @JvmStatic
+    fun setOvertakeLatchSafe(active: Boolean) {
+        if (!isAvailable) return
+        try { setOvertakeLatch(active) } catch (e: Throwable) { Logger.w(TAG, "setOvertakeLatch failed", e) }
+    }
+
+    /**
+     * 自锁型超车按键 hooks 安装安全包装。native 不可用 / 加载失败时静默降级 ——
+     * 等价于功能不生效（按钮保持原生自复位语义），不影响游戏。
+     */
+    @JvmStatic
+    fun initOvertakeSafe(enableLatchOvertake: Boolean) {
+        if (!isAvailable) return
+        try {
+            initOvertake(
+                enableLatchOvertake = enableLatchOvertake,
+                touchPressOtk = OffsetTable.ODOMETER_HANDLER_TOUCH_PRESS_OTK,
+                touchReleaseOtk = OffsetTable.ODOMETER_HANDLER_TOUCH_RELEASE_OTK,
+                disableOtk = OffsetTable.HYBRID_COMPONENT_DISABLE_OTK
+            )
+        } catch (e: Throwable) {
+            Logger.w(TAG, "initOvertake failed", e)
+        }
     }
 
     @JvmStatic
