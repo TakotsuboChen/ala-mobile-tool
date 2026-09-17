@@ -5,6 +5,7 @@
 #include "native_log.h"
 #include "pedal_hook.h"
 #include "drs_hook.h"
+#include "overtake_hook.h"
 #include "unlock_hook.h"
 #include "music_hook.h"
 #include "intro_hook.h"
@@ -331,6 +332,41 @@ Java_tools_alamobile_mod_NativeBridge_setDRSActive(JNIEnv *env, jclass clazz, jb
     (void) env;
     (void) clazz;
     drs_set_active((int) active);
+}
+
+// ─ 自锁型超车按键早期安装（不动 init() 44 参数签名，与 initUnlock/initIntro 同模式）──
+// 玩家在开场菜单/自由练习里就可能按 OTK，故与 DRS hook 一并走主路径尽早安装。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_initOvertake(JNIEnv *env, jclass clazz,
+                                                   jboolean enable_latch_overtake,
+                                                   jlong touch_press_otk, jlong touch_release_otk,
+                                                   jlong disable_otk) {
+    (void) env;
+    (void) clazz;
+
+    overtake_hook_config_t otk_cfg = {
+        .enable_latch_overtake = (bool) enable_latch_overtake,
+        .touch_press_otk_offset = (uintptr_t) touch_press_otk,
+        .touch_release_otk_offset = (uintptr_t) touch_release_otk,
+        .disable_otk_offset = (uintptr_t) disable_otk,
+    };
+
+    LOGI("initOvertake: latch=%d pressOTK=0x%lx releaseOTK=0x%lx disableOTK=0x%lx",
+         (int) enable_latch_overtake,
+         (unsigned long) touch_press_otk, (unsigned long) touch_release_otk,
+         (unsigned long) disable_otk);
+
+    if (!overtake_install_hooks(&otk_cfg)) {
+        LOGE("Failed to install overtake hooks");
+    }
+}
+
+// 运行时开关自锁型超车按键（配置广播到达后调用，不重装 hook）。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_setOvertakeLatch(JNIEnv *env, jclass clazz, jboolean active) {
+    (void) env;
+    (void) clazz;
+    overtake_set_active((int) active);
 }
 
 JNIEXPORT void JNICALL

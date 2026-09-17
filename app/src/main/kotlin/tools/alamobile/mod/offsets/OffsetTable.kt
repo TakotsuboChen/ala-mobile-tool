@@ -49,6 +49,23 @@ object OffsetTable {
     // OnDRSStateChanged 会丢失动画/音效/HUD/previousDRSState 维护）。
     const val CAR_MODIFIER_MANUAL_DRS_USAGE: Long = 0x1767D94L
 
+    // ── 自锁型超车按键（odometerHandler）──
+    // OTK 屏幕按钮的 UnityEvent 两个入口。**按钮专属**：全 .so 零 bl 指向，
+    // 唯一引用者是按钮 prefab（datapack.unity3d，类名
+    // `IRDS.UI.odometerHandler, Assembly-CSharp` + 这两个方法名 + 同文件 GUID，
+    // 8.0.6 实测 @offset 122230882）。
+    // 两个方法尾部各自无条件转发 HybridComponent.EnableOTK / DisableOTK。
+    //
+    // ⚠️ **不要**改去 hook HybridComponent.EnableOTK/DisableOTK：它们虽然也覆盖
+    // 触摸路径，但不是按钮专属 —— HybridComponent.switchHModeUp(0x1A27484) 是
+    // 游戏自己的 OTK toggle，被 odometerHandler.onHybridMapChange 与
+    // odometerHandler.Update（ERS 混动模式切换键）调用。挂那里会连带吞掉
+    // ERS 模式键的"关超车"。
+    const val ODOMETER_HANDLER_TOUCH_PRESS_OTK: Long = 0x1A0BE24L
+    const val ODOMETER_HANDLER_TOUCH_RELEASE_OTK: Long = 0x1A0BE40L
+    // HybridComponent.DisableOTK —— 解锁路径转调的游戏入口（保持动画/HUD 收尾）。
+    const val HYBRID_COMPONENT_DISABLE_OTK: Long = 0x1A27494L
+
     // carModifier 实例字段偏移（0xD8 icinp / 0x9C playercar / 0xF8 _currentDRSState）
     // 按仓库惯例以 native 侧 `#define OFF_*` 维护——字段偏移的升版核对清单
     // 就是 native 里全部 OFF_* 常量（见 CLAUDE.md），不在本表登记。

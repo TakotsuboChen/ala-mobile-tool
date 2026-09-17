@@ -22,6 +22,7 @@ add_library(
     src/il2cpp_hooks.c
     src/pedal_hook.c
     src/drs_hook.c
+    src/overtake_hook.c
     src/unlock_hook.c
     src/music_hook.c
     src/intro_hook.c
