@@ -622,9 +622,10 @@ object ModConfig {
             val (absMode, absStrength, absPressure) = migrateAbs(json)
             Settings(
                 pedalMode = migratePedalMode(json),
-                // 自动 DRS 功能未实现，强制读成 false，忽略任何旧配置里的 true，
-                // 避免老用户升级后开关显示"开"但实际无效果。
-                enableAutoDrs = false,
+                enableAutoDrs = json.optBoolean(
+                    KEY_ENABLE_AUTO_DRS,
+                    Defaults.ENABLE_AUTO_DRS
+                ),
                 disableAutoGear = json.optBoolean(
                     KEY_DISABLE_AUTO_GEAR,
                     Defaults.DISABLE_AUTO_GEAR
@@ -1032,7 +1033,7 @@ object ModConfig {
             val (absMode, absStrength, absPressure) = migrateAbs(j)
             Settings(
                 pedalMode = migratePedalMode(j),
-                enableAutoDrs = false,
+                enableAutoDrs = j.optBoolean(KEY_ENABLE_AUTO_DRS, Defaults.ENABLE_AUTO_DRS),
                 disableAutoGear = j.optBoolean(KEY_DISABLE_AUTO_GEAR, Defaults.DISABLE_AUTO_GEAR),
                 enableManualShift = j.optBoolean(KEY_ENABLE_MANUAL_SHIFT, Defaults.ENABLE_MANUAL_SHIFT),
                 enableUnlock = j.optBoolean(KEY_ENABLE_UNLOCK, Defaults.ENABLE_UNLOCK),

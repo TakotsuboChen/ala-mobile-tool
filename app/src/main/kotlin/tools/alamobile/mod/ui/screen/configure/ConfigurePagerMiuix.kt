@@ -46,6 +46,7 @@ import androidx.compose.material.icons.rounded.Opacity
 import androidx.compose.material.icons.rounded.BorderOuter
 import androidx.compose.material.icons.rounded.RoundedCorner
 import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material.icons.rounded.Air
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -197,6 +198,20 @@ fun ConfigurePagerMiuix(
                                 },
                                 checked = uiState.hideGamePedals,
                                 onCheckedChange = actions::setHideGamePedals
+                            )
+                            SwitchPreference(
+                                title = "自动 DRS 与 AA",
+                                summary = "在规定的区域自动打开减阻系统与主动空力套件",
+                                startAction = {
+                                    Icon(
+                                        Icons.Rounded.Air,
+                                        modifier = Modifier.padding(end = 6.dp),
+                                        contentDescription = null,
+                                        tint = colorScheme.onBackground
+                                    )
+                                },
+                                checked = uiState.enableAutoDrs,
+                                onCheckedChange = actions::setEnableAutoDrs
                             )
                             // TC 调节：游戏设置没有任何 TC 参数可调（仅手柄生效的
                             // 开关且被游戏每帧覆写），模块档位是移动端唯一调节途径。

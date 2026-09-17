@@ -101,6 +101,14 @@ class ConfigReceiver : BroadcastReceiver() {
                 Logger.i(TAG, "ConfigReceiver: setTcAbs enableTc=$enableTc enableAbs=$enableAbs")
             }
 
+            // 实时同步自动 DRS/AA 开关——hook 常驻（信号旁路式，见 drs_hook.c），
+            // 游戏运行中拨开关立即生效，不需要重装 hook。
+            val enableAutoDrs = incoming.optBoolean("enable_auto_drs", false)
+            if (tools.alamobile.mod.NativeBridge.isAvailable) {
+                tools.alamobile.mod.NativeBridge.setDRSActiveSafe(enableAutoDrs)
+                Logger.i(TAG, "ConfigReceiver: setDRSActive $enableAutoDrs")
+            }
+
             // 实时同步 TC 档位（强度插值 + 时机 ε/minSPD 配对覆写）——游戏运行中改档立即生效。
             // **必须经 tcEffectiveParams 按 tc_mode 派生**：mode=default 时无视
             // 缓存的 strength/timing（记忆值）恒为原厂透传，否则"调回游戏默认"

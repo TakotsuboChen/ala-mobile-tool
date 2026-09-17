@@ -553,6 +553,14 @@ class AlaMobileModule : XposedModule() {
                     } catch (e: Throwable) {
                         logX(Log.ERROR, TAG, "setTcParams failed: ${e.message}")
                     }
+                    // 自动 DRS/AA 运行时开关下发：init 已按配置装好 hook，
+                    // 这里显式同步一次开关（配置变更路径走同一个 setter）。
+                    try {
+                        NativeBridge.setDRSActiveSafe(enableAutoDrs)
+                        logX(Log.INFO, TAG, "setDRSActive $enableAutoDrs")
+                    } catch (e: Throwable) {
+                        logX(Log.ERROR, TAG, "setDRSActive failed: ${e.message}")
+                    }
                     // ABS 档位下发：同 TC 模式（init 兜底为不覆写/不缩放，这里补用户档位）。
                     try {
                         NativeBridge.setAbsParams(absMix, absBOverride, brakeScale)
