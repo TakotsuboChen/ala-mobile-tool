@@ -9,6 +9,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathNode
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 // 多 path SVG → ImageVector helper。与 OverviewPage.kt 的 svgIcon() 逻辑相同，
@@ -31,12 +32,17 @@ private fun svgIconMulti(
     name: String,
     viewportWidth: Float,
     viewportHeight: Float,
-    paths: List<SvgPath>
+    paths: List<SvgPath>,
+    // intrinsic 尺寸。**默认 24×24 只适用于近似正方形的 viewport**：本函数把
+    // viewport 映射到 defaultWidth×defaultHeight，两者比例不一致会导致非等比
+    // 拉伸。扁长图形（如 BoostIcon 的 90×48.49）必须按同比例传默认尺寸。
+    defaultWidth: Dp = 24.dp,
+    defaultHeight: Dp = 24.dp
 ): ImageVector =
     ImageVector.Builder(
         name = name,
-        defaultWidth = 24.dp,
-        defaultHeight = 24.dp,
+        defaultWidth = defaultWidth,
+        defaultHeight = defaultHeight,
         viewportWidth = viewportWidth,
         viewportHeight = viewportHeight
     ).apply {
@@ -143,7 +149,30 @@ val BrakeCurveIcon: ImageVector = svgIconMulti(
         SvgPath(d = "M248.83 190.46c-10.576 0-19.15 8.574-19.15 19.15s8.574 19.15 19.15 19.15c10.577 0 19.15-8.574 19.15-19.15s-8.574-19.15-19.15-19.15M287.44 229.07c-10.577 0-19.151 8.574-19.15 19.15 0 10.577 8.574 19.15 19.15 19.15s19.149-8.573 19.15-19.15-8.574-19.15-19.15-19.15M248.83 267.68c-10.576 0-19.15 8.574-19.15 19.15 0 10.577 8.574 19.15 19.15 19.15 10.577 0 19.15-8.573 19.15-19.15s-8.573-19.15-19.15-19.15M210.22 229.07a19.15 19.15 0 0 0-19.15 19.15 19.15 19.15 0 0 0 19.15 19.15 19.15 19.15 0 0 0 19.15-19.15 19.15 19.15 0 0 0-19.15-19.15")
     )
 )
-// ─── 围场（Paddock）底栏 icon：挥舞方格旗 ───
+// ── 自锁型超车按键（Boost）───
+// 用户提供 SVG：viewBox="5 25.75 90 48.49"，3 条同形 path 错位排列成三连箭头，
+// 全部 fill。
+// ⚠️ **路径坐标已平移**：viewBox 的四元组是 `minX minY width height`，原图图形
+// 占 x:5→95 / y:25.75→74.24。但 Compose 的 ImageVector **不支持非零 viewport
+// 原点**（viewportWidth/Height 只定义 0..W × 0..H）——若照搬原坐标配 90×48.49 的
+// viewport，图形只有 y<48.49 的部分可见，即**只画出上面约一半**（(48.49−26.8)/
+// (71−26.8)≈49%，正是实机看到的"只显示一半"）。故三个 path 的起始点各减去
+// (5, 25.75)：m36.902/65.797/94.691 48.891 → 31.902/60.797/89.691 23.141。
+// 后续命令全是相对坐标（c/l 小写），不受平移影响，字节原样保留。
+// ⚠️ 图形比例 ≈1.856:1（扁长），intrinsic 尺寸必须同比例 —— 沿用 24×24 会纵向
+// 拉伸 1.86 倍（箭头变瘦高），故给 24 × 12.93dp。
+val BoostIcon: ImageVector = svgIconMulti(
+    "BoostIcon", 90f, 48.49f,
+    listOf(
+        SvgPath(d = "m31.902 23.141-13.344-22.102c-0.38672-0.64453-1.0859-1.0352-1.8359-1.0352h-14.574c-1.6719 0-2.6992 1.8242-1.8359 3.2539l11.996 19.883c0.41016 0.67969 0.41016 1.5352 0 2.2148l-11.996 19.883c-0.86328 1.4297 0.16797 3.2539 1.8359 3.2539h14.582c0.75 0 1.4492-0.39453 1.8359-1.0352l13.332-22.102c0.41016-0.68359 0.41016-1.5352 0-2.2188z"),
+        SvgPath(d = "m60.797 23.141-13.344-22.102c-0.38672-0.64453-1.0859-1.0352-1.8359-1.0352h-14.57c-1.668 0-2.6992 1.8242-1.8359 3.2539l11.996 19.883c0.41016 0.67969 0.41016 1.5352 0 2.2148l-11.996 19.883c-0.86328 1.4297 0.16797 3.2539 1.8359 3.2539h14.582c0.75 0 1.4492-0.39453 1.8359-1.0352l13.332-22.102c0.41016-0.68359 0.41016-1.5352 0-2.2188z"),
+        SvgPath(d = "m89.691 23.141-13.344-22.102c-0.38672-0.64453-1.0859-1.0352-1.8359-1.0352h-14.57c-1.6719 0-2.6992 1.8242-1.8359 3.2539l11.996 19.883c0.41016 0.67969 0.41016 1.5352 0 2.2148l-11.996 19.883c-0.86328 1.4297 0.16797 3.2539 1.8359 3.2539h14.582c0.75 0 1.4492-0.39453 1.8359-1.0352l13.332-22.102c0.41016-0.68359 0.41016-1.5352 0-2.2188z"),
+    ),
+    defaultWidth = 24.dp,
+    defaultHeight = 12.93.dp
+)
+
+// ── 围场（Paddock）底栏 icon：挥舞方格旗 ───
 // 用户提供 SVG（100×100 viewBox，单 path fill），path 数据原样搬运。
 val ChequeredFlagIcon: ImageVector = svgIconMulti(
     "ChequeredFlagIcon", 100f, 100f,

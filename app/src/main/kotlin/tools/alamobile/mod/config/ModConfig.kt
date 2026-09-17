@@ -54,6 +54,9 @@ object ModConfig {
 
     // Feature toggles
     const val KEY_ENABLE_AUTO_DRS = "enable_auto_drs"
+    // 自锁型超车按键：把 OTK（超车）按钮从「按住才生效」改成「点一下切换」。
+    // 只改按键抬落语义，是否允许开超车（ERS 解锁 / 电量）仍由游戏判定。
+    const val KEY_ENABLE_LATCH_OVERTAKE = "enable_latch_overtake"
     const val KEY_DISABLE_AUTO_GEAR = "disable_auto_gear"
     const val KEY_ENABLE_MANUAL_SHIFT = "enable_manual_shift"
     const val KEY_ENABLE_UNLOCK = "enable_unlock"
@@ -516,6 +519,7 @@ object ModConfig {
 
     private object Defaults {
         const val ENABLE_AUTO_DRS = false
+        const val ENABLE_LATCH_OVERTAKE = false
         const val DISABLE_AUTO_GEAR = false
         const val ENABLE_MANUAL_SHIFT = false
         const val ENABLE_UNLOCK = false
@@ -626,6 +630,10 @@ object ModConfig {
                     KEY_ENABLE_AUTO_DRS,
                     Defaults.ENABLE_AUTO_DRS
                 ),
+                enableOvertakeLatch = json.optBoolean(
+                    KEY_ENABLE_LATCH_OVERTAKE,
+                    Defaults.ENABLE_LATCH_OVERTAKE
+                ),
                 disableAutoGear = json.optBoolean(
                     KEY_DISABLE_AUTO_GEAR,
                     Defaults.DISABLE_AUTO_GEAR
@@ -717,6 +725,7 @@ object ModConfig {
     fun buildJson(settings: Settings): String = JSONObject().apply {
         put(KEY_PEDAL_MODE, settings.pedalMode.value)
         put(KEY_ENABLE_AUTO_DRS, settings.enableAutoDrs)
+        put(KEY_ENABLE_LATCH_OVERTAKE, settings.enableOvertakeLatch)
         put(KEY_DISABLE_AUTO_GEAR, settings.disableAutoGear)
         put(KEY_ENABLE_MANUAL_SHIFT, settings.enableManualShift)
         put(KEY_ENABLE_UNLOCK, settings.enableUnlock)
@@ -1034,6 +1043,7 @@ object ModConfig {
             Settings(
                 pedalMode = migratePedalMode(j),
                 enableAutoDrs = j.optBoolean(KEY_ENABLE_AUTO_DRS, Defaults.ENABLE_AUTO_DRS),
+                enableOvertakeLatch = j.optBoolean(KEY_ENABLE_LATCH_OVERTAKE, Defaults.ENABLE_LATCH_OVERTAKE),
                 disableAutoGear = j.optBoolean(KEY_DISABLE_AUTO_GEAR, Defaults.DISABLE_AUTO_GEAR),
                 enableManualShift = j.optBoolean(KEY_ENABLE_MANUAL_SHIFT, Defaults.ENABLE_MANUAL_SHIFT),
                 enableUnlock = j.optBoolean(KEY_ENABLE_UNLOCK, Defaults.ENABLE_UNLOCK),
@@ -1258,6 +1268,7 @@ object ModConfig {
         return Settings(
             pedalMode = Defaults.PEDAL_MODE,
             enableAutoDrs = Defaults.ENABLE_AUTO_DRS,
+            enableOvertakeLatch = Defaults.ENABLE_LATCH_OVERTAKE,
             disableAutoGear = Defaults.DISABLE_AUTO_GEAR,
             enableManualShift = Defaults.ENABLE_MANUAL_SHIFT,
             enableUnlock = Defaults.ENABLE_UNLOCK,
@@ -1298,6 +1309,9 @@ object ModConfig {
     data class Settings(
         val pedalMode: PedalMode,
         val enableAutoDrs: Boolean,
+        // 自锁型超车按键（OTK 按钮点按切换）。带默认值 —— PedalOverlayView 的
+        // 命名参数部分构造（37 行）无需改动即可编译。
+        val enableOvertakeLatch: Boolean = Defaults.ENABLE_LATCH_OVERTAKE,
         val disableAutoGear: Boolean,
         val enableManualShift: Boolean,
         val enableUnlock: Boolean,
