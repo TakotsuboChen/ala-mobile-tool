@@ -337,6 +337,10 @@ class OverlayManager(context: Context) {
             placeDimAboveGameContent(parent, dim)
             val hint = ensureHintView(parent)
             hint.bringToFront()
+            // 进场从 0 播 0→1 淡入，与退场的 1→0 对称。alpha 初值已在
+            // ensureDimView/ensureHintView 设为 0（新建层）或保持现值
+            // （"编辑中改参数重建"复用旧层时 alpha 已是 1，动画为空操作
+            // 不重播——见 ensureDimView 注释）。
             animateFade(dim, 1f, isEditLayer = false)
             animateFade(hint, 1f, isEditLayer = false)
         } else {
@@ -355,8 +359,15 @@ class OverlayManager(context: Context) {
         if (target == 0f && isEditLayer) {
             // 延时收尾必须与动画时长同步；期间又切回编辑模式时，editMode
             // 已为 true，不能误置 GONE。
+            // ⚠️ 不能加 `view.alpha == 0f` 附加判据：ViewPropertyAnimator 的末帧
+            // 走 Choreographer 调度，比同时到期的 postDelayed 消息晚 0~1 帧——
+            // 消息触发时动画还差最后零点几没播完，alpha ≈ 0.03~0.05 恒不为 0，
+            // 判据永不成立 → 永远不置 GONE → 编辑层以 alpha≈0 常驻 VISIBLE，
+            // 铺满整屏 + z 序最上，吃掉踏板矩形内的触摸（表现为退出编辑模式后
+            // 踏板"仍可拖拽"、游戏油门/刹车失灵）。editMode 守卫已覆盖"中途
+            // 重进"的全部情形，直接置 GONE 即可。
             view.postDelayed({
-                if (!editMode && view.alpha == 0f) view.visibility = View.GONE
+                if (!editMode) view.visibility = View.GONE
             }, FADE_DURATION_MS)
         }
     }
@@ -395,9 +406,15 @@ class OverlayManager(context: Context) {
         val dim = View(appContext).apply {
             tag = "overlay_dim"
             setBackgroundColor(Color.argb(191, 0, 0, 0)) // 75% 黑
-            // 编辑模式中因配置变更重建时直接以已变暗状态出现，避免每改一次
-            // 参数就重播一次 0.3s 渐暗。
-            alpha = if (editMode) 1f else 0f
+            // 新建层一律从 alpha=0 起步，由 syncEditMode 的 animateFade 播 0→1
+            // 淡入（与退场 1→0 对称）。"编辑中改参数不重播渐暗"不靠初值，靠
+            // 复用：removeGamingOverlays 不再摘除 dim 层，编辑中途重建控件时
+            // 本方法命中顶部 takeIf 直接返回旧层（alpha 已是 1，1→1 动画为
+            // 空操作）。旧实现 `alpha = if (editMode) 1f else 0f` 在首次进场时
+            // 也命中 editMode=true 分支（toggleEditMode 先置位再调到这），
+            // 新层 alpha=1 + 1→1 空动画 = 进场瞬间变黑无过渡（用户报的
+            // "进入编辑模式闪现变暗"）。
+            alpha = 0f
             isClickable = false
             isFocusable = false
             // 不接受触摸：事件穿透到下层（长按工具按钮退出编辑模式的手势
@@ -420,8 +437,10 @@ class OverlayManager(context: Context) {
         hintView?.takeIf { it.parent === parent }?.let { return it }
         val hint = EditHintView(appContext).apply {
             tag = "overlay_edit_hint"
-            // 同上：编辑模式中重建时直接可见，不重播淡入。
-            alpha = if (editMode) 1f else 0f
+            // 同 ensureDimView：新建层从 alpha=0 淡入，复用旧层时 1→1 空操作
+            // 不重播。旧实现 `if (editMode) 1f else 0f` 与 ensureDimView 同款
+            // 问题——首次进场时 editMode 已为 true，初值 1 = 瞬间出现无过渡。
+            alpha = 0f
         }
         hintView = hint
         parent.addView(hint, FrameLayout.LayoutParams(
@@ -561,7 +580,9 @@ class OverlayManager(context: Context) {
             // 无变化。出厂默认是固定值，重置才有意义。
             OverlayPosition.DEFAULT_PEDAL,
             positionKey,
-            startVisible = editMode
+            startVisible = editMode,
+            ::isBlankArea,
+            ::resetPedalsToDefault
         )
     }
 
@@ -575,7 +596,9 @@ class OverlayManager(context: Context) {
             "brake_overlay_edit",
             OverlayPosition.DEFAULT_BRAKE,
             ModConfig.KEY_BRAKE_POSITION,
-            startVisible = editMode
+            startVisible = editMode,
+            ::isBlankArea,
+            ::resetPedalsToDefault
         )
     }
 
@@ -589,8 +612,57 @@ class OverlayManager(context: Context) {
             "gear_shift_overlay_edit",
             OverlayPosition.DEFAULT_GEAR,
             ModConfig.KEY_GEAR_POSITION,
-            startVisible = editMode
+            startVisible = editMode,
+            ::isBlankArea,
+            ::resetPedalsToDefault
         )
+    }
+
+    /**
+     * 空白判定：本地坐标 (x, y)（相对某个编辑层）不属于**任何**编辑层矩形、
+     * 也不在工具按钮上。注入给每个 OverlayEditView——触摸只会派给 z 序
+     * 最高的编辑层，高层必须替兄弟层"让路"（否则把落在兄弟矩形内的点当
+     * 空白吃掉，兄弟的拖拽永远收不到事件）。工具按钮排除在外，保留长按
+     * 退出编辑模式的穿透路径。
+     *
+     * 各编辑层铺满整屏、同父容器，矩形在每层的本地坐标里原点相同，一个
+     * 聚合函数可服务所有层。
+     */
+    private fun isBlankArea(x: Float, y: Float): Boolean {
+        fun inside(left: Int, top: Int, width: Int, height: Int): Boolean =
+            !(x < left - OverlayEditView.CORNER_HIT_RADIUS || y < top - OverlayEditView.CORNER_HIT_RADIUS ||
+                x > left + width + OverlayEditView.CORNER_HIT_RADIUS ||
+                y > top + height + OverlayEditView.CORNER_HIT_RADIUS)
+
+        listOfNotNull(pedalEditView, brakeEditView, gearEditView).forEach { layer ->
+            if (inside(layer.editLeft, layer.editTop, layer.editWidth, layer.editHeight)) return false
+        }
+        // 工具按钮矩形（屏幕坐标 → 编辑层本地坐标；编辑层与按钮同父容器、
+        // 无滚动，本地坐标一致）。按钮自身消费触摸，这里排除防长按 3s 误触
+        // （按住按钮 3s 是退出编辑模式，不是重置踏板）。
+        toggleButton?.let { btn ->
+            if (x >= btn.left && x < btn.left + btn.width &&
+                y >= btn.top && y < btn.top + btn.height
+            ) return false
+        }
+        return true
+    }
+
+    /**
+     * 长按空白处 3s：把**当前显示**的单/双踏板恢复出厂默认位置（含大小）。
+     * 换挡控件不在范围（按钮语义只提踏板，与提示文案一致）；每套踏板的
+     * 重置经编辑层已有的 updateTarget → onChanged 链路落盘，与拖拽持久化
+     * 同一条路径。
+     */
+    private fun resetPedalsToDefault() {
+        val screenWidth = appContext.resources.displayMetrics.widthPixels
+        val screenHeight = appContext.resources.displayMetrics.heightPixels
+        var any = false
+        listOfNotNull(pedalEditView, brakeEditView).forEach { layer ->
+            layer.resetToDefault(screenWidth, screenHeight)
+            any = true
+        }
+        Logger.i("AlaMobileTool", "resetPedalsToDefault: layers=$any")
     }
 
     private fun saveOverlayPosition(key: String, left: Int, top: Int, width: Int, height: Int) {
@@ -620,8 +692,16 @@ class OverlayManager(context: Context) {
         parent.findViewWithTag<View>("pedal_overlay_edit")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("brake_overlay_edit")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("gear_shift_overlay_edit")?.let { parent.removeView(it) }
-        parent.findViewWithTag<View>("overlay_dim")?.let { parent.removeView(it) }
-        parent.findViewWithTag<View>("overlay_edit_hint")?.let { parent.removeView(it) }
+        // ⚠️ 变暗层/提示层**不在这里移除，字段引用也绝不能清**：它们的生命
+        // 周期由 syncEditMode 的 alpha 动画管理（退出后 alpha=0 常驻，不消费
+        // 触摸）。编辑模式中配置变更重建会走到这里——若清了引用，ensureDimView/
+        // ensureHintView 命中不了 takeIf 复用，会**新建第二份** dim/hint 层
+        // （旧层 alpha=1 仍挂在树上无人管理），用户长按退出时 animateFade 只
+        // 淡出新层，旧层 alpha=1 永久盖屏（实测：编辑模式切踏板模式 → 退出
+        // → 黑屏 + 三行提示常驻、BGM 正常）。不清引用则 rebuild 命中复用：
+        // 旧层 alpha 已是 1，1→1 动画为空操作，天然不重播渐暗。整层拆除只在
+        // removeExisting（showOverlays 全量重建）里做。编辑层三个 tag 仍在此
+        // 移除并清引用——它们随配置重建，且移除后残留引用才真的是死 view。
         pedalView = null
         brakeView = null
         gearView = null
@@ -629,8 +709,7 @@ class OverlayManager(context: Context) {
         pedalEditView = null
         brakeEditView = null
         gearEditView = null
-        dimView = null
-        hintView = null
+        // dimView/hintView 保留（见上）：rebuild 复用，编辑模式期间永远只存在一份。
     }
 
     private fun removeExisting() {

@@ -24,12 +24,20 @@ fun createEditLayer(
     tag: String,
     defaultPosition: OverlayPosition,
     positionKey: String,
-    startVisible: Boolean
+    startVisible: Boolean,
+    // 空白判定回调（OverlayManager 聚合全部兄弟层后注入，见 OverlayEditView）。
+    isBlankAreaFn: (x: Float, y: Float) -> Boolean,
+    // 长按空白处 3s 触发（恢复当前显示的单/双踏板默认位置）。
+    onBlankLongPress: (() -> Unit)?
 ): OverlayEditView {
     val minSizePx = (48 * context.resources.displayMetrics.density).toInt()
-    val layer = OverlayEditView(context, target, minSizePx, minSizePx, defaultPosition) { left, top, width, height ->
-        saveOverlayPosition(context, positionKey, left, top, width, height)
-    }
+    val layer = OverlayEditView(
+        context, target, minSizePx, minSizePx, defaultPosition,
+        { left, top, width, height ->
+            saveOverlayPosition(context, positionKey, left, top, width, height)
+        },
+        isBlankAreaFn, onBlankLongPress
+    )
     layer.tag = tag
     // startVisible=true（在编辑模式中因配置变更而重建）：直接以 VISIBLE +
     // alpha=1 呈现，避免每改一次边框参数就重播一遍 0.3s 淡入（拖滑动条时会

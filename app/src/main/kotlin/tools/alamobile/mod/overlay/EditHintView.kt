@@ -47,7 +47,7 @@ class EditHintView(context: Context) : View(context) {
     private val lines = listOf(
         "拖拽移动位置",
         "拖动四角调整大小",
-        "长按 ${OverlayEditView.LONG_PRESS_RESET_MS / 1000} 秒恢复默认状态"
+        "长按空白处 ${OverlayEditView.LONG_PRESS_RESET_MS / 1000} 秒恢复默认状态"
     )
 
     init {
