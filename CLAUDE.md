@@ -30,7 +30,7 @@ Supported game version: **Ala Mobile 8.0.6 (versionCode 200150)**（2026-09-04 �
 - Hook strategy:
   - Java layer (libxposed API 102): module entry, overlay injection, configuration reading.
   - Native layer: ByteDance ShadowHook inline hooks on `libil2cpp.so` for gameplay logic.
-- Auto DRS: prefer hooking the game's own DRS input check; currently swallows unwanted toggles while a user DRS request is active.
+- Auto DRS / 主动空力（AA）：**hook `carModifier.OnDRSStateChanged`，捕捉「游戏允许开启」的信号**——状态机推进到 `Deployable(3)` 时游戏在此播 DRS 提示音（反汇编实证 `0x17600C4` 处 `cmp #3` → 播 drsAlert），此刻开启必然合法。收到信号后调 `carModifier.ManualDRSUsage()`（= 玩家按键的真实入口），3→4 的合法性校验/动画/音效/HUD 全部交给游戏。**一个 hook 点覆盖两种车、两套规则**：地效车 DRS 走物理触发区（`carModifier.OnTriggerEnter` + `isDRSGloballyEnabled`(0x101) + 圈数门槛），2026 主动空力走 waypoint 数组协程（`CheckActiveAeroAvailability` 查 `activeAerozone[]` + `isSafeForBoostAndActiveAero`(0x102) + `carType==DoubleDRSEra` 硬门）——两者区域判定方式截然不同（这就是"同赛道两套区域不同"的代码本质），但都汇聚到同一状态机事件，故**模块不需要分析赛道区域数据**。hook 恒装上（信号旁路式，不因开关为假而跳过），运行时开关走 `drs_set_active`。⚠️ `carModifier` 每车一份、`OnDRSStateChanged` 在所有车上触发，必须严格白名单（`icinp`(0xD8) == `pedal_get_controller()`，回落 `playercar`(0x9C)），否则会替 AI 车按 DRS。⚠️ **不要** hook `IRDSCarControllInput.drsToggle`——那是玩家按键入口，自动模式下无人按键、永远触发不了（旧实现即栽于此：hook 装上了却只会把所有玩家 DRS 请求吞掉）；也**不要**直接写 `_currentDRSState`（绕过 `OnDRSStateChanged` 会丢动画/音效/HUD/`previousDRSState`）。
 - Multiplayer: do not detect Photon; show a warning and a master toggle, leave responsibility to the user.
 
 ## High-level Architecture
@@ -182,7 +182,7 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - `native/src/pedal_hook.c` — throttle/brake/gear hook logic + input writer thread + ABS/TC control (carController hook + per-wheel usesABS) + TC/ABS gear-level field overwrites with baseline capture/restore + TC/ABS intervention indicator signals (RoadForce 0x1A7B7DC instruction interceptor + 25Hz frame-phase clock; single-writer phase clock, frame-seq age matching — see docs/MODULE_ABS_NOTES.md §2c for the evolution and pitfalls; ⚠️ the interceptor callback must stay float-free — it replays `str s0` and any FP register use corrupts tempBrakeF, killing all ABS gears).
 - `app/src/main/kotlin/tools/alamobile/mod/util/VersionGate.kt` — version gating.
 - `native/src/ala_core.c` — native entry points and ShadowHook init.
-- `native/src/drs_hook.c` — auto DRS / active aero hook logic.
+- `native/src/drs_hook.c` — auto DRS / active aero hook logic. hook `carModifier.OnDRSStateChanged`（见上「Auto DRS / 主动空力」条目的完整设计说明与白名单红线）。
 - `native/src/unlock_hook.c` — billing/unlock IL2CPP hook logic.
 - `native/src/music_hook.c` — main menu music mute + heartbeat signal.
 - `native/src/intro_hook.c` — intro V10 engine sound: mute introSound + one-shot signal.
@@ -210,10 +210,9 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 
 ## TODO(human) Integration Points
 
-Two areas are explicitly designated for human contribution during implementation:
-
 1. `PedalOverlayView.updateValues(y: Float)` — implemented with deadzone, configurable transition point, and linear/quadratic/exponential curves. Fine-tune defaults and curve exponents based on real-device feel.
-2. `native/src/drs_hook.c` — if telemetry polling is used, read `inDRSZone`, `throttle`, `steeringAngle`, `speed` from IL2CPP instance fields and evaluate DRS eligibility.
+
+> `native/src/drs_hook.c` 的 telemetry polling 方案已废弃（2026-09-17）：改为捕捉游戏自己的 `OnDRSStateChanged(Deployable)` 信号，不需要读 `inDRSZone`/`throttle`/`steeringAngle`/`speed`——区域判定与合法性完全交给游戏。详见上方「Auto DRS / 主动空力」条目。
 
 ## Notes for Future Changes
 
