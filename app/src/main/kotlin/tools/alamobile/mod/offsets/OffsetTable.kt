@@ -29,8 +29,29 @@ object OffsetTable {
     const val IRDS_CAR_CONTROLL_INPUT_SET_CLUTCH: Long = 0x1A65560L
     const val IRDS_CAR_CONTROLL_INPUT_SHIFT_UP: Long = 0x1A67324L
     const val IRDS_CAR_CONTROLL_INPUT_SHIFT_DOWN: Long = 0x1A67378L
+    // IRDSCarControllInput.drsToggle —— 玩家按键/屏幕按钮的 DRS 输入入口
+    // （IRDSPlayerControls.CarControllerAnalogueInput 与 odometerHandler.OpenDrsTouch
+    // 都经它进 carModifier.ManualDRSUsage）。自动部署**不** hook 这里：自动模式下
+    // 没有人按键，hook 输入入口永远触发不了（旧实现即栽于此——装上了 hook 却只把
+    // 玩家所有 DRS 请求吞掉）。保留此常量仅作导航参考，native 侧不引用。
     const val IRDS_CAR_CONTROLL_INPUT_DRS_TOGGLE: Long = 0x1A673E0L
     const val IRDS_CAR_CONTROLL_INPUT_FIXED_UPDATE: Long = 0x1A66C3CL
+
+    // ── 自动 DRS / 主动空力（carModifier）──
+    // carModifier.OnDRSStateChanged(DRSState) 是"游戏允许开启"的广播点：状态机
+    // 推进到 Deployable(3) 时游戏在此播 DRS 提示音（0x17600C4 处 cmp #3 → 播
+    // drsAlert）。hook 它即可覆盖 DRS 与主动空力两条独立放行管线，以及地效车
+    // （物理触发区 OnTriggerEnter）与 2026 车（waypoint 数组协程 ManageActiveAero）
+    // 两种截然不同的区域判定 —— 模块无需自行分析赛道区域。
+    const val CAR_MODIFIER_ON_DRS_STATE_CHANGED: Long = 0x175FFA4L
+    // carModifier.ManualDRSUsage：玩家手动开启 DRS 的真实入口。Deployable(3)
+    // → Active(4) 的合法转换由游戏自己校验，模块不自行写状态字段（绕过
+    // OnDRSStateChanged 会丢失动画/音效/HUD/previousDRSState 维护）。
+    const val CAR_MODIFIER_MANUAL_DRS_USAGE: Long = 0x1767D94L
+
+    // carModifier 实例字段偏移（0xD8 icinp / 0x9C playercar / 0xF8 _currentDRSState）
+    // 按仓库惯例以 native 侧 `#define OFF_*` 维护——字段偏移的升版核对清单
+    // 就是 native 里全部 OFF_* 常量（见 CLAUDE.md），不在本表登记。
 
     // IRDSCarControllInput instance fields (relative to instance base)
     // Unchanged from 8.0.0 (class layout identical)

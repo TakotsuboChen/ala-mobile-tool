@@ -39,7 +39,8 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
                                            jlong handle_abs,
                                            jlong abs_rf_write,
                                            jlong player_controls_update,
-                                           jlong drs_toggle,
+                                           jlong drs_state_changed,
+                                           jlong manual_drs_usage,
                                            jlong billing_manager_awake,
                                            jlong billing_manager_get_instance,
                                            jlong billing_manager_initialize_billing,
@@ -90,9 +91,8 @@ Java_tools_alamobile_mod_NativeBridge_init(JNIEnv *env, jclass clazz,
 
     drs_hook_config_t drs_cfg = {
         .enable_auto_drs = (bool) enable_drs,
-        .drs_toggle_offset = (uintptr_t) drs_toggle,
-        .throttle_field_offset = (uintptr_t) throttle_field,
-        .brake_field_offset = (uintptr_t) brake_field,
+        .on_drs_state_changed_offset = (uintptr_t) drs_state_changed,
+        .manual_drs_usage_offset = (uintptr_t) manual_drs_usage,
     };
 
     if (!pedal_install_hooks(&pedal_cfg)) {
