@@ -1,7 +1,12 @@
 package tools.alamobile.mod.ui.screen.paddock
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.PaddingValues
@@ -40,9 +45,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -266,6 +274,9 @@ fun LeaderboardScreen() {
                             value = "${e.points}",
                             rowShape = boardRowShape(i, entries.size),
                             alpha = boardAlpha.value,
+                            // 服务端判定的金标（版本榜：2×零辅助最快圈 ≥ 总数；
+                            // 总榜另需至少 1 条零辅助）。客户端不重算。
+                            gold = e.gold,
                             modifier = Modifier.animateItem(
                                 fadeInSpec = tween(250),
                                 fadeOutSpec = tween(150),
@@ -286,6 +297,10 @@ fun LeaderboardScreen() {
                             value = e.lapDisplay,
                             rowShape = boardRowShape(i, entries.size),
                             alpha = boardAlpha.value,
+                            // 该车手的个人最快圈为零辅助（TC/ABS 全关）→ 整行金字。
+                            // 逐行判定：不要求是全服第一（用户定案：鼓励提升技术，
+                            // 即使不在榜首也有含金量）。
+                            gold = e.gold,
                             modifier = Modifier.animateItem(
                                 fadeInSpec = tween(250),
                                 fadeOutSpec = tween(150),
@@ -419,8 +434,13 @@ private fun BoardRow(
     value: String,
     rowShape: Shape,
     alpha: Float = 1f,
+    /** 该行是否"零辅助最快圈"→ username 与数值走金色流光（服务端判定，客户端不重算）。 */
+    gold: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    // 金色流光样式：只对金标行求值（普通行以 null 传入 → 完全走原样式，零开销）。
+    // ⚠️ 这里不能传 `color =`——miuix Text 的 color 参数会覆盖 brush（见 goldShimmerStyle 注释）。
+    val goldStyle = if (gold) goldShimmerStyle(MiuixTheme.textStyles.main) else null
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -447,6 +467,10 @@ private fun BoardRow(
             text = name,
             fontSize = 15.sp,
             maxLines = 1,
+            // 金色流光作用于"用户名 + 数值"（用户定案：这一行文字整体金色）。
+            // 名次与头像不参与——名次列有 emoji 与数字混排，上渐变会和奖牌色打架。
+            // 非金标行传主题样式（与改动前逐字等价）。
+            style = goldStyle ?: MiuixTheme.textStyles.main,
             modifier = Modifier.weight(1f),
         )
         Text(
@@ -463,9 +487,12 @@ private fun BoardRow(
             // tnum 是**字体自带**的数字变体（OpenType feature），不换字体、只换数字字形，
             // 对"ROM 换成哪个 sans"免疫——ColorOS 的 SysFont/OPSans/Roboto 都带 tnum。
             // 字体不带该特性时被静默忽略，退化为今天的行为，不会更差。
-            style = MiuixTheme.textStyles.main.merge(TabularDigits),
+            //
+            // 金色流光：以 goldStyle 为底再叠 tnum（顺序不能反——merge 后者覆盖前者，
+            // 两个 style 的字段无交集，但保持"主题 → 金光 → 等宽"的阅读顺序）。
+            style = (goldStyle ?: MiuixTheme.textStyles.main).merge(TabularDigits),
             fontSize = 15.sp,
-            color = colorScheme.onBackground,
+            color = if (gold) Color.Unspecified else colorScheme.onBackground,
         )
     }
 }
@@ -473,8 +500,75 @@ private fun BoardRow(
 /** 行底色 = miuix Card 默认 surfaceContainer（CardDefaults.defaultColors 的取值）。 */
 @Composable
 private fun Modifier.squircleRowBackground(shape: Shape): Modifier {
-    // miuix Card 内部用 squircleSurface；行级拼接用 background + 同款圆角（视觉一致，行级拆分无 squircle 依赖）。
+    // miuix Card 内部用 squircleSurface；行级拼接用 background + 同款圆角
+    // （视觉一致，行级拆分无 squircle 依赖）。
     return this.background(color = colorScheme.surfaceContainer, shape = shape)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 金色流光（"零辅助最快圈"标识）
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * 金色渐变的两端：底色 + 扫过的高光带。
+ *
+ * ️ 底色别选 `darkgoldenrod`(#B8860B) ——实机观感偏暗、像脏铜色（用户反馈"有点黑"）。
+ * 这里用标准 `goldenrod`(#DAA520) 起步：色相不变、亮度抬一档，在浅深两主题下
+ * 都仍是"金"而不刺眼。高光用更浅的暖黄，保证暗底上仍能看出扫过的光带。
+ */
+private val GOLD_BASE = Color(0xFFDAA520)
+private val GOLD_BRIGHT = Color(0xFFFFE9A3)
+
+/** 金色流光周期（毫秒）。2.4s 是"可察觉地闪耀但不晃眼"的手感值。 */
+private const val GOLD_PERIOD_MILLIS = 2400
+
+/**
+ * 金色流光样式：给 username / 数值两个 Text 换上带 `brush` 的 TextStyle。
+ *
+ * ## 为什么用 brush 渐变而不是 `animateColor`
+ *
+ * 用户要的是"闪耀光泽"——一道高光**扫过**，不是整体明暗呼吸。渐变 + 相位平移
+ * 做出的正是带状高光移动；`animateColor` 只能整体变色，观感是"闪烁"不是"流光"。
+ *
+ * ## 为什么不会带来性能问题
+ *
+ * 本函数**只对金标行调用**（普通行走原样式，零额外开销）。内部每帧重算 Brush，
+ * 会让这些行重组——但金标行在 205 行榜单里通常是个位数。周期 2.4s + Reverse
+ * 往复，比单向重头开始的观感更"呼吸"，也更省（无跳变）。
+ *
+ * ⚠️ miuix `Text` 的 `color` 参数默认为 `Color.Unspecified`，此时它走
+ * `style.color.takeOrElse { LocalContentColor }`。故本函数产出的 style 里
+ * **不能带 color**（否则覆盖 brush，金光消失）——`.merge(TextStyle(brush = ...))`
+ * 不带 color 正好满足；调用处也**不要**再传 `color =`。
+ */
+@Composable
+private fun goldShimmerStyle(base: TextStyle): TextStyle {
+    val transition = rememberInfiniteTransition(label = "gold")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(GOLD_PERIOD_MILLIS, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "gold-phase",
+    )
+    // 亮带中心在 -0.4..1.4 区间内平移；两侧用暗金兜住（tileMode=Clamp 防越界回绕）。
+    // 线性而非 sweep：文字水平排布，斜向扫过的"金属反射"观感更自然。
+    val brush = remember(phase) {
+        val c = phase * 1.8f - 0.4f
+        Brush.linearGradient(
+            colorStops = arrayOf(
+                (c - 0.28f).coerceIn(0f, 1f) to GOLD_BASE,
+                c.coerceIn(0f, 1f) to GOLD_BRIGHT,
+                (c + 0.28f).coerceIn(0f, 1f) to GOLD_BASE,
+            ),
+            start = Offset.Zero,
+            end = Offset(180f, 60f),
+            tileMode = TileMode.Clamp,
+        )
+    }
+    return base.merge(TextStyle(brush = brush))
 }
 
 @Composable
