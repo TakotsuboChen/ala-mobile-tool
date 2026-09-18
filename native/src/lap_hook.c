@@ -112,14 +112,36 @@ static char g_track_name[64] = "?";              // 最近一次读到的 trackT
 static volatile int32_t g_current_gp_index = -1; // LAPscene 探测结果（0..15，-1=未知）
 
 // ── 围场上传单槽缓冲 ──
-// order==2 有效圈边界写入 (gp_index, lap_ms)；Java 层 1Hz 轮询 pollLapUpload()
-// 取走。单槽 + seq 校验：写侧只进（seq 递增），读侧消费后置 consumed；
-// 圈完成分钟级一遇，丢槽概率可忽略（轮询窗口 1s vs 事件间隔 30s+）。
+// order==2 有效圈边界写入 (gp_index, lap_ms, 辅助配置)；Java 层 1Hz 轮询
+// lap_poll_upload() 取走。单槽 + seq 校验：写侧只进（seq 递增），读侧消费后
+// 置 consumed；圈完成分钟级一遇，丢槽概率可忽略（轮询窗口 1s vs 事件间隔 30s+）。
 // version_code 由 Java 层自填（native 不读游戏版本——VersionGate 已在 Java 判定）。
 static volatile int32_t g_upload_seq = 0;        // 事件序号（0=无待传）
 static volatile int32_t g_upload_gp = -1;
 static volatile int32_t g_upload_lap_ms = 0;
 static volatile int32_t g_upload_consumed_seq = 0;  // Java 已消费到的 seq
+// 本圈要上报的辅助配置码（0 = 整圈不一致或未推配置 → 记缺失）。
+// 只在 order==2 事件内写入，与 lap_ms 同批发布。
+static volatile int32_t g_upload_assist[5] = {0, 0, 0, 0, 0};
+
+// ── 整圈辅助配置一致性检测（epoch 快照法）──
+//
+// 目标：判断"这一整圈里玩家的踏板/TC/ABS 配置有没有变过"。配置是离散枚举
+// （不可能连续变化），所以只需检测**变更事件**，不必逐帧采样。
+//
+// 为什么用 epoch 计数器而不是逐个字段比对：配置变了又改回原值时，逐字段比
+// 对会判"没变"（属于碰运气式漏判）；epoch 单调递增能抓住任何一次变更历史。
+//
+// 边界语义：boundary_epoch 表示"当前这一圈的起点时的配置版本"。
+//   - LLV.Awake（= 场景加载 = 第一圈开始）时快照；
+//   - 每次 order==2 事件（= 上一圈结束 = 下一圈开始）时快照；
+//   - 圈完成时比对 cur_epoch == boundary_epoch，不等则本圈配置记缺失。
+// 单写者：全部在主线程（Java 的 lap_set_assist_config 走 JNI，任意线程——故
+// 该函数对字段写用简单比较 + 赋值，与主线程读的竞态后果仅是"某一圈被判不一致"，
+// 属于安全侧的误判，不会错误地宣称一致）。
+static volatile int32_t g_assist_cfg[5] = {0, 0, 0, 0, 0};
+static volatile int32_t g_assist_epoch = 0;
+static volatile int32_t g_assist_boundary_epoch = 0;
 
 static void *g_llv_awake_stub = NULL;
 static void *g_llv_awake_orig = NULL;
@@ -533,6 +555,9 @@ static void proxy_llv_awake(void *this, void *method_info) {
     g_mode_gated = 0;
     g_session_diag_logged = 0;
     g_sector_diag_logged = 0;
+    // 新会话 = 第一圈的起点：配置版本快照。**不重置 epoch 本身**（它是配置的
+    // 变更历史计数，与游戏会话无关；Java 推配置时仍会照常递增）。
+    g_assist_boundary_epoch = g_assist_epoch;
     char track[64];
     il2cpp_string_read_ascii(*(void **) ((uintptr_t) this + OFF_LLV_TRACK_TO_RACE),
                              track, sizeof(track));
@@ -633,6 +658,12 @@ static void proxy_odometer_handle_sectors_times(void *this, int sector_order,
     // ══ 圈完成事件：order==2 首次出现且携带完整圈时 = 过圈瞬间 ══
     // （收到即判定，不等 2→0 回绕——回绕在下一圈 S1 过线才发生）
     if (order_changed && sector_order == 2 && total_lap_time > 0.0f) {
+        // 圈边界 = 本圈结束 **同时是** 下一圈的起点。先把"本圈起点时的配置版本"
+        // 取到局部变量（供下面的比对用），再把 boundary 推进到当前值——
+        // 顺序颠倒会让本圈的比对退化成恒真（自己和自己比）。
+        // 无效圈也推进：下一圈仍然从此刻开始。
+        int32_t lap_start_epoch = g_assist_boundary_epoch;
+        g_assist_boundary_epoch = g_assist_epoch;
         if (valid_lap) {
             float cur_best = g_best_valid_lap;
             if (cur_best <= 0.0f) cur_best = 1.0e9f;  // 0 = 无有效圈
@@ -660,6 +691,18 @@ static void proxy_odometer_handle_sectors_times(void *this, int sector_order,
             // 定案：无物理阈值拒收（全放行）——validLap 位是唯一有效性门槛。
             if (g_current_gp_index >= 0) {
                 int32_t ms = (int32_t) (total_lap_time * 1000.0f + 0.5f);
+                // 辅助配置：整圈未经变更才随圈上报（否则五维全 0 = 缺失）。
+                int32_t cur_epoch = g_assist_epoch;
+                int consistent = (cur_epoch == lap_start_epoch);
+                if (consistent) {
+                    for (int i = 0; i < 5; i++) {
+                        g_upload_assist[i] = g_assist_cfg[i];
+                    }
+                } else {
+                    for (int i = 0; i < 5; i++) g_upload_assist[i] = 0;
+                    LOGI("LAPcfg: config changed mid-lap (epoch %d != lap-start %d) → assist marked missing",
+                         cur_epoch, lap_start_epoch);
+                }
                 g_upload_gp = g_current_gp_index;
                 g_upload_lap_ms = ms;
                 g_upload_seq++;   // volatile 递增单写者（主线程）——发布序：先写数据后写 seq
@@ -777,16 +820,37 @@ bool lap_install_hooks(const lap_hook_config_t *config) {
 // 有未消费的有效圈事件时返回 true 并填充出参（gpIndex 0..15 / lapMs 毫秒），
 // Java 侧随后调 lapUploadMarkConsumed() 确认消费。单槽语义：同一时刻最多
 // 一个待传圈；Java 1Hz 轮询 + 事件分钟级间隔 ⇒ 实践中不会覆盖。
-bool lap_poll_upload(int32_t *out_lap_seq, int32_t *out_gp_index, int32_t *out_lap_ms) {
-    if (out_lap_seq == NULL || out_gp_index == NULL || out_lap_ms == NULL) return false;
+bool lap_poll_upload(lap_upload_t *out) {
+    if (out == NULL) return false;
     int32_t seq = g_upload_seq;
     if (seq == 0 || seq == g_upload_consumed_seq) return false;  // 无新事件
-    *out_lap_seq = seq;
-    *out_gp_index = g_upload_gp;
-    *out_lap_ms = g_upload_lap_ms;
+    out->lap_seq = seq;
+    out->gp_index = g_upload_gp;
+    out->lap_ms = g_upload_lap_ms;
+    out->pedal_mode = g_upload_assist[0];
+    out->tc_mode = g_upload_assist[1];
+    out->tc_strength = g_upload_assist[2];
+    out->abs_mode = g_upload_assist[3];
+    out->abs_strength = g_upload_assist[4];
     return true;
 }
 
 void lap_mark_upload_consumed(int32_t lap_seq) {
     if (lap_seq > g_upload_consumed_seq) g_upload_consumed_seq = lap_seq;
+}
+
+void lap_set_assist_config(int pedal_mode, int tc_mode, int tc_strength,
+                           int abs_mode, int abs_strength) {
+    int32_t next[5] = {pedal_mode, tc_mode, tc_strength, abs_mode, abs_strength};
+    int changed = 0;
+    for (int i = 0; i < 5; i++) {
+        if (g_assist_cfg[i] != next[i]) {
+            changed = 1;
+            g_assist_cfg[i] = next[i];
+        }
+    }
+    if (!changed) return;
+    g_assist_epoch++;
+    LOGI("LAPcfg: assist config updated pedal=%d tcm=%d tcs=%d absm=%d abss=%d (epoch=%d)",
+         pedal_mode, tc_mode, tc_strength, abs_mode, abs_strength, g_assist_epoch);
 }

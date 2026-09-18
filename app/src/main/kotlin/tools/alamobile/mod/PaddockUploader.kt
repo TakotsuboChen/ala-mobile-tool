@@ -103,21 +103,22 @@ object PaddockUploader {
         if (!PaddockClient.hasToken()) {
             PaddockClient.retryRestoreAuth()
         }
-        val seq = IntArray(1)
-        val gp = IntArray(1)
-        val ms = IntArray(1)
+        // 单数组 9 元：lapSeq / gpIndex / lapMs / 5 个辅助配置码（见 NativeBridge 注释）。
+        val out = IntArray(9)
         val has = try {
-            NativeBridge.pollLapUpload(seq, gp, ms)
+            NativeBridge.pollLapUpload(out)
         } catch (e: Throwable) {
             AlaMobileModule.logX(Log.WARN, TAG, "pollLapUpload failed: ${e.message}")
             return
         }
         if (!has) return
-        if (seq[0] <= lastSeq.get()) return  // 已处理过的 seq（双读保护）
-        lastSeq.set(seq[0])
-        val gpIdx = gp[0]
-        val lapMs = ms[0]
-        val lapSeq = seq[0]
+        val lapSeq = out[0]
+        if (lapSeq <= lastSeq.get()) return  // 已处理过的 seq（双读保护）
+        lastSeq.set(lapSeq)
+        val gpIdx = out[1]
+        val lapMs = out[2]
+        // 配置码 → 原始枚举字符串（0 = 缺失，整圈配置变动过时 native 整组填 0）
+        val assist = PaddockClient.LapAssist.fromCodes(out)
         if (!PaddockClient.hasToken()) {
             // token 仍缺失：入本地待传队列（30 天），日志可见——此前此路径
             // 完全静默，用户"跑了圈没记录"却无从排查（两份用户日志实证）。
@@ -128,7 +129,7 @@ object PaddockUploader {
         }
         io.execute {
             val toast = try {
-                PaddockClient.uploadLap(gpIdx, lapMs)
+                PaddockClient.uploadLap(gpIdx, lapMs, assist)
             } catch (e: Throwable) {
                 AlaMobileModule.logX(Log.WARN, TAG, "uploadLap: ${e.message}")
                 null

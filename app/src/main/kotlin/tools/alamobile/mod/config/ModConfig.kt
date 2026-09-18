@@ -389,6 +389,96 @@ object ModConfig {
     // 切线解缓存：曲线预览（每帧 ~41 次采样）与踏板求值（1-2 次/帧）都以
     // 相同点集连续调本函数，避免每次重解 QP。未命中最坏重解一次，解是
     // 确定性的，无正确性影响。
+    // ═══════════════════════════════════════════════════════════════════════
+    // 围场积分 · 辅助配置上报（2026-09-18）
+    // ══════════════════════════════════════════════════════════════════════
+
+    /**
+     * 一圈成绩的辅助配置（用于围场积分加成与"零辅助"金标）。
+     *
+     * 只带**原始枚举**，不带"关/低"这类派生结论——派生规则在服务端
+     * （`paddock-api/src/score.rs`）。这样调规则不必发模块版本。
+     *
+     * ️ [tcCustom]/[absCustom] 与 strength 分列：`mode=default` 表示游戏默认
+     * 透传，此时 strength 只是 UI 记忆值、**不生效**——服务端据此避免把"从未
+     * 调过 TC"的用户误判成"关 TC"。
+     * ⚠️ 踏板按**设置**取值，不看控件当前是否被临时隐藏（用户定案：按设置计）。
+     */
+    data class LapAssistConfig(
+        val pedalMode: PedalMode,
+        /** TC/ABS 是否处于"自定义"（false = 游戏默认，档位不生效） */
+        val tcCustom: Boolean,
+        val tcStrength: TcStrength,
+        val absCustom: Boolean,
+        val absStrength: AbsStrength,
+    ) {
+        /**
+         * TC/ABS 强度码（**同一套码表**，因两枚举的档位顺序必须一致）。
+         * 单独取名而非各自一套：这正是 [LapAssistCodes.assertStrengthOrdersAligned]
+         * 要守的不变量——若哪天两枚举分叉，这里会立刻编译不过。
+         */
+        val tcStrengthCode: Int get() = tcStrength.ordinal + 1
+        val absStrengthCode: Int get() = absStrength.ordinal + 1
+
+        companion object {
+            /** 从 [Settings] 取原始配置（不派生"关/低"，那是服务端的事）。 */
+            fun from(s: Settings): LapAssistConfig = LapAssistConfig(
+                pedalMode = s.pedalMode,
+                // 注意：enableTc/enableAbs 是派生布尔，**不能**用来判"是否自定义"——
+                // DEFAULT 模式下它们恒 true。这里直接读 mode 字段本身。
+                tcCustom = s.tcMode == TcMode.CUSTOM,
+                tcStrength = s.tcStrength,
+                absCustom = s.absMode == AbsMode.CUSTOM,
+                absStrength = s.absStrength,
+            )
+        }
+    }
+
+    /**
+     * [LapAssistConfig] → native 整数码（跨 JNI 只传 int，不传字符串）。
+     *
+     * 码方案：**0 = 缺失**，非 0 = 枚举 `ordinal + 1`。之所以不直接用 ordinal：
+     * native 用 0 作"未推配置"的初值，若 ordinal 0 也是有效值就无法区分
+     * "没推过"与"推了第一档"。**加枚举成员必须追加在末尾**，否则在线用户的
+     * 记忆档位会错位（与 TcStrength 的 JSON 键历史不同，这里没有兼容负担——
+     * 每次配置变化都会整份重推）。
+     */
+    object LapAssistCodes {
+        const val MISSING = 0
+
+        fun pedalCode(m: PedalMode): Int = m.ordinal + 1
+        /** mode 只有两值：false=default、true=custom（顺序固定，勿改）。 */
+        fun modeCode(custom: Boolean): Int = if (custom) 2 else 1
+        /**
+         * 档位码 → 档位名（**两强度枚举共用**，见 [assertStrengthOrdersAligned]）。
+         * 只用 TcStrength 查表，因为两枚举的 value 序列必须一致。
+         */
+        fun strengthName(code: Int): String {
+            if (code <= MISSING) return ""
+            return TcStrength.entries.getOrNull(code - 1)?.value ?: ""
+        }
+        /** 踏板码 → 枚举 value（"" = 缺失，上报时由调用方转成不发字段）。 */
+        fun pedalName(code: Int): String {
+            if (code <= MISSING) return ""
+            return PedalMode.entries.getOrNull(code - 1)?.value ?: ""
+        }
+        /** 模式码 → 枚举 value（"" = 缺失）。 */
+        fun modeName(code: Int): String = when (code) {
+            1 -> "default"
+            2 -> "custom"
+            else -> ""
+        }
+        /** 强度码 → 枚举 value（与 [strengthName] 同义，语义别名便于调用处自解释）。 */
+        fun strengthValue(code: Int): String = strengthName(code)
+
+        /**
+         * 防呆：两强度枚举的顺序若分叉，[strengthName] 会给出错误档位名而无人察觉。
+         * 模块启动时调用一次（返回 false 只落日志，不抛异常——不能因为这个断言
+         * 让整个模块起不来）。
+         */
+        fun assertStrengthOrdersAligned(): Boolean =
+            TcStrength.entries.map { it.value } == AbsStrength.entries.map { it.value }
+    }
     private val tangentCache = object : LinkedHashMap<List<CurvePoint>, FloatArray>(8, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<List<CurvePoint>, FloatArray>): Boolean = size > 8
     }

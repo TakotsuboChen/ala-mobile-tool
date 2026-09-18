@@ -149,6 +149,29 @@ class ConfigReceiver : BroadcastReceiver() {
                 Logger.i(TAG, "ConfigReceiver: setAbsParams mix=$absMix bOverride=$absBOverride brakeScale=$brakeScale")
             }
 
+            // 圈辅助配置同步（围场积分加成 / 零辅助金标数据源）——
+            // 用户在游戏运行中改踏板模式/TC 档/ABS 档，必须立刻让 native 知道：
+            // 否则"这一圈中途改过配置"检测不到，会把不一致的圈当成一致上报。
+            // ⚠️ 走**原始配置四维**（不派生"关/低"），与 AlaMobileModule 启动路径一致。
+            try {
+                val pedalModeForAssist = ModConfig.PedalMode.from(incoming.optString("pedal_mode", "off"))
+                tools.alamobile.mod.NativeBridge.setLapAssistConfigSafe(
+                    ModConfig.LapAssistConfig(
+                        pedalMode = pedalModeForAssist,
+                        tcCustom = tcMode == ModConfig.TcMode.CUSTOM,
+                        tcStrength = ModConfig.TcStrength.from(incoming.optString("tc_strength", "stock")),
+                        absCustom = absMode == ModConfig.AbsMode.CUSTOM,
+                        absStrength = ModConfig.AbsStrength.from(incoming.optString("abs_strength", "stock")),
+                    )
+                )
+                Logger.i(
+                    TAG,
+                    "ConfigReceiver: setLapAssistConfig pedal=$pedalModeForAssist tcCustom=${tcMode == ModConfig.TcMode.CUSTOM} absCustom=${absMode == ModConfig.AbsMode.CUSTOM}"
+                )
+            } catch (e: Throwable) {
+                Logger.w(TAG, "ConfigReceiver: setLapAssistConfig failed: ${e.message}")
+            }
+
             // 实时同步音乐替换开关——用户从配置页切到游戏时即时生效。
             // 需要 native 可用（mute 游戏音乐靠 native hook 静音 AudioSource）。
             val enableMusicReplace = incoming.optBoolean("enable_music_replace", false)

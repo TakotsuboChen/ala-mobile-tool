@@ -630,15 +630,88 @@ object PaddockClient {
     // ── 圈速上传 ────────────────────────────────────────────
 
     /**
+     * 一圈的辅助配置上报载荷（原始枚举字符串，缺失 = null）。
+     *
+     * 服务端据这些**原始值**派生"关 TC / 低档 ABS / 线性踏板"并算加成
+     * （见 paddock-api `score.rs`）——模块不报派生结论，规则调整无需发新版。
+     */
+    data class LapAssist(
+        val pedalMode: String?,
+        val tcMode: String?,
+        val tcStrength: String?,
+        val absMode: String?,
+        val absStrength: String?,
+    ) {
+        /** 五维全缺（native 未就绪 / 整圈配置变动过 / 旧数据）→ 不上报字段。 */
+        val allMissing: Boolean
+            get() = pedalMode == null && tcMode == null && tcStrength == null &&
+                absMode == null && absStrength == null
+
+        /** 塞进上报体（缺失维不发字段——服务端 `#[serde(flatten)]` + Option 天然接住）。 */
+        fun putInto(o: JSONObject) {
+            pedalMode?.let { o.put("pedal_mode", it) }
+            tcMode?.let { o.put("tc_mode", it) }
+            tcStrength?.let { o.put("tc_strength", it) }
+            absMode?.let { o.put("abs_mode", it) }
+            absStrength?.let { o.put("abs_strength", it) }
+        }
+
+        companion object {
+            val MISSING = LapAssist(null, null, null, null, null)
+
+            /**
+             * native 单槽的 5 个配置码（0 = 缺失）→ 枚举字符串。
+             *
+             * ⚠️ 码是**整圈一致性的载体**：native 只在整圈配置未变过时才填非 0，
+             * 否则整组填 0。故这里逐维解码即可，无需再判一致性。
+             */
+            fun fromCodes(out: IntArray): LapAssist {
+                val c = tools.alamobile.mod.config.ModConfig.LapAssistCodes
+                // 解码函数返回 "" 表示缺失 → 转 null（null 维不发字段，服务端记缺失）
+                fun str(code: Int, f: (Int) -> String): String? =
+                    if (code <= c.MISSING) null else f(code).takeIf { it.isNotEmpty() }
+                return LapAssist(
+                    pedalMode = str(out[3], c::pedalName),
+                    tcMode = str(out[4], c::modeName),
+                    tcStrength = str(out[5], c::strengthValue),
+                    absMode = str(out[6], c::modeName),
+                    absStrength = str(out[7], c::strengthValue),
+                )
+            }
+
+            /** 待传队列条目 → 载荷（队列里存的是紧凑键名）。 */
+            fun fromQueue(o: JSONObject): LapAssist = LapAssist(
+                pedalMode = o.optString("pm").takeIf { it.isNotEmpty() },
+                tcMode = o.optString("tcm").takeIf { it.isNotEmpty() },
+                tcStrength = o.optString("tcs").takeIf { it.isNotEmpty() },
+                absMode = o.optString("absm").takeIf { it.isNotEmpty() },
+                absStrength = o.optString("abss").takeIf { it.isNotEmpty() },
+            )
+        }
+
+        /** 写进待传队列条目（紧凑键，省空间；空值不写）。 */
+        fun putIntoQueue(o: JSONObject) {
+            pedalMode?.let { o.put("pm", it) }
+            tcMode?.let { o.put("tcm", it) }
+            tcStrength?.let { o.put("tcs", it) }
+            absMode?.let { o.put("absm", it) }
+            absStrength?.let { o.put("abss", it) }
+        }
+    }
+
+    /**
      * 上传一条有效圈。返回 Toast 文案(可为 null=无提示):成功=服务端四条件文案,
      * 失败(200 以外任何情况)=TOAST_LAP_QUEUED,且必定已入本地待传队列——
      * 入队与提示严格一一对应,绝不静默丢圈。阻塞 IO,工作线程调用。
+     *
+     * [assist] 随圈走：**入队时也要带上**——"先跑圈后登录"的补传路径若不存配置，
+     * 那一圈会白白变成"缺失"（0 分加成），正是用户最在意的丢分场景。
      */
-    fun uploadLap(gpIndex: Int, lapMs: Int): String? {
+    fun uploadLap(gpIndex: Int, lapMs: Int, assist: LapAssist = LapAssist.MISSING): String? {
         lastUploadAt = System.currentTimeMillis()
         val token = authToken
         if (token == null) {
-            enqueue(gpIndex, lapMs)
+            enqueue(gpIndex, lapMs, assist)
             Logger.log(
                 Log.WARN, TAG,
                 "uploadLap: no token, queued locally (gp=$gpIndex, ${pendingCount()} pending)"
@@ -650,6 +723,7 @@ object PaddockClient {
                 .put("gp_index", gpIndex)
                 .put("version_code", versionCode)
                 .put("lap_ms", lapMs)
+            assist.putInto(body)
             val (code, resp) = postJson("$serverBase/v1/laps", body, token)
             when {
                 code == 200 -> {
@@ -666,7 +740,7 @@ object PaddockClient {
                     // 宁可先存后判;是否继续重试交给 [drainQueue] 的 [isRetryableStatus]
                     // (永久 4xx 会在下一轮补传中被丢弃,不会长期占队头挡后面的好圈)。
                     // 入队与 TOAST_LAP_QUEUED 严格一一对应——提示「已保存在本地」永不说假话。
-                    enqueue(gpIndex, lapMs)
+                    enqueue(gpIndex, lapMs, assist)
                     if (isRetryableStatus(code)) {
                         Logger.log(Log.WARN, TAG, "upload failed (retryable $code), queued: ${errText(code, resp)}")
                     } else {
@@ -676,13 +750,13 @@ object PaddockClient {
                 }
             }
         } catch (e: IOException) {
-            enqueue(gpIndex, lapMs)
+            enqueue(gpIndex, lapMs, assist)
             TOAST_LAP_QUEUED
         } catch (e: Throwable) {
             // 兜底:非 IO 的意外异常(JSON 解析崩等)同样入队,绝不静默丢圈。
             // 这是「偶尔没见补传、成绩丢了」的另一处漏点——改前此处既不入队也不提示,
             // 圈直接蒸发(唯一的痕迹只有一行 WARN 日志)。
-            enqueue(gpIndex, lapMs)
+            enqueue(gpIndex, lapMs, assist)
             Logger.log(Log.WARN, TAG, "uploadLap failed (unexpected), queued: ${e.message}")
             TOAST_LAP_QUEUED
         }
@@ -712,9 +786,13 @@ object PaddockClient {
 
     private fun queueFile(): File = File(getDir(), QUEUE_FILE)
 
-    /** 入队（去重：同 gp+lapMs+当日 不重复入队）。满了丢最旧。 */
+    /** 入队（去重：同 gp+lapMs+当日 不重复入队）。满了丢最旧。
+     *
+     * [assist] 一并存进条目——补传时要用它重建上报体。**漏存 = 补传的圈丢配置**
+     * （用户最在意的"跑了圈没加成分"场景），故 [LapAssist] 的队列键名由它自己管。
+     */
     @Synchronized
-    private fun enqueue(gpIndex: Int, lapMs: Int) {
+    private fun enqueue(gpIndex: Int, lapMs: Int, assist: LapAssist = LapAssist.MISSING) {
         try {
             val arr = readQueue()
             // 简单去重：完全相同的 (gp, ms) 且 60s 内已入队 → 跳过
@@ -726,6 +804,7 @@ object PaddockClient {
                 }
             }
             val item = JSONObject().put("gp", gpIndex).put("ms", lapMs).put("t", now)
+            assist.putIntoQueue(item)
             arr.put(item)
             while (arr.length() > QUEUE_MAX) arr.remove(0)
             queueFile().writeText(arr.toString())
@@ -778,6 +857,8 @@ object PaddockClient {
                     .put("gp_index", it.optInt("gp"))
                     .put("version_code", versionCode)
                     .put("lap_ms", it.optInt("ms"))
+                // 队列里存的辅助配置一并回传（旧队列条目无这些键 → 全缺失，行为同旧版）
+                LapAssist.fromQueue(it).putInto(body)
                 postJson("$serverBase/v1/laps", body, token).first
             } catch (e: Throwable) {
                 -1  // 网络异常：保留待下次补传
@@ -849,9 +930,30 @@ object PaddockClient {
     // ── HTTP ────────────────────────────────────────────────
 
     /** 榜单条目（积分榜/赛道榜共用解析子集） */
-    data class PointsEntry(val username: String, val points: Int, val avatarUrl: String?)
+    data class PointsEntry(
+        val username: String,
+        val points: Int,
+        val avatarUrl: String?,
+        /** 该用户在该榜维度内有成绩的赛道数（金标分母；本文具不展示，留给将来"x/y"提示） */
+        val bestCount: Int = 0,
+        /** 其中零辅助最快圈的条数（金标分子） */
+        val zeroCount: Int = 0,
+        /**
+         * 是否显示金色流光。**服务端判定的唯一事实源**——客户端不重算，
+         * 否则公式改一处两边就不一致（服务端已按"版本榜 2×零辅助≥总数、
+         * 总榜另需至少 1 条零辅助"判好）。
+         */
+        val gold: Boolean = false,
+    )
 
-    data class TrackEntry(val rank: Int, val username: String, val lapDisplay: String, val avatarUrl: String?)
+    data class TrackEntry(
+        val rank: Int,
+        val username: String,
+        val lapDisplay: String,
+        val avatarUrl: String?,
+        /** 该车手的个人最快圈是否零辅助（TC 与 ABS 均关）→ 整行金色流光 */
+        val gold: Boolean = false,
+    )
 
     data class TrackBoard(
         val trackName: String,
@@ -869,7 +971,15 @@ object PaddockClient {
             val arr = org.json.JSONArray(JSONObject(resp).optJSONArray("entries")?.toString() ?: "[]")
             (0 until arr.length()).mapNotNull { i ->
                 val e = arr.optJSONObject(i) ?: return@mapNotNull null
-                PointsEntry(e.optString("username"), e.optInt("points"), e.optString("avatar_url").takeIf { it.isNotEmpty() })
+                PointsEntry(
+                    username = e.optString("username"),
+                    points = e.optInt("points"),
+                    avatarUrl = e.optString("avatar_url").takeIf { it.isNotEmpty() },
+                    bestCount = e.optInt("best_count"),
+                    zeroCount = e.optInt("zero_count"),
+                    // optBoolean 在旧服务端（无该字段）下返回 false = 无金标，天然向后兼容
+                    gold = e.optBoolean("gold"),
+                )
             }
         } catch (e: Throwable) {
             Logger.log(Log.WARN, TAG, "fetchPointsBoard: ${e.message}")
@@ -889,7 +999,13 @@ object PaddockClient {
             val arr = org.json.JSONArray(j.optJSONArray("entries")?.toString() ?: "[]")
             val entries = (0 until arr.length()).mapNotNull { i ->
                 val e = arr.optJSONObject(i) ?: return@mapNotNull null
-                TrackEntry(e.optInt("rank"), e.optString("username"), e.optString("lap_display"), e.optString("avatar_url").takeIf { it.isNotEmpty() })
+                TrackEntry(
+                    rank = e.optInt("rank"),
+                    username = e.optString("username"),
+                    lapDisplay = e.optString("lap_display"),
+                    avatarUrl = e.optString("avatar_url").takeIf { it.isNotEmpty() },
+                    gold = e.optBoolean("gold"),
+                )
             }
             TrackBoard(j.optString("track_name", "赛道"), entries)
         } catch (e: Throwable) {

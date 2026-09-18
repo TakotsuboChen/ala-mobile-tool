@@ -259,25 +259,31 @@ Java_tools_alamobile_mod_NativeBridge_initLap(JNIEnv *env, jclass clazz,
 }
 
 // ── 围场上传通道（S2）：Java 1Hz 轮询取走 order==2 有效圈事件 ──
-// 返回 true 时 outLapSeq 去重用、outGpIndex∈[0,15]、outLapMs 毫秒。
+// out 为长度 ≥9 的 int[]，填充顺序：
+//   [0]=lapSeq（去重） [1]=gpIndex∈[0,15] [2]=lapMs
+//   [3..7]=辅助配置码 pedal/tcMode/tcStrength/absMode/absStrength（0=缺失；
+//          非 0 表示**整圈全程未变过**——见 lap_hook.h 的 epoch 说明）
+// 单数组传参而非 9 个出参：出参越多越容易在 Java 侧写错顺序，且
+// SetIntArrayRegion 一次拷贝比分 9 次调用便宜。
 JNIEXPORT jboolean JNICALL
 Java_tools_alamobile_mod_NativeBridge_pollLapUpload(JNIEnv *env, jclass clazz,
-                                                    jintArray outLapSeq,
-                                                    jintArray outGpIndex,
-                                                    jintArray outLapMs) {
+                                                    jintArray out) {
     (void) clazz;
-    if (env == NULL || outLapSeq == NULL || outGpIndex == NULL || outLapMs == NULL)
-        return JNI_FALSE;
-    jint buf[3];
-    int32_t seq = 0, gp = 0, ms = 0;
-    if (!lap_poll_upload(&seq, &gp, &ms)) return JNI_FALSE;
-    buf[0] = (jint) seq;
-    buf[1] = (jint) gp;
-    buf[2] = (jint) ms;
-    // 三个单元素数组写入（Java 侧 new 出来的，此处必非 NULL——NULL 已在前面拦截）
-    (*env)->SetIntArrayRegion(env, outLapSeq, 0, 1, &buf[0]);
-    (*env)->SetIntArrayRegion(env, outGpIndex, 0, 1, &buf[1]);
-    (*env)->SetIntArrayRegion(env, outLapMs, 0, 1, &buf[2]);
+    if (env == NULL || out == NULL) return JNI_FALSE;
+    if ((*env)->GetArrayLength(env, out) < 9) return JNI_FALSE;
+    lap_upload_t up;
+    if (!lap_poll_upload(&up)) return JNI_FALSE;
+    jint buf[9];
+    buf[0] = (jint) up.lap_seq;
+    buf[1] = (jint) up.gp_index;
+    buf[2] = (jint) up.lap_ms;
+    buf[3] = (jint) up.pedal_mode;
+    buf[4] = (jint) up.tc_mode;
+    buf[5] = (jint) up.tc_strength;
+    buf[6] = (jint) up.abs_mode;
+    buf[7] = (jint) up.abs_strength;
+    buf[8] = 0;  // 预留
+    (*env)->SetIntArrayRegion(env, out, 0, 9, buf);
     return JNI_TRUE;
 }
 
@@ -287,6 +293,21 @@ Java_tools_alamobile_mod_NativeBridge_markLapUploadConsumed(JNIEnv *env, jclass 
     (void) env;
     (void) clazz;
     lap_mark_upload_consumed((int32_t) lapSeq);
+}
+
+// ── 整圈辅助配置推送（模块启动 + ConfigReceiver 收到广播时）──
+// 码 0 = 缺失/未知；非 0 的取值由 Java 依 ModConfig 枚举给出（native 不认识语义，
+// 只做变更检测与透传）。**重复推同一份配置是幂等的**——native 只在真正变化时
+// 递增 epoch，否则"配置没变的圈"会被误判成"中途改过"（见 lap_hook.c 注释）。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_setLapAssistConfig(JNIEnv *env, jclass clazz,
+                                                         jint pedal_mode, jint tc_mode,
+                                                         jint tc_strength, jint abs_mode,
+                                                         jint abs_strength) {
+    (void) env;
+    (void) clazz;
+    lap_set_assist_config((int) pedal_mode, (int) tc_mode, (int) tc_strength,
+                          (int) abs_mode, (int) abs_strength);
 }
 
 JNIEXPORT void JNICALL

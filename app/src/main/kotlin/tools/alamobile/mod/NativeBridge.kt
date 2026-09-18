@@ -2,6 +2,7 @@ package tools.alamobile.mod
 
 import tools.alamobile.mod.util.Logger
 import android.content.Context
+import tools.alamobile.mod.config.ModConfig
 import tools.alamobile.mod.offsets.OffsetTable
 import java.io.File
 import java.io.FileOutputStream
@@ -300,16 +301,57 @@ object NativeBridge {
 
     /**
      * 围场上传通道（S2）：轮询取走 order==2 有效圈事件（单槽，见 lap_hook.c）。
-     * 有未消费事件返回 true，outLapSeq 去重用（单调递增）、
-     * outGpIndex∈[0,15]、outLapMs=完整圈毫秒。消费成功后调
-     * [markLapUploadConsumed]。
+     * 有未消费事件返回 true，out 至少 9 元素，填充：
+     * ```
+     * [0] lapSeq（去重，单调递增）   [1] gpIndex∈[0,15]   [2] lapMs
+     * [3] pedalMode  [4] tcMode  [5] tcStrength  [6] absMode  [7] absStrength
+     * ```
+     * 索引 3..7 是**整圈辅助配置码**（0 = 缺失）。非 0 表示该圈全程配置未变过，
+     * 可安全作为成绩属性上报。消费成功后调 [markLapUploadConsumed]。
      */
     @JvmStatic
-    external fun pollLapUpload(outLapSeq: IntArray, outGpIndex: IntArray, outLapMs: IntArray): Boolean
+    external fun pollLapUpload(out: IntArray): Boolean
 
     /** native 单槽消费确认（与 [pollLapUpload] 配对）。 */
     @JvmStatic
     external fun markLapUploadConsumed(lapSeq: Int)
+
+    /**
+     * 推送当前辅助配置（模块启动 + 配置广播到达时）。native 只在**真正变化**时
+     * 递增内部 epoch，故可重复调用；圈中途改过配置的圈会被判"不一致"记缺失。
+     *
+     * 码值 = [ModConfig.LapAssistCodes]（0 = 缺失/未知，非 0 为枚举序号 +1）。
+     * 传 [ModConfig.LapAssistCodes.MISSING] 表示整维缺失。
+     */
+    @JvmStatic
+    external fun setLapAssistConfig(
+        pedalMode: Int,
+        tcMode: Int,
+        tcStrength: Int,
+        absMode: Int,
+        absStrength: Int
+    )
+
+    /**
+     * [setLapAssistConfig] 的防御包装。**只接受原始配置五维**（不是可选类型）——
+     * "缺失"由调用方决定不调用本函数表达（初始状态本就是缺失，且用户一旦配置
+     * 过就不该回退成"缺失"；那种回退只能靠 [setLapAssistConfigMissing]）。
+     */
+    fun setLapAssistConfigSafe(cfg: ModConfig.LapAssistConfig) {
+        if (!isAvailable) return
+        try {
+            val c = ModConfig.LapAssistCodes
+            setLapAssistConfig(
+                c.pedalCode(cfg.pedalMode),
+                c.modeCode(cfg.tcCustom),
+                cfg.tcStrengthCode,
+                c.modeCode(cfg.absCustom),
+                cfg.absStrengthCode,
+            )
+        } catch (e: Throwable) {
+            Logger.w(TAG, "setLapAssistConfig failed", e)
+        }
+    }
 
     @JvmStatic
     external fun setThrottle(value: Float)

@@ -580,6 +580,27 @@ class AlaMobileModule : XposedModule() {
                     } catch (e: Throwable) {
                         logX(Log.ERROR, TAG, "setAbsParams failed: ${e.message}")
                     }
+                    // 圈辅助配置下发（围场积分加成 + 零辅助金标的数据源）。
+                    // ⚠️ 必须走 **原始配置四维**（LapAssistConfig.from），不能用上面
+                    // 派生出的 enableTc/enableAbs——DEFAULT 模式下它们恒 true，
+                    // 会丢失"是否自定义"这层信息，服务端就无法区分"关 TC"与"没调过"。
+                    // settings==null（NPatch 早期配置读不到）时**不推送**：保持 native
+                    // 的初始"缺失"态（宁可记缺失不加分，也不虚报用户配置）。
+                    if (settings != null) {
+                        try {
+                            // 防呆：TC/AbsStrength 两枚举顺序若分叉，档位码解码会静默
+                            // 给错档位名（见 LapAssistCodes 注释）。只记日志不阻断。
+                            if (!ModConfig.LapAssistCodes.assertStrengthOrdersAligned()) {
+                                logX(Log.ERROR, TAG, "TC/AbsStrength enum order diverged — assist strength codes will be wrong!")
+                            }
+                            NativeBridge.setLapAssistConfigSafe(ModConfig.LapAssistConfig.from(settings))
+                            logX(Log.INFO, TAG, "setLapAssistConfig from settings")
+                        } catch (e: Throwable) {
+                            logX(Log.ERROR, TAG, "setLapAssistConfig failed: ${e.message}")
+                        }
+                    } else {
+                        logX(Log.WARN, TAG, "assist config not pushed (settings unavailable) → laps will be marked missing")
+                    }
                     // 主菜单音乐替换：native hooks 装好后初始化播放器。
                     // 提取 APK 内置 MP3 → 轮询主菜单状态 → 在主菜单播放。
                     // 开关由广播/初始化同步。
