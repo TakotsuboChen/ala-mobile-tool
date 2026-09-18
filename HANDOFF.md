@@ -1,85 +1,88 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-09-18T02:35:00+08:00 · Git HEAD: `09b0fae`（本文件为后续 handoff 提交，其 parent）
-paddock 仓 HEAD: `973329d`（本会话未动）
+生成时间: 2026-09-18T16:30:41+08:00 · Git HEAD: `15e84ec`
+paddock 仓 HEAD: `0f8319c`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: 模块 main @ `09b0fae`（2026-09-18 02:35）
-- 漂移检查: `git rev-parse HEAD~1`（模块仓）是否仍 = `09b0fae`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA；不一致以 git 实际输出为准
-- 待重探的 [?]: 见下方标记
-- 先读: CLAUDE.md「自锁型超车按键」条目（本会话新增，hook 点红线全在里面）+ `native/src/overtake_hook.c`；逆向选点时用 `.tools/` 四脚本（CLAUDE.md IL2CPP RE 段有用法）
+- 锚点: 模块 main @ `15e84ec`；paddock main @ `0f8319c`（两仓均已 push）
+- 漂移检查: `git rev-parse HEAD~1`（两仓）是否仍 = 上述 SHA——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA
+- 待重探的 [?]: 见 §5
+- 先读: `docs/PADDOCK_PLAN.md` §1（积分公式与辅助加成定案）+ `paddock-api/src/score.rs`（公式单一事实源）
 
 ## 1. 当前目标
-**已完成**：新增「自锁型超车按键」功能——把 OTK（超车）**屏幕按钮**从「按住才生效」改成「点一下切换」，只改按键抬落语义，**是否允许开超车（ERS 解锁 / 电量）完全仍由游戏判定**（模块一行都没改游戏守卫，点了没反应与原生一致、不补提示）。含配置项 + 设置页开关 + Boost 图标 + native hook + 运行时热更新。**用户实机验收："全部完美"。现无进行中目标。**
+**已完成**：「围场辅助加成 + 零辅助金标」全链路——服务端存圈辅助配置（踏板/TC/ABS 原始枚举）、积分加成（最多 +50%）、排行榜金字；模块侧随圈上报配置（整圈一致性由 native epoch 判定）；管理端配置列/编辑回填/金标播报模板；用户页人数修复。**服务端已部署上线 + 模块已装机。用户验收："可以，完美"。现无进行中目标。**
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **工作已提交推送**：`0b3976c`（配置+UI+图标）、`c5ce30c`（native 实现）、`0002c7d`（JNI 接线）、`09b0fae`（持久文档）。四次 push 均成功。
-- [V] **门槛**：`:app:lint` → `EXIT=0` + `BUILD SUCCESSFUL`（58 warnings / 4 hints / baseline 过滤后 0 error）；`:app:assembleRelease -x lintVital*` → `EXIT=0`。
-- [V] **已装机**：APK 与设备版本核对一致（均 `104100 / 1.0.4 Alpha 1`）后 `adb install -r` → `Success`，设备 MEIZU 20（无线 `192.168.50.142:5555`）。**版本号未改动。**
-- [V] **用户实机验收通过**：点按切换行为正确，图标显示完整。
-- [V] **hook 安装日志实锤**：`Hooked TouchPressOTK at 0x7736a13e24 / TouchReleaseOTK at 0x7736a13e40 (DisableOTK at 0x7736a2f494, latch_overtake=1)`（base 0x7735c0a000）——三个地址与 OffsetTable 全部对上。
-- [V] **行为日志**：Monza 计时赛 8 分钟（01:53:41–02:01:23）45 次点按，开 23 / 关 22 **严格交替**，最长锁定 17.5s；期间零 native 崩溃（`ala_tool_crash_native.log` 不存在）。唯一一次 `locked→locked` 是跨场景切换（回主菜单→进新赛道，旧实例销毁）。
-- [V] **图标渲染**：`rsvg-convert` 对拍「原始 viewBox」与「平移后」SVG，`compare -metric AE` = **0**（像素完全一致）。
-- [V] 工作区 clean。
+- [V] **两仓工作已提交推送**：模块 `d2bd475`（native+JNI+上传）/`f91ea22`（金字）/`326f84b`（契约+指南）/`15e84ec`（持久文档）；paddock `3fbd1bb`（后端+加成）/`121c2b7`（真库测试）/`0f8319c`（管理端 UI+金标播报）。
+- [V] **门槛**：`:app:lint --rerun-tasks` → `Lint found 58 warnings, 4 hints (3 errors + 14 filtered by baseline)` + `BUILD SUCCESSFUL`；`:app:assembleRelease -x lintVital*` → `BUILD SUCCESSFUL`。
+- [V] **服务端测试**：`cargo test --release` → **9 passed / 0 failed**；`DATABASE_URL=... cargo test --release -- --ignored` → **7 passed / 0 failed**（真 Postgres 容器）。
+- [V] **服务端已部署**：镜像 `paddock-api:1.0.1`（同名 tag 覆盖，本地/VPS ID 一致）→ `docker load` + `compose up -d --force-recreate app` → `/v1/health` = `{"status":"ok","version":"1.0.1"}`。迁移 `0009` 已应用（`laps` 五列 + `best_laps` 四布尔）。**部署前已做完整 pg_dump 备份**（`VPS:~/paddock/backup-pre-0009-20260918143257.sql.gz`，458KB）。
+- [V] **模块已装机**：APK `1.0.4 Alpha 1 / 104100`（版本号未动）→ `adb install -r` Success，设备 MEIZU 20（无线 `192.168.50.142:5555`）。
+- [V] **实机日志实证全链路**：`LAPcfg: assist config updated pedal=2 tcm=2 tcs=1 absm=2 abss=3 (epoch=1)`（奇数码 = 枚举序号，pedal=2=SINGLE、tcs=1=OFF）→ 生产库出现 `Takotsubo / gp=7 / 63845ms / single+custom+off / custom+off` → 赛道榜该行 `gold=True`。
+- [V] **金标播报迁移已生效**：VPS 启动日志 `[qq_bot] 已为播报规则 preset-bc-alltime / -bc-version 补上预设金标模板`，`configs` 出现 `bot_gold_template_migrated_v1` 标记；二次启动无重复补写（幂等验证过）。
+- [V] 工作区: 两仓 clean。
 
 ### 测试/build 输出（本次交接 run 的真实输出，含退出码）
 ```
-$ ./gradlew :app:lint        → EXIT=0, BUILD SUCCESSFUL
+$ ./gradlew :app:lint --rerun-tasks
+  → Lint found 58 warnings, 4 hints (and 3 errors and 14 warnings filtered by baseline lint-baseline.xml)
+  → BUILD SUCCESSFUL in 2m 9s   EXIT=0
 $ ./gradlew :app:assembleRelease -x :app:lintVitalAnalyzeRelease -x :app:lintVitalRelease
-                             → EXIT=0, BUILD SUCCESSFUL
-$ adb install -r app/build/outputs/apk/release/app-release.apk → Success
-$ grep -c 'tap -> locked' / grep -c 'tap -> released'（pid 25156）→ 23 / 22
+  → BUILD SUCCESSFUL in 3s   EXIT=0
+$ cd paddock-api && cargo test --release
+  → test result: ok. 9 passed; 0 failed; 7 ignored
+$ DATABASE_URL=postgres://postgres:test@127.0.0.1:55436/paddock cargo test --release -- --ignored --test-threads=1
+  → test result: ok. 7 passed; 0 failed; 9 filtered out   EXIT=0
 ```
 
 ## 3. 决策与理由
-- **hook 点 = OTK 按钮专属方法，不是 `HybridComponent.EnableOTK/DisableOTK`** [V]——这是本会话最关键的一步。两个按钮入口（`odometerHandler.TouchPressOTK` 0x1A0BE24 / `TouchReleaseOTK` 0x1A0BE40）是**按钮专属**（全 `.so` 零 `bl` 指向，引用者只有按钮 prefab：`datapack.unity3d` @122230882 `IRDS.UI.odometerHandler, Assembly-CSharp` + 两方法名 + 同文件 GUID）。而 `EnableOTK/DisableOTK` 虽也覆盖触摸路径（`TouchPressOTK` 尾部就是 `b EnableOTK`），但 `switchHModeUp`(0x1A27484) 是游戏自己的 OTK toggle、被 `onHybridMapChange`/`Update`（**ERS 混动模式键**）调用——挂那里会连带吞掉 ERS 键的"关超车"。**方法论：选 hook 点前先跑 `.tools/find_callers.py` 看调用方集合**。
-- **不写任何游戏状态字段** [V]——按下转调游戏自己的 `DisableOTK`（0x1A27494），保手臂动画/HUD/`UpdateHybridRNCs` 联动；开启原样转发 `TouchPressOTK`。绕过游戏入口会丢这些。
-- **以 `OvertakeActive`(0xC4) 复核"是否真的开起来了"** [V]——游戏可能因 ERS 未解锁 / 电量不足拒绝开启，此时不进锁定态（避免"点了没反应却锁住"）。这正是"可用性判定仍归游戏"的落地方式。
-- **抬起路径额外核 `currentCapacity`(0x74)** [V]——电量耗尽时游戏自己的管理管线会调 `DisableOvertakeModeSwitch(false)` 收尾，此时若仍吞抬起，玩家下次点按会变成"关闭"（体感反的）。
-- **不做 this 上的白名单** [V]——`HybridComponent` 没有可靠的"我是玩家车"字段：`isPlayer`(0xD0) 的 7 个读取点全在车队/遥测/HUD 类，推不出语义；0xA0 是 `SteeringWheelUI`（该判据在 `carModifier` 上成立但此处不成立）。可信度落在调用图证据上（AI 超车走 `AIHybridManager.ManageOvertake` → `EnableDisableOvertakeModeSwitch`，不经此路）。**升版必核这个调用图。**
-- **hook 恒装上，开关在回调内判** [V]——与自动 DRS 同策略，避免"关功能那一刻玩家正按着 OTK"的边缘态。
-- **图标：`viewBox` 四元组的原点必须处理** [V]——`minX minY width height`，Compose `ImageVector` 不支持非零 viewport 原点，需把 path 起点绝对坐标减去 `(minX, minY)`（相对命令不受影响）。`svgIconMulti` 同时新增 `defaultWidth/defaultHeight`（扁长图形沿用 24×24 会纵向拉伸 1.86 倍）。
+- **客户端只报原始枚举，服务端派生"关/低/线性"** [V]——规则留在服务端，改加分不必发模块版本。否决"客户端算好再报"：规则迭代会让老客户端报错值。
+- **关 TC/ABS 必须 `mode=='custom'`** [V]——`mode=default` 时 `strength` 只是 UI 记忆值不生效，读它会把"从没调过 TC"的用户误判成关 TC 白拿 10%。测试 `default_mode_never_counts_as_off` 钉住。
+- **加成两道零门**：`base>0 && pct>0` [V]——缺 `pct>0` 这道，"四项全不达标"会走"不足 1 保底 1"分支**人人白送 1 分**。`bonus_rounding_edges` 钉住。
+- **整圈一致性用 epoch 计数器而非逐维比对** [V]——"改了又改回"逐维比对会误判一致；epoch 抓得住。开销 = 每圈 1 次整数比较。
+- **`score.rs` 作积分公式单一事实源** [V]——公式原有 4 处 SQL 副本（版本榜/总榜/`/v1/me`/管理端），改一处必漏三处。
+- **金标模板是独立字段而非模板内变量** [V]——用户文案是整段多行替换（含"金标认证"句），变量替换表达不了"整段换掉"。
+- **金标模板迁移必须一次性 + 独立标记** [V]——`load_rules` 每次播报都调用，"见空就补"会把用户手工清空（= 不要金标播报）悄悄填回；"字段从未存在"与"用户清空"在 JSON 里都是空串。
+- **管理端配置列三维 token**（双踏板 / 关 / 最高）[V]——用户定案：`mode=default` 与 `custom+stock` 计分等价、语义也是"默认就是最高"，分两维纯占地方。`stock` 反向展开为 `mode=default`（不是 `custom+stock`，后者语义是"开过自定义"）。
+- **金色流光用 `brush` 而非 `animateColor`** [V]——要的是高光**扫过**（带状移动），不是整体明暗呼吸。底色 `goldenrod #DAA520`（`darkgoldenrod #B8860B` 实机反馈偏暗像脏铜色）。
+- **金标判据只看 TC/ABS，不含踏板** [V]——用户理由：原生按键物理上跑不出有效圈，实际满足者必然在用模块踏板。
+- **服务端用同名 tag 覆盖部署** [V]——`Cargo.toml` 版本号一个字没动（用户红线）；镜像 tag 必须与 compose 里写死的一致，故构建产物直接覆盖同名 tag。**唯一风险是"装上去的还是旧的"，靠二进制时间戳 + 镜像 ID 比对证伪**。
 
 ## 4. 失败的尝试 — 不要再试
-- **[X] hook `HybridComponent.EnableOTK`/`DisableOTK`（0x1A274F4 / 0x1A27494）** [V]——虽覆盖触摸路径，但不是按钮专属：`switchHModeUp`(0x1A27484) 被 `odometerHandler.onHybridMapChange`/`Update`（ERS 模式键）调用，会连带吞掉 ERS 键的"关超车"。
-- **[X] 给 `HybridComponent` 写身份白名单** [V]——`isPlayer`(0xD0) 语义未经证实（7 reads 全在车队/遥测/HUD 类）；组件内**没有** `IRDSCarControllInput` 字段（0x60=Car 枚举、0x98=IRDSDrivetrain、0xA0=SteeringWheelUI），故 `carModifier` 那条 `icinp` 判据不可移植。写进去只会把猜测固化。
-- **[X] 图标照搬 `viewBox` 坐标配 `0..90 × 0..48.49` 的 viewport** [V]——非零原点被丢，图形只显示 `y<48.49` 部分（≈49%，实机"只显示一半"）。
-- **[X] hook `IRDSCarControllInput.drsToggle`（0x1A673E0）做自动 DRS** [V]——那是**玩家按键入口**。自动模式下无人按键，hook 永不触发；旧实现装上了却只把所有玩家 DRS 请求吞掉。**自动部署必须走信号侧**。
-- **[X] 模块自行解析赛道 DRS/AA 区域数据（`activeAerozone[]` / telemetry 轮询）** [V]——两套规则判定管线不同，重复实现冗余且必然出错；游戏已有信号。
-- **[X] 直接写 `carModifier._currentDRSState`（或调 setter 绕过回调）** [V]——会丢部署动画、音效、HUD 与 `previousDRSState` 维护。
-- **[X] hook `carModifier.FixedUpdate` 或 `ManageActiveAero` 做 DRS 部署时机** [?]——`FixedUpdate` 每帧高频且全车共享（passthrough 红线）；`ManageActiveAero` 只服务 2026 车。（未实测，静态推断否决）
-- **[X] 用 `drsAlertPlayedThisZone`(0x47C) 做闩锁但不对 carType 分流** [V]——地效车该标志整场不复位，会"每场只能自动开一次"。
-- **[X] 在 `proxy_on_drs_state_changed` 里 `dl_iterate_phdr` 取 base** [V]——回调每车必经，持锁调用纯浪费；改为 install 时缓存。
-- **[X] 整段 `md.disasm(detail=True)` 扫 libil2cpp** [V]——31MB 代码段全量致 Python 申请 14GB+ → 内核 OOM → **WSL2 宿主 Vsock 超时整机重启**。一律 `disasm_lite` 流式 + `ulimit -v 4194304`。
-- 继承死路 [X]（详 `.handoffs/` 归档 §4）：编辑层尺寸=控件尺寸 / 变暗层插 index 0 / `withEndAction` 淡出收尾 / 提示文字画在编辑框 onDraw / `setShadowLayer` 阴影 / `result::class.simpleName` 记日志 / 锁屏态 monkey 拉起 / 踏板"单向补送" / `coroutineScope{}` 内多源竞速 / `***text***` 粗斜体 / MarkdownText 表格 / Remote Preferences `remove()` 清 token / `scheduleDraw` 治 LTPO / 单变量弹窗挂载 / 磁盘缓存原图字节 / 全局挂 `tnum` / `FontFamily.Monospace` 等宽 / miuix `Text` 转发 `fontFeatureSettings` / `tail` 截断 gradle 输出验门槛。
+- **[X] 在 `load_rules` 里"见空就补" gold_template** [V]——每次播报都调用，会把用户手工清空静默填回。改用一次性迁移 + `configs` 标记。
+- **[X] 管理端 lapEdit 传旧字段名（`dataset.tcm/tcs/absm/abss`）** [V]——data-* 已改成 `data-tc/data-abs`，传 undefined → 全部落在"缺失"选项。**这类键名不匹配 lint/单测/编译全发现不了**，只有真渲染 DOM 才看得见。
+- **[X] QQ Markdown 做文字颜色（`<font color>` / `<span style>`）** [V]——官方白名单只有标题/加粗/斜体/删除线/链接/图片/列表/引用/分割线，**无颜色语法**。那是钉钉/飞书的能力。用户已决定放弃。
+- **[X] 给 `leaderboard.rs` 的三层 CTE 里漏带派生列** [V]——`scored` CTE 没带上 `pedal_linear`/`abs_low` → 榜单端点 500 `column s.pedal_linear does not exist`。**单元测试测不出**（它测 Rust 实现，线上跑 SQL 字符串），靠 `score_sql_tests.rs` 真库测试抓出。
+- **[X] 掏生产库验证时把 SQL 单独跑了就下结论** [V]——那次 `data-pedal` 属性 grep 为空、我误判成"容器没重启"，实际是旧模板（即上述 lapEdit bug 的表现）。**线索要串起来看，别单点归因。**
+- **[X] hooks 里"每次读都补空值"式的补数据** [V]——凡是在高频读路径上做"见缺就补"的迁移，都会覆盖用户的有意清空。一律改为一次性 + 标记。
+- 继承死路 [X]（详 `.handoffs/` 归档 §4）：hook `HybridComponent.EnableOTK/DisableOTK` / 给 `HybridComponent` 写身份白名单 / `viewBox` 非零原点照搬 / hook `IRDSCarControllInput.drsToggle` / 模块自行解析赛道 DRS 区域 / 直写 `_currentDRSState` / 整段 `md.disasm(detail=True)` 扫 libil2cpp / 编辑层尺寸=控件尺寸 / 变暗层插 index 0 / `withEndAction` 淡出收尾 / `result::class.simpleName` 记日志 / 踏板"单向补送" / `coroutineScope{}` 内多源竞速 / Remote Preferences `remove()` 清 token / 单变量弹窗挂载 / 磁盘缓存原图字节 / 全局挂 `tnum` / `FontFamily.Monospace` 等宽。
 
 ## 5. 已知坑
-- ⚠️ **方法代码在 `il2cpp` 节（~31MB），不在 `.text`（0x2c3160）** [V]——只扫 `.text` 会得到"函数名乱配"的假结果；动手前 `readelf -SW` 按目标 RVA 反查所属节。`.tools/` 脚本已内置两节表。
-- ⚠️ **无线 adb 端口固定 5555** [V]——用户给魅族 20 装了 ADB Live 锁死端口；直接 `adb connect <IP>:5555`，**不要再从 mdns 取端口**。IP 仍会漂（当前 192.168.50.142）。
-- ⚠️ **`playercar`(0x9C) 自动 DRS 白名单回落分支未实机验证** [?]——实机走的是 `icinp == pedal_get_controller()` 主判据。**若用户关掉踏板替换，自动 DRS 需重新验证**。
-- ⚠️ **官版（com.Vince）未验证** [?]——本会话全部日志来自共存版 `com.Takotsubo.AlamobileFormula`。官版 media 目录只有 config/auth 两个 json。
-- ⚠️ **自锁型超车按键的"抬起被吞"缺直接日志证据** [?]——抬起路径两个分支都没打日志，当前结论由"开/关严格交替"逻辑排除法得出（用户已实机确认体感正确）。若要闭合证据链，在抬起分支各补一行 LOGI。
-- ⚠️ **地效车与空力车的确认粒度** [?]——自动 DRS 的日志无 `carType`，无法区分哪个 pid/时段是哪种车。
-- ⚠️ **手势路径未 hook** [?]——自锁只作用于屏幕按钮（用户诉求）；手柄 `IRDSPlayerControls.NitroMobile`(0x1A74D30) 语义未实证，未改。
+- ⚠️ **`/v1/me` 的 `total_points` 是独立于榜单的第二份 SQL** [V]——已改成走 `score.rs` 生成片段，但**仍是独立查询**。改公式后两处都要验（用真库跑一遍对比榜单端点最直接）。
+- ⚠️ **服务端镜像 tag 是临时状态** [?]——目前 `paddock-api:1.0.1` 被本次构建覆盖，`Cargo.toml` 未升版。**若之后要正式发版，需用户定版本号**才能让 tag/Cargo.toml/git tag 三处对齐。
+- ⚠️ **VPS 实测访问方式** [V]——`curl 127.0.0.1:8080` 正常；但管理端登录需要 `PADDOCK_ADMIN_USER`（真实值 **`Takotsubo`**，不是 `admin`）+ `.env` 里的密码。远程 bash 里嵌套引号易被吞（`unmatched '`），改用 `python3` 脚本或 heredoc 传 `bash -s`。
+- ⚠️ **金标金光实际观感未验收** [?]——周期 2.4s 是我定的初值；底色刚从 darkgoldenrod 调成 goldenrod，用户尚未反馈新观感。
+- ⚠️ **金标播报模板未实机触发验证** [?]——迁移已生效（文案在库），但还没有"零辅助圈破纪录"的真实播报发生。
+- ⚠️ **官版（com.Vince）未验证** [?]——本会话全部日志来自共存版。
+- ⚠️ **自动 DRS 的 `playercar`(0x9C) 白名单回落分支未实机验证** [?]（继承）——实机走 `icinp == pedal_get_controller()` 主判据。
+- ⚠️ **地效车与空力车的确认粒度** [?]（继承）——自动 DRS 日志无 `carType`。
+- ⚠️ **自锁型超车按键的"抬起被吞"缺直接日志证据** [?]（继承）——结论由开/关严格交替逻辑排除法得出。
+- ⚠️ **手势路径未 hook** [?]（继承）——自锁只作用屏幕按钮。
 - ⚠️ **读图会触发网关层 token 爆炸** [V]（继承）——读图先降采样到长边 ≤1568px。
-- ⚠️ **adb 设备必是本机、用户口中的"用户"必是远端** [V]（继承）——不预设传输方式，每次先 `adb devices -l`。
-- ⚠️ **LogExporter 的 3 行诊断日志去留未定** [?]（继承）；**NPatch 段未端到端验证** [?]（继承）；**`Logger.gameMediaDir`/`LogExporter.gameMediaDir` 两份实现** [?]（继承）；**旧 `Android/data/<pkg>/files/` 残留** [?]（继承）。
-- ⚠️ **同类弹窗坑仍在 `EulaDialog`/`UpdateDialog` 潜伏** [?]（继承）——无可滚动正文 `weight` 时平板可能重演窄条按钮。
-- ⚠️ **编辑模式仅共存版 + SINGLE 模式验证** [?]（继承）——DUAL 双编辑层、换挡控件编辑层、官版包名未回归。
-- ⚠️ **榜单 tnum 只在 ColorOS 16 平板验过** [?]（继承）。
-- ⚠️ **对话纪律** [V]（继承）——1 逐条消化 mid-turn 消息 2 旧快照不当现在时 3 装机前验设备 APK 版本 4 调查日志先对齐"几次"计数 5 修 UI 时序先拉触摸时间线 6 日志判不了的结论不要用日志反驳用户体感 7 别在用户锁屏时操作设备 8 **动用户设备状态前先说明** 9 **不要主动提版本号**（用户已多次强调）。
+- ⚠️ **adb 设备必是本机、用户口中的"用户"必是远端** [V]（继承）——每次先 `adb devices -l`。
+- ⚠️ **编辑模式仅共存版 + SINGLE 模式验证** [?]（继承）；**榜单 tnum 只在 ColorOS 16 平板验过** [?]（继承）；**同类弹窗坑仍在 `EulaDialog`/`UpdateDialog` 潜伏** [?]（继承）。
+- ⚠️ **对话纪律** [V]（继承）——1 逐条消化 mid-turn 消息 2 旧快照不当现在时 3 装机前验设备 APK 版本 4 调查日志先对齐"几次"计数 5 修 UI 时序先拉触摸时间线 6 日志判不了的结论不要用日志反驳用户体感 7 别在用户锁屏时操作设备 8 **动用户设备状态前先说明** 9 **不要主动提版本号**。
 
 ## 6. 下一步（有序）
-1. （可选）关掉踏板替换后回归自动 DRS 的 `playercar` 白名单回落分支（§5 第 3 条）。
-2. （可选）官版（com.Vince）回归：编辑模式 + 日志导出 + 自动 DRS + 自锁超车四处对称验证。
-3. （可选）DUAL 模式回归编辑模式；换挡控件编辑层回归（继承）。
-4. （可选）决定 LogExporter 3 行诊断日志留几行；其它 ROM 回归榜单 tnum；加固 `EulaDialog`/`UpdateDialog` 正文 `weight`（继承）。
-5. （可选）若要闭合自锁超车的证据链，抬起分支补日志（§5 第 4 条）。
+1. 用户在实机看金标观感（榜单金字 + 金标播报），按反馈调 `GOLD_BASE`/周期或金标模板文案。
+2. （可选）造一次"零辅助破纪录"实测金标播报：管理端把某条已有成绩改成 `双踏板/关/关` 并保存（若它恰好是当前纪录即触发）。
+3. （可选）正式发版时需先问用户版本号，再做 tag/Cargo.toml/compose 三处对齐。
+4. （可选）关掉踏板替换后回归自动 DRS 的 `playercar` 白名单回落分支（继承）。
+5. （可选）官版（com.Vince）回归：编辑模式 + 日志导出 + 自动 DRS + 自锁超车四处对称验证（继承）。
 
 ## 7. 留给用户的开放问题
-- 自动 DRS 的部署时机体感如何？（当前 = 游戏提示音响起的同一帧，是否过早/过晚）
-- 要不要给自动 DRS 加"仅正赛/计时赛生效"的会话限制？（当前无模式门控，任何 DRS 可用场合都会代按）
-- 自锁型超车按键要不要也覆盖手柄 nitroButton 路径？（当前只改屏幕按钮）
-- 3×slop 长按取消阈值、3 行诊断日志、旧 `Android/data` 残留日志清理（均继承）
-- 那两条锁屏态 SIGSEGV（`located=0`，疑与模块无关）是否要单独追？（继承）
+- 金标金光亮度与速度合适吗？（底色已改 goldenrod，周期 2.4s）
+- 金标播报的文案要不要在 `# 纪录快讯` 后加 emoji 之类装饰？（已按原文逐字保留，未加）
+- 自动 DRS 的部署时机体感如何、要不要加会话限制？（继承）
+- 自锁型超车按键要不要覆盖手柄 nitroButton 路径？（继承）
