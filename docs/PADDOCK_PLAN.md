@@ -21,7 +21,9 @@
 | 数据契约 | 圈时(ms) + gpIndex + versionCode（最小契约）[D] | 未来扩展再加字段 |
 | 版本键 | 游戏 6 位 versionCode（200146=8.0.4）[D] | 版本榜即该游戏版本榜 |
 | 登录态 | 90 天滑动 token [D] | 改密即失效兜底 |
-| 积分公式 | `score = round((N+1−rank)×100/N)`：第一 100，每名次递减 100/N，第 N 名 100/N，虚位第 N+1 名 0；N=1 自然得 100 无需特判（v40 修正定案。例：2 人 → 100/50/虚位0）。⚠️ v39 曾写成 `(N−rank)×100/N`，与例句 100/50/虚位0 矛盾（off-by-one，SQL 实现抄了错的那半，致 2 人榜 50/0），v40 起以本行为准 [D] | 每赛道×每版本独立；总榜=各版本独立计分后累加（版本=独立赛季：两版本全赛道第一=3200） |
+| 积分公式 | `total = base + bonus`。**基础分** `base = round((N+1−rank)×100/N)`：第一 100，每名次递减 100/N，第 N 名 100/N，虚位第 N+1 名 0；N=1 自然得 100 无需特判（v40 修正定案。例：2 人 → 100/50/虚位0）。⚠️ v39 曾写成 `(N−rank)×100/N`，与例句 100/50/虚位0 矛盾（off-by-one，SQL 实现抄了错的那半，致 2 人榜 50/0），v40 起以本行为准 [D]。**辅助加成**（v41，2026-09-18）：线性踏板 +10% / 关 TC +10% / 低档 ABS +10% / 关 ABS +30%（最大 50%），`bonus = base>0 && pct>0 ? max(1, round(base×pct)) : 0` [D] | 每赛道×每版本独立；总榜=各版本独立计分后累加（版本=独立赛季：两版本全赛道第一=3200）。⚠️ 加成只加在**基础分**上（不是总分复利） |
+| 辅助配置上报 | `POST /v1/laps` 附带 5 个**原始枚举**（pedal_mode / tc_mode / tc_strength / abs_mode / abs_strength），服务端派生布尔位；缺失 = 不发字段 = 不加分 [D] | 客户端只报事实、规则留在服务端（调规则不必发模块版本）。**未开自定义（mode=default）= 游戏默认 = 绝不算"关"**——此时 strength 只是 UI 记忆值 [D] |
+| 零辅助金标 | 赛道榜：该车手**个人最快圈**为零辅助（TC 与 ABS 均关）→ 整行金字；积分榜：该用户零辅助最快圈占比 ≥50%（版本榜 `2×零辅助 ≥ 总数`；总榜另需 ≥1 条）→ 金字 [D] | 判据**只看 TC/ABS，不看踏板**（原生按键物理上跑不出有效圈）[D]。金标由服务端判定（响应带 `gold` 字段），客户端不重算 |
 | Toast | 四条件全启用，同帧取最高一条：全服历史 > 全服版本 > 个人历史 > 个人版本 [D] | 服务端响应决定 |
 | 弱网 | 本地待传队列自动重传 + 去重 [D] | 未登录圈缓存（时效 30 天）登录后补传 |
 | 密码找回 | bot 一次性码（群内 @bot "重置密码 用户名"）[D] | 管理端同时留人工重置入口为宜（计划内含） |
@@ -96,11 +98,20 @@ GET  /v1/me/avatar              (Bearer) → {uploaded, url}（查自己是否�
 GET  /v1/avatar/{user_id}       → 200 图片字节 | 404 无头像（公开端点）
     （2026-09-06：users.avatar_version=上传 epoch millis，榜单/ /v1/me 的 avatar_url
      带 ?v=<version>——客户端磁盘缓存失效开关；响应带 Cache-Control: immutable）
-POST /v1/laps                   {gp_index, lap_ms, version_code} (Bearer)
+POST /v1/laps                   {gp_index, lap_ms, version_code,
+                                 pedal_mode?, tc_mode?, tc_strength?,
+                                 abs_mode?, abs_strength?}   (Bearer)
                                                     → {personal: bool, server: bool,
                                                        toast: null|{level, track}}
+    （2026-09-18 加辅助配置五维：全部可选，缺省 = 缺失（旧模块零改动即天然缺失）。
+     枚举：pedal_mode=off|single|dual；tc/abs_mode=default|custom；
+     tc/abs_strength=off|weak|medium|strong|stock。未知值被服务端归一化为缺失——
+     宁可记缺失也不丢圈。⚠️ 客户端只报原始值，派生规则（关/低/线性）在服务端
+     `score.rs`，改规则不必发模块版本。）
 GET  /v1/leaderboard/points?version=      → 积分总榜/版本榜
+     条目含 points / best_count / zero_count / gold（金标由服务端判定）
 GET  /v1/leaderboard/track/{gp_index}?version= → 赛道榜（总榜不分版本）
+     条目含 gold（该车手个人最快圈是否零辅助 → 整行金色流光）
 GET  /v1/me                      (Bearer) → {user_id, username, reg_seq, has_avatar, avatar_url, total_points}
     （2026-09-01 实现：模块重进后恢复登录态展示；total_points=计时赛总积分，与积分总榜同口径
      （v39 起=各版本独立计分累加，无成绩=0）；401=token 失效→模块自动登出；
