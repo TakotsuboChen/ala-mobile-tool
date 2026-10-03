@@ -1,75 +1,77 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-10-04T01:31:31+08:00 · Git HEAD: `af99985`
+生成时间: 2026-10-04T02:52:22+08:00 · Git HEAD: `9928c9d`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: 模块 main @ `af99985`（**已 push**，见 §2）
-- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `af99985`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA
+- 锚点: 模块 main @ `9928c9d`（**已 push**，见 §2）
+- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `9928c9d`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA
 - 待重探的 [?]: 见 §5
-- 先读: `native/src/native_log.c` 头部「异步落盘队列」注释块（上上会话修复的全部设计约束）+ `native/src/slip_feedback.c` 常量区（信号源定案的全部实测依据）
+- 先读: `native/src/slip_feedback.c` 的 `read_level_with_watchdog()` 附近（本次修复的全部设计约束）+ `native/src/native_log.c` 头部异步落盘注释块
 
 ## 1. 当前目标
-**「滑移率反馈」更名「抓地力反馈」并移至杂项区最下方 + 默认值调整。已完成并装机。** 附带条件：模式 ≠ 关闭（下方弹出折叠滑条卡片）时，在该行**上方**显示分隔线。
+**「抓地力反馈」暂停/退回主界面时持续振动与光斑不复位的 bug——已修复、已实机验证、已提交。** 根因：电平是状态量，物理帧停推时 `tick` 不再执行 ⇒ `g_level` 冻结在最后一次驾驶的值上，Java 侧 60Hz 轮询永远读到非零值 ⇒ 无限循环波形一直响、光斑一直亮。修复 = 读侧停滞看门狗（300ms 超时归零）。
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **两个切片已提交并 push**：`10ffd11`（UI 工作：更名/移位/分隔线/默认值）→ `af99985`（README.md + CLAUDE.md 持久文档同步）。
-- [V] **门槛**：`./gradlew :app:assembleDebug` EXIT=0；`./gradlew :app:lint` EXIT=0（0 error，64 warnings / 4 hints 均未超基线）；`./gradlew :app:assembleRelease -x :app:lintVitalAnalyzeRelease -x :app:lintVitalRelease` EXIT=0。
-- [V] **已装机**：`aapt2` 与设备 `dumpsys` 双验版本一致 = **1.0.4 Alpha 1 / 104100**（**版本号未动**，用户红线）→ `adb install -r` Success；设备 MEIZU 20（无线 `192.168.50.142:5555`）。
-- [V] **改动内容**（`ConfigurePagerMiuix.kt`）：① 标题「滑移率反馈」→「抓地力反馈」，从 Section 1（游戏原生特性控制）移至 **Section 4（杂项）最下方**；② summary → 「1/4 强度为最佳抓地力，打滑、空转和锁死达到最大强度」；③ 模式 ≠ OFF 时在该行上方补 `HorizontalDivider`（`AnimatedVisibility` + `fadeIn/fadeOut`，与 TC/ABS 区成组逻辑同构）。
-- [V] **默认值**（`ModConfig.kt` Defaults）：`SLIP_FEEDBACK_MODE` `OFF`→`BOTH`；`SLIP_HAPTIC_INTENSITY` `100`→`50`；`SLIP_VISUAL_OPACITY` 维持 `100`。
-- [V] **内部标识符全部保留**（`slipFeedbackMode` / `SlipFeedbackMode` / `slip_feedback.c` / `KEY_SLIP_*` / `SLIP_*` 常量名）——只改用户可见文案与默认值，JSON 键与 native 接线零改动。
-- [V] 工作区 clean（除 HANDOFF.md 自身与归档）。
-- [?] **默认值改动对已有用户无效**：`ModConfig` 读盘走 `json.optString(KEY, Defaults.…value)`，键已存在即用存量值。本机设备曾存 `"slip_feedback_mode":"off"`，装新 APK 后仍显示「关闭」——**用户若要看到新默认值需先清一次配置**（本次未替用户清，未实测）。
+- [V] **两个切片已提交并 push**：`fb0becd`（native 看门狗修复）→ `9928c9d`（CLAUDE.md 同步红线）。工作区 clean（除 HANDOFF.md 自身与归档）。
+- [V] **门槛全绿**：`:app:assembleDebug` EXIT=0；`:app:lint` EXIT=0（0 error）；`:app:assembleRelease -x :app:lintVitalAnalyzeRelease -x :app:lintVitalRelease` EXIT=0。
+- [V] **已装机**：`adb install -r` Success，版本 **1.0.4 Alpha 1 / 104100**（**版本号未动**，用户红线）。
+- [V] **实机验证通过**（进程 23703，实时 logcat 监控 `/tmp/ala_logcat/monitor2.txt`）：
+  - 锁死中电平 = `1.00` → 直接点暂停 → `watchdog stale (301 ms since last tick)` → **18ms 后** `电平归零，停止输出`。
+  - 35 秒暂停期间 watchdog 日志**仅 1 行**（上升沿收敛前实测同场景刷 1681 行）。
+  - 恢复驾驶后电平正常重新出现（0.09→0.99→0.52→0.78→1.00），`g_stale_reported` 复位正常。
+- [V] **改动范围**：仅 `native/src/slip_feedback.c`（+92/-6）与 `CLAUDE.md`。未动 Kotlin/Java、未动 `OffsetTable.kt`、未动版本号。
+- [V] **修复要点**：`level_store()` 统一所有电平写入点（含关开关归零分支）；哨兵 `INT64_MIN`（= 从未 tick，避免进程启动瞬态误判）；`CLOCK_MONOTONIC` 墙钟（帧计数停帧时同样冻住）；日志只打上升沿。
 
 ### 测试/build 输出（本次交接 run 的真实输出，含退出码）
 ```
 $ ./gradlew :app:assembleDebug
-  → BUILD SUCCESSFUL in 19s          EXIT=0
+  → BUILD SUCCESSFUL in 3s        EXIT=0
 $ ./gradlew :app:lint
-  → BUILD SUCCESSFUL in 1m 2s        EXIT=0  (64 warnings / 4 hints, 0 errors)
+  → BUILD SUCCESSFUL in 1s        EXIT=0  (0 errors)
 $ ./gradlew :app:assembleRelease -x :app:lintVitalAnalyzeRelease -x :app:lintVitalRelease
-  → BUILD SUCCESSFUL in 1m 22s       EXIT=0
+  → BUILD SUCCESSFUL in 1s        EXIT=0
 $ adb install -r app/build/outputs/apk/release/app-release.apk
-  → Performing Streamed Install / Success   EXIT=0
+  → Performing Streamed Install / Success
 ```
 
 ## 3. 决策与理由
-- **只改用户可见文案与默认值，不动内部标识符** [V]——`slipFeedbackMode` 等是 JSON 键与跨进程契约（`ConfigReceiver` / 信箱 / native 接线），改名会破坏存量配置与既有接线，风险与收益不成比例。
-- **分隔线判据 = `slipFeedbackMode != OFF`** [V]——与 TC/ABS 区的"子卡片全收 → 无分隔线；展开 → 补线"成组规律同构。此处无"子卡片"，等价物是**折叠滑条卡片**，故判据从"档位=CUSTOM"换成"模式≠OFF"。
-- **分隔线用 `fadeIn/fadeOut` 而非 `expandVertically`** [V]——线本身高度固定（1dp 线 + padding），无形变过程；TC/ABS 上线也是纯 fade。真正做高度动画的是下方滑条卡片，由另一个 `AnimatedVisibility`（`expandVertically`）承担。
-- **默认值 `BOTH` / 50% / 100%** [V]——用户 2026-10-04 明确指定"默认配置：开启全部，最大振动强度 50%，最大不透明度 100%"。
+- **看门狗放读侧（`slip_feedback_query`），不放 tick** [V]——tick 恰恰是那个停掉的函数；query 由 Java 主线程 60Hz 调用，与物理帧率无关，是唯一在物理帧停止后仍持续执行的地方。
+- **时钟用 `CLOCK_MONOTONIC` 而非帧计数** [V]——帧计数只在 tick 里自增，停帧时同样冻住，做不了"当前时刻"的参照。
+- **阈值 300ms** [V]——正常物理帧间隔 ≈20ms，300ms = 15 帧，任何正常卡顿（含场景加载）不误触发；响应延迟 0.3s 可接受。
+- **日志只打上升沿** [V]——60Hz 每帧都打会让暂停刷屏，而 native 日志是 2MB 滚动截断，会把之前跑圈的探针数据滚出去。诊断日志频率 = 想保留多久历史，降噪是正确性问题。
+- **哨兵 `INT64_MIN`** [V]——`CLOCK_MONOTONIC` 零点 = 开机时刻，初值 0 会把"进程刚起"误判成停滞（实测打出 `151904620 ms` 假日志）。
 
 ## 4. 失败的尝试 — 不要再试
-- **[X] 用"探针窗口到达间隔"证明掉帧** [V]——间隔 P50=500.0ms、>600ms 占比 0.0%，被误读为"无卡顿"。**该判据对周期性开销天然免疫**：每周期固定写 15 行，周期长度不变而周期内部有停顿。诊断此类问题必须量周期内部耗时（如一批日志行的时间戳跨度）。
-- **[X] 通道②用 `|Fy|/(μ·Fn)`（侧向摩擦圆利用率）** [V]——不区分转弯强度（悠闲 0.66 / 响胎 0.76），锚点怎么放都"只要转弯就顶满"。
-- **[X] 通道②用 `α/maxAngle`（归一化滑移角）** [V]——归一化把速度除掉，高速响胎算得小（P50 仅 0.94）。
-- **[X] 通道④门控用 `carSpeed > 2`** [V]——烧胎时车速恒 0，把最该响的场景全挡掉。
-- 继承死路 [X]（详 `.handoffs/20261004013131-handoff.md` §4）：hook `HybridComponent.EnableOTK/DisableOTK` / 给 `HybridComponent` 写身份白名单 / `viewBox` 非零原点照搬 / hook `IRDSCarControllInput.drsToggle` / 模块自行解析赛道 DRS 区域 / 直写 `_currentDRSState` / 整段 `md.disasm(detail=True)` 扫 libil2cpp / 编辑层尺寸=控件尺寸 / 变暗层插 index 0 / `withEndAction` 淡出收尾 / `result::class.simpleName` 记日志 / 踏板"单向补送" / `coroutineScope{}` 内多源竞速 / Remote Preferences `remove()` 清 token / 单变量弹窗挂载 / 磁盘缓存原图字节 / 全局挂 `tnum` / `FontFamily.Monospace` 等宽 / 管理端 lapEdit 传旧 data-* 键名 / `load_rules` 里"见空就补"。
+- **[X] 用"电平会自己衰减到 0"解释暂停时的持续反馈** [V]——实机反证：暂停瞬间电平 = **1.00**（满电平），物理帧停推后 tick 不再执行，`best` 压根不重算，冻结值**没有任何机制自行衰减**。此前我把它误当成"自然衰减"（读了静态日志里更早一次的正常衰减事件），被用户纠正。**教训：静态日志里"电平归零"的行绝大多数是正常衰减，只有一条对应暂停——不看时序、只数事件就会误判。**
+- **[X] 在 tick 里做停滞检测** [V]——tick 是那个不再被调用的函数，检测不到自己的缺席。
+- **[X] 停滞日志每次归零都打（不节流）** [V]——暂停 27 秒实测刷 1681 行，会通过 2MB 滚动截断销毁之前跑圈的探针证据。
+- 继承死路 [X]（详 `.handoffs/20261004013131-handoff.md` §4 及更早）：通道②用 `|Fy|/(μ·Fn)` / 通道②用 `α/maxAngle` / 通道④门控用 `carSpeed>2` / hook `HybridComponent.EnableOTK` / 给 `HybridComponent` 写身份白名单 / `viewBox` 非零原点照搬 / hook `IRDSCarControllInput.drsToggle` / 模块自行解析赛道 DRS 区域 / 直写 `_currentDRSState` / 整段 `md.disasm(detail=True)` 扫 libil2cpp / 编辑层尺寸=控件尺寸 / 变暗层插 index 0 / `withEndAction` 淡出收尾 / `result::class.simpleName` 记日志 / 踏板"单向补送" / `coroutineScope{}` 内多源竞速 / Remote Preferences `remove()` 清 token / 单变量弹窗挂载 / 磁盘缓存原图字节 / 全局挂 `tnum` / `FontFamily.Monospace` 等宽 / 用"探针窗口到达间隔"证明掉帧。
 
 ## 5. 已知坑
-- ⚠️ **native 日志写路径绝不能退回同步** [V]——FUSE 转发 + 调用方在 Unity 主线程 = 每写一行阻塞帧预算。见 CLAUDE.md 日志红线条。改 `native_log.c` 前先读其头部注释块。
-- ⚠️ **探针常开让 2MB 滚动窗口缩到 ~7 分钟** [V]——异步化消除了卡顿，但没减少写入量。用户报问题若隔十几分钟再拉日志，那段已被覆盖。拉日志要趁热。
-- ⚠️ **本设备实测走 Envelope 振感路径** [?]——日志 `path=env` 说明共存版已带 VIBRATE 权限；官版（com.Vince）无此权限会走 `Fallback`（`performHapticFeedback` 22ms 密集叩击），**该路径未实机验证**。
-- ⚠️ **默认值只在"键不存在"时生效** [?]——存量用户配置不会被新默认值覆盖（见 §2 最后一条）。
+- ⚠️ **"生产者按帧推送的状态量"在生产者停摆后会永久冻结** [V]——任何"物理帧写 → 异步读"的信号都必须自带存活判据，判据只能放**读侧**（生产者正是停掉的那个），参照时钟必须独立于生产者帧率。本仓库目前只有抓地力反馈做了看门狗；`TcAbsIndicatorView`（25Hz 二值闪烁）若也有类似语义需排查。
+- ⚠️ **native 日志写路径绝不能退回同步** [V]——FUSE 转发 + 调用方在 Unity 主线程 = 每写一行阻塞帧预算。见 CLAUDE.md 日志红线条。
+- ⚠️ **探针常开让 2MB 滚动窗口缩到 ~7 分钟** [V]——拉日志要趁热。
+- ⚠️ **默认值只在"键不存在"时生效** [?]——存量用户配置不会被新默认值覆盖（`ModConfig` 走 `optString(KEY, default)`）。本机曾存 `"slip_feedback_mode":"off"`，装新 APK 后仍显示「关闭」。
+- ⚠️ **本设备实测走 Envelope 振感路径** [?]——`path=env` 说明共存版已带 VIBRATE 权限；官版（`com.Vince`）无此权限走 `Fallback`，**该路径未实机验证**。
 - ⚠️ **金标金光观感 / 金标播报实机触发未验收** [?]（继承）。
-- ⚠️ **官版（com.Vince）未验证** [?]（继承）——本会话全部日志来自共存版。
+- ⚠️ **官版（com.Vince）整体未验证** [?]（继承）——全部日志来自共存版。
 - ⚠️ **自动 DRS 的 `playercar`(0x9C) 白名单回落分支未实机验证** [?]（继承）。
 - ⚠️ **自锁型超车按键"抬起被吞"缺直接日志证据** [?]（继承）；**手柄路径未 hook** [?]（继承）。
-- ⚠️ **崩溃自捕新增能力仍未实机触发验证** [?]（继承）：日志环快照 + 钩子登记表 + `native_log_flush()` 只在代码层完成，无真实崩溃可验。
+- ⚠️ **崩溃自捕新增能力仍未实机触发验证** [?]（继承）：日志环快照 + 钩子登记表 + `native_log_flush()` 只在代码层完成。
 - ⚠️ **读图会触发网关层 token 爆炸** [V]（继承）——读图先降采样到长边 ≤1568px。
 - ⚠️ **adb 设备必是本机、用户口中的"用户"必是远端** [V]（继承）——每次先 `adb devices -l`。
-- ⚠️ **对话纪律** [V]（继承）——1 逐条消化 mid-turn 消息 2 旧快照不当现在时 3 装机前验设备 APK 版本 4 调查日志先对齐"几次"计数 5 修 UI 时序先拉触摸时间线 6 **日志判不了的结论不要用日志反驳用户体感** 7 别在用户锁屏时操作设备 8 动用户设备状态前先说明 9 **不要主动提版本号**。
-- ⚠️ **`_currentDRSState` / 编辑模式 / 弹窗挂载 等长期约定**见 `CLAUDE.md`（持久文档）。
+- ⚠️ **对话纪律** [V]（继承）——1 逐条消化 mid-turn 消息 2 旧快照不当现在时 3 装机前验设备 APK 版本 4 调查日志先对齐"几次"计数 5 修 UI 时序先拉触摸时间线 6 **日志判不了的结论不要用日志反驳用户体感** 7 别在用户锁屏时操作设备 8 动用户设备状态前先说明 9 **不要主动提版本号** 10 **跑长耗时/带 timeout 的命令前必须先说明"做什么/为什么/多久/你该做什么"，禁止静默等待**（本次被用户明确纠正，已入项目记忆 `announce-long-running-commands.md`）。
 
 ## 6. 下一步（有序）
-1. **回归官版（com.Vince）**：抓地力反馈走 `Fallback` 振感路径，验证它确实出振、不抛 `SecurityException`；同时确认官版下卡顿修复同样生效（官版日志路径同）。
-2. 让用户实机确认**抓地力反馈新文案/位置/分隔线/默认值**的观感（本次仅装机，未截图核对），以及**金标观感**（榜单金字 + 金标播报）。
-3. （可选）造一次"零辅助破纪录"实测金标播报（继承）。
-4. （可选）正式发版时**先问用户版本号**，再做 tag/Cargo.toml/compose 三处对齐（继承）。
+1. **回归官版（com.Vince）**：验证 `Fallback` 振感路径确实出振、不抛 `SecurityException`；确认官版下停滞看门狗同样生效（日志路径同）。
+2. 让用户实机确认**抓地力反馈新文案/位置/分隔线/默认值**的观感（前次仅装机未截图核对），以及**金标观感**。
+3. （可选）排查 `TcAbsIndicatorView` 是否有同类"状态量冻结"语义（见 §5 第一条）。
+4. （可选）造一次"零辅助破纪录"实测金标播报（继承）。
+5. （可选）正式发版时**先问用户版本号**，再做 tag/Cargo.toml/compose 三处对齐（继承）。
 
 ## 7. 留给用户的开放问题
 - 抓地力反馈**默认开启全部**后，新装用户首次进游戏就持续有振感/光斑，是否合适？（旧默认是关闭）
-- **最大振动强度默认 50%** 的手感如何？会不会偏弱？
-- 官版（无 VIBRATE 权限）的 `Fallback` 振感可接受吗？（需用户用官版跑一次）
-- 卡顿修复后**多跑几圈是否稳定**（长时驾驶、多车场景）？还有没有别的周期性卡顿？
+- **最大振动强度默认 50%** 的手感如何？
+- 官版（无 VIBRATE 权限）的 `Fallback` 振感可接受吗？
+- 停滞看门狗 300ms 的响应延迟体感是否合适（会不会觉得"停得慢"或"停得太急"）？
