@@ -1,5 +1,6 @@
 #include "drs_hook.h"
 #include "native_log.h"
+#include "crash_hook.h"
 #include "pedal_hook.h"
 #include <dlfcn.h>
 #include <inttypes.h>
@@ -218,6 +219,7 @@ bool drs_install_hooks(const drs_hook_config_t *config) {
         return false;
     }
 
+    crash_hook_register("OnDRSStateChanged", (void *) target);
     LOGI("Hooked OnDRSStateChanged at 0x%" PRIxPTR " (auto_drs=%d)",
          target, g_auto_active);
 

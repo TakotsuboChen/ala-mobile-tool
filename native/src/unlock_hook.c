@@ -1,5 +1,6 @@
 #include "unlock_hook.h"
 #include "native_log.h"
+#include "crash_hook.h"
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <inttypes.h>
@@ -527,6 +528,7 @@ bool unlock_install_hooks(const unlock_hook_config_t *config) {
 
         if (result) {
             LOGI("Successfully hooked BillingManager.Awake()");
+            crash_hook_register("Billing.Awake", (void *) awake_addr);
         } else {
             int err = shadowhook_get_errno();
             LOGE("Failed to hook BillingManager.Awake(): errno=%d (%s)",
@@ -554,6 +556,7 @@ bool unlock_install_hooks(const unlock_hook_config_t *config) {
 
         if (result) {
             LOGI("Successfully hooked BillingManager.GetInstance()");
+            crash_hook_register("Billing.GetInstance", (void *) get_instance_addr);
         } else {
             int err = shadowhook_get_errno();
             LOGE("Failed to hook BillingManager.GetInstance(): errno=%d (%s)",
@@ -576,6 +579,7 @@ bool unlock_install_hooks(const unlock_hook_config_t *config) {
 
         if (result) {
             LOGI("Successfully hooked BillingManager.InitializeBilling()");
+            crash_hook_register("Billing.InitBilling", (void *) init_billing_addr);
         } else {
             int err = shadowhook_get_errno();
             LOGE("Failed to hook BillingManager.InitializeBilling(): errno=%d (%s)",
@@ -596,6 +600,7 @@ bool unlock_install_hooks(const unlock_hook_config_t *config) {
 
         if (result) {
             LOGI("Successfully hooked BillingManager.OnOwnedNone()");
+            crash_hook_register("Billing.OnOwnedNone", (void *) on_owned_none_addr);
         } else {
             int err = shadowhook_get_errno();
             LOGE("Failed to hook BillingManager.OnOwnedNone(): errno=%d (%s)",
@@ -616,6 +621,7 @@ bool unlock_install_hooks(const unlock_hook_config_t *config) {
 
         if (result) {
             LOGI("Successfully hooked BillingManager.OnPurchaseFailed()");
+            crash_hook_register("Billing.OnPurchaseFailed", (void *) on_purchase_failed_addr);
         } else {
             int err = shadowhook_get_errno();
             LOGE("Failed to hook BillingManager.OnPurchaseFailed(): errno=%d (%s)",

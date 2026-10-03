@@ -43,6 +43,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 #include "lap_hook.h"
 #include "native_log.h"
+#include "crash_hook.h"
 #include <dlfcn.h>
 #include <elf.h>
 #include <inttypes.h>
@@ -789,6 +790,7 @@ bool lap_install_hooks(const lap_hook_config_t *config) {
                  err, shadowhook_to_errmsg(err));
         } else {
             LOGI("lap_hook: hooked IRDSLevelLoadVariables.Awake at 0x%" PRIxPTR, target);
+            crash_hook_register("LLV.Awake", (void *) target);
         }
     }
 
@@ -804,6 +806,7 @@ bool lap_install_hooks(const lap_hook_config_t *config) {
                  err, shadowhook_to_errmsg(err));
         } else {
             LOGI("lap_hook: hooked odometerHandler.HandleSectorsTimes at 0x%" PRIxPTR, target);
+            crash_hook_register("HandleSectorsTimes", (void *) target);
         }
     }
 

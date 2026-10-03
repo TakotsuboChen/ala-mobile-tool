@@ -1,5 +1,6 @@
 #include "music_hook.h"
 #include "native_log.h"
+#include "crash_hook.h"
 #include <dlfcn.h>
 #include <inttypes.h>
 #include <pthread.h>
@@ -133,6 +134,7 @@ bool music_install_hooks(const music_hook_config_t *config) {
 
         if (result) {
             LOGI("Successfully hooked handleMusicVolume.Update()");
+            crash_hook_register("MusicVolume.Update", (void *) update_addr);
         } else {
             int err = shadowhook_get_errno();
             LOGE("Failed to hook handleMusicVolume.Update(): errno=%d (%s)",
@@ -155,6 +157,7 @@ bool music_install_hooks(const music_hook_config_t *config) {
 
         if (result) {
             LOGI("Successfully hooked handleMusicVolume.Start()");
+            crash_hook_register("MusicVolume.Start", (void *) start_addr);
         } else {
             int err = shadowhook_get_errno();
             LOGE("Failed to hook handleMusicVolume.Start(): errno=%d (%s)",

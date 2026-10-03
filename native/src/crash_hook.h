@@ -21,6 +21,21 @@ extern "C" {
  */
 void crash_catcher_install(void);
 
+/**
+ * **登记一个已安装的钩子**（2026-10-02 新增，崩溃现场取证用）。
+ *
+ * 各 `*_install_hooks` 在 shadowhook_hook_sym_addr 成功后调用一次。崩溃
+ * handler 会把整张表连同最近日志快照一起落盘，这样报告里直接能看到
+ * "崩的时候哪些 hook 活着、各自挂在哪个绝对地址"——不用再靠日志反推。
+ *
+ * async-signal-safe：只写静态数组 + `snprintf`，无锁无分配。
+ * 同名重复登记会覆盖（early install 与 15s 延迟路径都会装同一批钩子）。
+ *
+ * @param name 钩子短名（如 "carController" / "FixedUpdate"），≤39 字符
+ * @param addr 目标函数的**绝对地址**（base + offset），0 表示未解析
+ */
+void crash_hook_register(const char *name, void *addr);
+
 #ifdef __cplusplus
 }
 #endif

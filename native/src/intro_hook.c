@@ -1,5 +1,6 @@
 #include "intro_hook.h"
 #include "native_log.h"
+#include "crash_hook.h"
 #include <dlfcn.h>
 #include <inttypes.h>
 #include <pthread.h>
@@ -125,6 +126,7 @@ bool intro_install_hooks(const intro_hook_config_t *config) {
 
         if (result) {
             LOGI("Successfully hooked IntroLogoManager.Start()");
+            crash_hook_register("IntroLogo.Start", (void *) start_addr);
         } else {
             int err = shadowhook_get_errno();
             LOGE("Failed to hook IntroLogoManager.Start(): errno=%d (%s)",

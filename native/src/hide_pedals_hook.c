@@ -1,5 +1,6 @@
 #include "hide_pedals_hook.h"
 #include "native_log.h"
+#include "crash_hook.h"
 #include <dlfcn.h>
 #include <elf.h>
 #include <inttypes.h>
@@ -194,6 +195,10 @@ static bool resolve_unity_methods(void) {
     g_go_set_active = (go_set_active_t)(base + rva_game_object_set_active);
     g_go_get_active_self = (go_get_active_self_t)(base + rva_game_object_get_active_self);
     LOGI("hide_pedals: Unity methods resolved (base=0x%" PRIxPTR ")", base);
+    // 登记：这是"模块第一次碰 Unity 对象"的地方（il2cpp_runtime_invoke +
+    // GetGameObject + SetActive），崩溃现场里它最值得关注。地址用 il2cpp
+    // runtime_invoke 的导出地址（= 模块实际会调进去的那个入口）。
+    crash_hook_register("hidePedals.invoke", (void *) g_il2cpp_runtime_invoke);
     return true;
 }
 

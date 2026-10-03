@@ -1,5 +1,6 @@
 #include "overtake_hook.h"
 #include "native_log.h"
+#include "crash_hook.h"
 #include <dlfcn.h>
 #include <inttypes.h>
 #include <link.h>
@@ -235,6 +236,8 @@ bool overtake_install_hooks(const overtake_hook_config_t *config) {
         return false;
     }
 
+    crash_hook_register("TouchPressOTK", (void *) press_target);
+    crash_hook_register("TouchReleaseOTK", (void *) release_target);
     LOGI("Hooked TouchPressOTK at 0x%" PRIxPTR " / TouchReleaseOTK at 0x%" PRIxPTR
          " (DisableOTK at 0x%" PRIxPTR ", latch_overtake=%d)",
          press_target, release_target, (uintptr_t) g_disable_otk_addr, g_latch_active);

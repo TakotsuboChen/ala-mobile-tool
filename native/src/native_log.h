@@ -23,6 +23,25 @@ extern "C" {
  */
 void native_log_print(int prio, const char *tag, const char *fmt, ...);
 
+/**
+ * **最近日志环形快照**（供崩溃 handler 使用，2026-10-02 新增）。
+ *
+ * 为什么需要：native 崩溃现场只有寄存器 + PC 偏移，看不出"崩之前模块在干什么"。
+ * 日志文件虽然一直写，但崩溃 handler 内不能 `localtime`/`malloc`，直接读文件又
+ * 会与写者争锁（`pthread_mutex_lock` **不是** async-signal-safe，崩溃时若锁
+ * 被同一线程持有就是死锁）。所以在 `native_log_print` 里额外维护一个**静态
+ * 环形缓冲**，handler 只读它，不碰文件、不碰锁。
+ *
+ * ⚠️ **best-effort 语义**：读者不加锁，可能读到半行（写者正在写当前槽）。
+ * 崩溃报告里出现一条截断的尾行是正常现象，不是 bug——比"什么都没有"好得多。
+ *
+ * @param out       输出缓冲（调用方提供，handler 内用静态数组）
+ * @param cap       缓冲容量
+ * @param max_lines 最多输出几行（限制 handler 耗时）
+ * @return 实际写入的字节数（不含结尾 NUL）
+ */
+int native_log_ring_snapshot(char *out, int cap, int max_lines);
+
 /* 提供给各模块的便捷宏 */
 #define NLOGI(...) native_log_print(ANDROID_LOG_INFO, "AlaMobileTool", __VA_ARGS__)
 #define NLOGW(...) native_log_print(ANDROID_LOG_WARN, "AlaMobileTool", __VA_ARGS__)

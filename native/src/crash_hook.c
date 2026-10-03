@@ -23,6 +23,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 #include "crash_hook.h"
 
+#include "native_log.h"
+
 #include <android/log.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -39,6 +41,38 @@
 
 #define LOG_TAG "AlaMobileTool"
 #define CRASH_FILE_MAX (512 * 1024)
+
+// ── 钩子登记表（2026-10-02）─────────────────────────────────────────────
+// 崩溃现场需要知道"崩的时候装了哪些钩子、各自挂在哪个地址"，才能判断
+// 是不是某个 hook 的锅。各 *_hook.c 在安装成功后调 crash_hook_register；
+// handler 只读这张表（静态数组，无锁无分配，async-signal-safe）。
+//
+// ⚠️ 这是**安装期**写入（主线程，早于任何崩溃可能）、崩溃期读取，
+// 不需要原子保护：写者不会在读者读的时候还在写（安装完成后不再变）。
+#define HOOK_REG_MAX 64
+typedef struct {
+    char     name[40];
+    uintptr_t addr;      // 目标绝对地址（0 = 未解析）
+} hook_reg_t;
+
+static hook_reg_t g_hooks[HOOK_REG_MAX];
+static volatile int g_hook_count = 0;
+
+void crash_hook_register(const char *name, void *addr) {
+    int i = g_hook_count;
+    if (i < 0 || i >= HOOK_REG_MAX) return;
+    // 简单去重：同名覆盖（重复安装路径——early install 与 15s 路径都会装）
+    for (int k = 0; k < i; k++) {
+        if (strncmp(g_hooks[k].name, name, sizeof(g_hooks[k].name) - 1) == 0) {
+            g_hooks[k].addr = (uintptr_t) addr;
+            return;
+        }
+    }
+    snprintf(g_hooks[i].name, sizeof(g_hooks[i].name), "%s", name);
+    g_hooks[i].addr = (uintptr_t) addr;
+    g_hook_count = i + 1;   // 最后发布
+}
+
 
 // ── 旧 handler 链 ──
 typedef struct {
@@ -226,6 +260,39 @@ static void crash_handler(int sig, siginfo_t *info, void *uctx) {
         (unsigned long) sp, x0, x1, x2, x3,
         located ? 1 : 0);
     if (len > 0) append_report(report, (size_t) len);
+
+    // 3b. 已安装钩子清单（名字 + 目标绝对地址）。
+    // 崩溃现场第一件想知道的事："崩的时候哪些 hook 活着、挂在哪"。
+    // 逐条 append（单次 append 缓冲有限，分批写避免栈上大数组）。
+    {
+        int n = g_hook_count;
+        if (n > 0) {
+            append_report("hooks=", 6);
+            for (int i = 0; i < n; i++) {
+                char one[80];
+                int l = snprintf(one, sizeof(one), "%s%s@0x%lx",
+                                 i == 0 ? "" : ",",
+                                 g_hooks[i].name, (unsigned long) g_hooks[i].addr);
+                if (l > 0) append_report(one, (size_t) l);
+            }
+            append_report("\n", 1);
+        } else {
+            append_report("hooks=(none registered)\n", 24);
+        }
+    }
+
+    // 3c. 最近日志快照（崩之前模块在干什么）。
+    // 读的是 native_log.c 的静态环，**不碰文件、不碰锁**——见 native_log.h。
+    // 栈上 4KB 缓冲：handler 跑在 sigaltstack（64KB）上，够用。
+    {
+        static char snap[4096];
+        int sn = native_log_ring_snapshot(snap, (int) sizeof(snap), 24);
+        if (sn > 0) {
+            append_report("--- last log lines ---\n", 24);
+            append_report(snap, (size_t) sn);
+        }
+    }
+    append_report("=== end ===\n", 12);
 
     // 4. 链式转发旧 handler（绝不能吞——Unity/系统崩溃上报依赖它）
     old_handler_t *old = (sig < 32) ? &g_old[sig] : NULL;

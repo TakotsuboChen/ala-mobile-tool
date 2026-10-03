@@ -10,12 +10,63 @@
 #include <time.h>
 #include <unistd.h>
 
+// gettid 在 bionic 上是系统调用（<unistd.h> 里已有声明），无需额外头。
+
 // 日志文件路径缓存
 static char g_log_path[256] = {0};
 static pthread_mutex_t g_log_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // 文件滚动阈值：2MB
 #define MAX_LOG_SIZE (2 * 1024 * 1024)
+
+// ── 最近日志环形快照（2026-10-02）────────────────────────────────────────
+// 崩溃 handler 需要"崩之前模块在干什么"，但 handler 内不能用锁/文件 IO。
+// 这里在**写日志时顺便**把已格式化好的整行拷进静态环，handler 只读环。
+//
+// 单槽 240 字节（够放一行：日志行最长 1200 但典型 ~140B；截断长行可接受）。
+// 64 槽 ⇒ 15KB 静态占用，覆盖崩溃前最后几十行。
+// ⚠️ `g_ring_seq` 用 unsigned 回绕计数，读者靠"seq 在读取期间是否变化"
+// 判断是否撕裂；变了就把该行标记为截断。
+#define SNAP_SLOTS 64
+#define SNAP_LINE  240
+
+static char          g_snap[SNAP_SLOTS][SNAP_LINE];
+static volatile unsigned g_snap_seq = 0;   // 已写入的总行数（单调，回绕）
+
+// 写者侧：把一行拷进环。**在 g_log_mutex 保护下调用**（与文件写同一临界区，
+// 保证行不交错）。不做任何可能失败的分配。
+static void snap_push(const char *line) {
+    unsigned s = g_snap_seq;
+    char *dst = g_snap[s % SNAP_SLOTS];
+    int i = 0;
+    while (line[i] != '\0' && line[i] != '\n' && i < SNAP_LINE - 1) {
+        dst[i] = line[i];
+        i++;
+    }
+    dst[i] = '\0';
+    g_snap_seq = s + 1;   // 最后发布：读者看到新 seq 时槽已就绪
+}
+
+int native_log_ring_snapshot(char *out, int cap, int max_lines) {
+    if (out == NULL || cap <= 0) return 0;
+    // 快照时刻的序号。读者不加锁——半行可接受（见头文件说明）。
+    unsigned end = g_snap_seq;
+    if (end == 0) { out[0] = '\0'; return 0; }
+
+    unsigned avail = end < SNAP_SLOTS ? end : SNAP_SLOTS;
+    unsigned n = avail < (unsigned) max_lines ? avail : (unsigned) max_lines;
+    unsigned start = end - n;   // 取**最新** n 行（越新越接近崩溃点）
+
+    int p = 0;
+    for (unsigned k = start; k < end && p < cap - 2; k++) {
+        const char *src = g_snap[k % SNAP_SLOTS];
+        int i = 0;
+        while (src[i] != '\0' && p < cap - 2) out[p++] = src[i++];
+        out[p++] = '\n';
+    }
+    out[p] = '\0';
+    return p;
+}
 
 // 历史说明：曾有 g_log_enabled 开关控制文件写入（2026-09-06 移除——与 Java
 // 层 logEnabled 同批强制开启，排查闪退时关日志=丢现场）。
@@ -126,12 +177,14 @@ void native_log_print(int prio, const char *tag, const char *fmt, ...) {
                                (prio == ANDROID_LOG_WARN) ? "W" :
                                (prio == ANDROID_LOG_ERROR) ? "E" :
                                (prio == ANDROID_LOG_DEBUG) ? "D" : "?";
-        snprintf(line, sizeof(line),
+        int line_len = snprintf(line, sizeof(line),
                  "[%04d-%02d-%02dT%02d:%02d:%02d.%03d pid=%d tid=%d][%s/%s] %s\n",
                  tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
                  tm.tm_hour, tm.tm_min, tm.tm_sec, ms,
                  (int)getpid(), (int)gettid(), prio_str, tag, buf);
-        write(f, line, strlen(line));
+        write(f, line, (size_t) line_len);
+        // 崩溃现场快照：与文件写同一临界区，保证行不交错、不撕裂。
+        snap_push(line);
         close(f);
     }
     pthread_mutex_unlock(&g_log_mutex);
