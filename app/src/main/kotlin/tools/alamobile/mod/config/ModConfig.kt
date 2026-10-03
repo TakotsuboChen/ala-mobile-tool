@@ -99,7 +99,7 @@ object ModConfig {
     // TC/ABS 介入指示灯（Overlay 控件区，纯视觉无副作用，默认开启）。
     const val KEY_ENABLE_TC_ABS_INDICATOR = "enable_tc_abs_indicator"
 
-    // 滑移率反馈（振感 + 视觉，游戏原生特性控制区，默认关闭）。
+    // 抓地力反馈（振感 + 视觉，杂项区最下方，默认开启全部）。
     // 锚点是**两条独立归一化通道，取大**（单位都是"该轮此刻的轮胎峰值 = 1"）：
     //   纵向 z = max_i |σ_i|/maxSlip_i   —— 打滑通道，**可满振**
     //   横向 z = max_i |α_i|/maxAngle_i  —— 用尽抓地力通道，**硬封顶 1/4**
@@ -736,10 +736,10 @@ object ModConfig {
         const val HIDE_GAME_PEDALS = false
         // TC/ABS 介入指示灯默认开启（纯视觉，参照"位置记忆默认启用"先例）。
         const val ENABLE_TC_ABS_INDICATOR = true
-        // 滑移率反馈默认关闭（用户规格：默认关闭）。
-        val SLIP_FEEDBACK_MODE = SlipFeedbackMode.OFF
-        // 最大振动强度默认 100%（用户定案）。
-        const val SLIP_HAPTIC_INTENSITY = 100
+        // 抓地力反馈默认开启全部（振感 + 视觉，用户 2026-10-04 定案）。
+        val SLIP_FEEDBACK_MODE = SlipFeedbackMode.BOTH
+        // 最大振动强度默认 50%（用户 2026-10-04 定案；旧默认 100%）。
+        const val SLIP_HAPTIC_INTENSITY = 50
         // 视觉最大不透明度默认 100%：与「最大振动强度」同构的封顶旋钮。
         // 下限 20 而非 0——0% 等价于"画了但看不见"，是关掉视觉的错误表达方式，
         // 要关就用模式下拉选「关闭」或「振感」。
@@ -1588,7 +1588,7 @@ object ModConfig {
         val toolButtonPosition: OverlayPosition = Defaults.TOOL_BUTTON_POSITION,
         // TC/ABS 介入指示灯开关（默认开启，纯视觉）。
         val enableTcAbsIndicator: Boolean = Defaults.ENABLE_TC_ABS_INDICATOR,
-        // 滑移率反馈：模式（关闭/振感/视觉/全部，默认关闭）+ 最大振动强度
+        // 抓地力反馈：模式（关闭/振感/视觉/全部，默认全部）+ 最大振动强度
         // 百分比 ∈ [20,100]。两个字段同属一个功能组，走 native 采样通道
         // （slip_feedback.c）。起振点/峰值电平是 native 常量（用户规格，不可调）。
         val slipFeedbackMode: SlipFeedbackMode = Defaults.SLIP_FEEDBACK_MODE,
