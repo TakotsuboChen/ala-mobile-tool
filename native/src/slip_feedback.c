@@ -5,6 +5,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <time.h>
 
 // ── IL2CPP 字段偏移（8.0.6 / 200150）─────────────────────────────────────
 // 与 pedal_hook.c 的其它 OFF_* 同规矩：偏移写在本处，方法 RVA 一律由 Java
@@ -286,6 +287,91 @@ static volatile float g_full_u = FULL_Z;
 // ── 生产者 → 消费者信号（物理线程写、Java 主线程读，单字对齐天然原子）──
 static volatile float g_level = 0.0f;
 
+// ── 停滞看门狗（2026-10-04）─────────────────────────────────────────────
+// **解决的问题**：本模块把"反馈电平"当作**状态量**（最新值）暴露给 Java，
+// 但电平只在 `slip_feedback_tick` 里更新，而 tick 只在 `carController` 之后、
+// 玩家车白名单内调用。**物理帧停止推进时（暂停 / 退回主界面 / 结算 / 读盘），
+// tick 不再被调用，`g_level` 就冻结在最后一次驾驶的值上**——Java 侧 60Hz 轮询
+// 永远读到同一个非零值，于是振感无限循环波形一直响、视觉光斑一直亮。
+// 用户 2026-10-04 实证：停在暂停菜单，底部光斑持续显示（截图逐像素确认）。
+//
+// **为什么不在 tick 里做**：tick 恰恰是那个不再被调用的函数。必须在**读侧**
+// （`slip_feedback_query`，Java 主线程 60Hz 调用，与物理帧率无关）判断
+// "电平有多久没被刷新过"，超时即视为停滞，返回 0。
+//
+// **为什么用墙钟而不是帧计数**：`clock_gettime` 在消费者线程（主线程）调用，
+// 与物理帧是否推进无关；帧计数只有在 tick 里才能自增，停帧时同样冻住，
+// 无法充当"当前时刻"的参照。
+//
+// 阈值取 300ms：正常物理帧间隔 ≈20ms（50Hz），300ms = 15 帧，任何正常卡顿
+// （含场景加载的短暂停顿）都不会误触发，而暂停/退出的响应延迟 0.3s 可接受。
+#define STALE_LEVEL_TIMEOUT_MS 300
+
+// 最近一次 tick **真正刷新**电平的墙钟（毫秒）。物理线程写、主线程读。
+//
+// ⚠️ 哨兵取 **INT64_MIN**（= "从未 tick"），**不是 0**：`CLOCK_MONOTONIC` 的
+// 零点是开机时刻，进程启动时它已是"开机时长"（本机实测 42.2 小时）。若初值取 0，
+// 第一帧物理 tick 之前 overlay 发起的第一次轮询会算出 `42.2h > 300ms` ⇒ 误判
+// "停滞"（虽然返回 0 无害，但会打出一条 `watchdog stale (151904620 ms ...)`
+// 的假日志，把"进程刚起"伪装成"物理帧卡死"）。见 read_level_with_watchdog。
+#define LEVEL_STAMP_UNSET INT64_MIN
+
+static volatile int64_t g_level_stamp_ms = LEVEL_STAMP_UNSET;
+
+static int64_t wall_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t) ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+// 刷新电平 + 打时间戳（**唯一的电平写入点**，见各处 tick 调用）。
+// 所有"电平归零"的分支也必须走这里——否则看门狗会看到陈旧时间戳而误判停滞。
+static inline void level_store(float v) {
+    g_level = v;
+    g_level_stamp_ms = wall_ms();
+}
+
+// ── 读侧：看门狗裁决（**唯一的电平读取点**）──────────────────────────────
+// 为什么把"读 g_level"收敛到一个函数：tick 有多条早退分支（未启用 / car_inputs
+// 为空），主路径在末尾刷新——但它们**全部**只改 `g_level`，时间戳统一由
+// `level_store` 维护。读侧只需看时间戳，不必知道是哪条分支。
+//
+// ⚠️ **不能靠"暂停后电平自己衰减到 0"来解释现状**：暂停时物理帧停推，tick 的
+// 主路径根本不再执行，`best`（本帧信号强度）压根不会被重算——冻结的是**最后一次
+// 驾驶时的高电平**，它没有任何机制自行衰减。这正是用户报的"锁死中直接暂停 →
+// 持续反馈"。（"刹车抱死→停车→滑移自然消失"是另一回事：那需要物理帧仍在推进。）
+//
+// 读取路径：INT64_MIN 哨兵 ⇒ 从未 tick ⇒ 返回 0 且**不打日志**（进程刚起的
+// 正常态，不是停滞）；否则超过 STALE_LEVEL_TIMEOUT_MS 未刷新 ⇒ 判定停滞。
+//
+// ⚠️ 日志只打**上升沿**（进入停滞的第一帧），持续停滞期间静默：`query` 是
+// Java 主线程 60Hz 调用，若每帧都打，暂停 27 秒就是 1681 行（2026-10-04 实测）。
+// 那不只是浪费——native 日志是 **2MB 滚动截断**，暂停久了会把**之前跑圈的探针
+// 数据滚出去**，正是排查时要看的东西。上升沿一条就够（时间 + 距上次 tick 的
+// 毫秒数，恰好就是"物理帧停推→归零"的延迟证据）。
+//
+// 读侧是**单线程**（SlipFeedbackView 的 main-looper Handler），`g_stale_reported`
+// 无需原子。
+static int g_stale_reported = 0;
+
+static float read_level_with_watchdog(void) {
+    const int64_t stamp = g_level_stamp_ms;
+    if (stamp == LEVEL_STAMP_UNSET) {
+        return 0.0f;   // 从未 tick（玩家车尚未上场）——静默
+    }
+    const int64_t now = wall_ms();
+    if (now - stamp > STALE_LEVEL_TIMEOUT_MS) {
+        if (!g_stale_reported) {
+            g_stale_reported = 1;
+            NLOGI("slip_feedback: watchdog stale (%lld ms since last tick) -> level 0",
+                  (long long) (now - stamp));
+        }
+        return 0.0f;
+    }
+    g_stale_reported = 0;   // 电平恢复刷新 ⇒ 重新武装上升沿
+    return g_level;
+}
+
 // ── 电平样本环（物理线程写、Java 主线程读；**每帧的抖动就是振感质感**）────
 // 为什么要有它：物理 50Hz / Java 轮询 60Hz 不同步，只取"最新值"会让某些帧被
 // 读两次、某些帧被漏掉，采样率不确定 ⇒ 手感飘。更根本的是——**振动的"质感"
@@ -389,12 +475,12 @@ void slip_feedback_set_params(int enabled, float full_z) {
         NLOGW("slip_feedback: bad full_z=%.3f, keeping previous (%.3f)",
               full_z, g_full_u);
         g_enabled = enabled ? 1 : 0;
-        if (!enabled) g_level = 0.0f;
+        if (!enabled) level_store(0.0f);
         return;
     }
     g_full_u = full_z;
     g_enabled = enabled ? 1 : 0;
-    if (!enabled) g_level = 0.0f;
+    if (!enabled) level_store(0.0f);
     NLOGI("slip_feedback: enabled=%d fullZ=%.3f "
           "(lon: z<=%.2f -> 0, z=%.2f -> %.2f, z>=%.2f -> 1 | "
           "latMax: z<=%.2f -> 0, z>=%.2f -> %.2f | "
@@ -453,7 +539,7 @@ void slip_feedback_set_probe(int enabled) {
 
 void slip_feedback_query(float *out_level) {
     if (out_level == NULL) return;
-    *out_level = g_level;
+    *out_level = read_level_with_watchdog();
 }
 
 int slip_feedback_drain(float *out, int max, unsigned int from_seq,
@@ -882,12 +968,12 @@ static inline void slip_ring_push(float level) {
 
 void slip_feedback_tick(void *car_inputs) {
     if (!g_enabled && !g_probe_enabled) {
-        g_level = 0.0f;
+        level_store(0.0f);
         slip_ring_push(0.0f);
         return;
     }
     if (car_inputs == NULL) {
-        g_level = 0.0f;
+        level_store(0.0f);
         slip_ring_push(0.0f);
         return;
     }
@@ -1129,7 +1215,7 @@ void slip_feedback_tick(void *car_inputs) {
     if (beta_level > best) best = beta_level;
     if (sat_level > best) best = sat_level;
     level = g_enabled ? best : 0.0f;
-    g_level = level;
+    level_store(level);
     slip_ring_push(level);
 
     probe_sample(z_lon, z_lat, z_lat_rear, z_spin_rear, throttle_on, gated,
