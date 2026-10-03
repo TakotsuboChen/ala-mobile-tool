@@ -8,6 +8,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathNode
 import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.graphics.vector.group
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -37,7 +38,19 @@ private fun svgIconMulti(
     // viewport 映射到 defaultWidth×defaultHeight，两者比例不一致会导致非等比
     // 拉伸。扁长图形（如 BoostIcon 的 90×48.49）必须按同比例传默认尺寸。
     defaultWidth: Dp = 24.dp,
-    defaultHeight: Dp = 24.dp
+    defaultHeight: Dp = 24.dp,
+    // 源 SVG 的 viewBox 原点（四元组的前两位）。**Compose 的 ImageVector
+    // 不支持非零 viewport 原点**（viewportWidth/Height 只定义 0..W × 0..H），
+    // 带偏移的 viewBox（如 `5.28 12.57 79.37 64.82`）必须把图形平移回
+    // 0..W × 0..H，否则超出部分被裁掉（BoostIcon 曾实测"只显示一半"）。
+    //
+    // ⚠️ 平移用 `group(translationX/Y)` 而非改写 path 数据：group 变换是
+    // Compose 原生支持的语义，与 SVG `<g transform="translate(...)">` 逐位
+    // 等价——可用 `rsvg-convert` 渲染包一层 `<g>` 的参考图做像素对拍验证
+    //（实测 AE=0）。改写 path 数据则要手工处理绝对/相对命令、首个 moveto
+    // 的绝对化，且难以独立验证（Vibration.svg 的实测教训）。
+    viewportOriginX: Float = 0f,
+    viewportOriginY: Float = 0f
 ): ImageVector =
     ImageVector.Builder(
         name = name,
@@ -46,41 +59,56 @@ private fun svgIconMulti(
         viewportWidth = viewportWidth,
         viewportHeight = viewportHeight
     ).apply {
-        paths.forEach { p ->
-            path(
-                fill = p.fill,
-                stroke = p.stroke,
-                strokeLineWidth = p.strokeWidth,
-                strokeLineCap = p.strokeLineCap,
-                strokeLineJoin = p.strokeLineJoin,
-                pathFillType = p.pathFillType
-            ) {
-                PathParser().parsePathString(p.d).toNodes().forEach { node ->
-                    when (node) {
-                        is PathNode.MoveTo -> moveTo(node.x, node.y)
-                        is PathNode.LineTo -> lineTo(node.x, node.y)
-                        is PathNode.RelativeMoveTo -> moveToRelative(node.dx, node.dy)
-                        is PathNode.RelativeLineTo -> lineToRelative(node.dx, node.dy)
-                        is PathNode.HorizontalTo -> horizontalLineTo(node.x)
-                        is PathNode.VerticalTo -> verticalLineTo(node.y)
-                        is PathNode.RelativeHorizontalTo -> horizontalLineToRelative(node.dx)
-                        is PathNode.RelativeVerticalTo -> verticalLineToRelative(node.dy)
-                        is PathNode.CurveTo -> curveTo(node.x1, node.y1, node.x2, node.y2, node.x3, node.y3)
-                        is PathNode.RelativeCurveTo -> curveToRelative(node.dx1, node.dy1, node.dx2, node.dy2, node.dx3, node.dy3)
-                        is PathNode.QuadTo -> quadTo(node.x1, node.y1, node.x2, node.y2)
-                        is PathNode.RelativeQuadTo -> quadToRelative(node.dx1, node.dy1, node.dx2, node.dy2)
-                        is PathNode.ReflectiveCurveTo -> reflectiveCurveTo(node.x1, node.y1, node.x2, node.y2)
-                        is PathNode.RelativeReflectiveCurveTo -> reflectiveCurveToRelative(node.dx1, node.dy1, node.dx2, node.dy2)
-                        is PathNode.ReflectiveQuadTo -> reflectiveQuadTo(node.x, node.y)
-                        is PathNode.RelativeReflectiveQuadTo -> reflectiveQuadToRelative(node.dx, node.dy)
-                        is PathNode.ArcTo -> arcTo(node.horizontalEllipseRadius, node.verticalEllipseRadius, node.theta, node.isMoreThanHalf, node.isPositiveArc, node.arcStartX, node.arcStartY)
-                        is PathNode.RelativeArcTo -> arcToRelative(node.horizontalEllipseRadius, node.verticalEllipseRadius, node.theta, node.isMoreThanHalf, node.isPositiveArc, node.arcStartDx, node.arcStartDy)
-                        is PathNode.Close -> close()
-                    }
+        // 非零原点时才包一层 group（原点为零时保持原有零包装结构，
+        // 不受此参数引入的任何新语义影响——既有图标全部走这条零路径）。
+        val wrap = viewportOriginX != 0f || viewportOriginY != 0f
+        if (wrap) {
+            group(
+                translationX = -viewportOriginX,
+                translationY = -viewportOriginY
+            ) { emitPaths(paths) }
+        } else {
+            emitPaths(paths)
+        }
+    }.build()
+
+/** 把 [paths] 逐条写进当前 ImageVector 作用域（供 group 内外复用）。 */
+private fun ImageVector.Builder.emitPaths(paths: List<SvgPath>) {
+    paths.forEach { p ->
+        path(
+            fill = p.fill,
+            stroke = p.stroke,
+            strokeLineWidth = p.strokeWidth,
+            strokeLineCap = p.strokeLineCap,
+            strokeLineJoin = p.strokeLineJoin,
+            pathFillType = p.pathFillType
+        ) {
+            PathParser().parsePathString(p.d).toNodes().forEach { node ->
+                when (node) {
+                    is PathNode.MoveTo -> moveTo(node.x, node.y)
+                    is PathNode.LineTo -> lineTo(node.x, node.y)
+                    is PathNode.RelativeMoveTo -> moveToRelative(node.dx, node.dy)
+                    is PathNode.RelativeLineTo -> lineToRelative(node.dx, node.dy)
+                    is PathNode.HorizontalTo -> horizontalLineTo(node.x)
+                    is PathNode.VerticalTo -> verticalLineTo(node.y)
+                    is PathNode.RelativeHorizontalTo -> horizontalLineToRelative(node.dx)
+                    is PathNode.RelativeVerticalTo -> verticalLineToRelative(node.dy)
+                    is PathNode.CurveTo -> curveTo(node.x1, node.y1, node.x2, node.y2, node.x3, node.y3)
+                    is PathNode.RelativeCurveTo -> curveToRelative(node.dx1, node.dy1, node.dx2, node.dy2, node.dx3, node.dy3)
+                    is PathNode.QuadTo -> quadTo(node.x1, node.y1, node.x2, node.y2)
+                    is PathNode.RelativeQuadTo -> quadToRelative(node.dx1, node.dy1, node.dx2, node.dy2)
+                    is PathNode.ReflectiveCurveTo -> reflectiveCurveTo(node.x1, node.y1, node.x2, node.y2)
+                    is PathNode.RelativeReflectiveCurveTo -> reflectiveCurveToRelative(node.dx1, node.dy1, node.dx2, node.dy2)
+                    is PathNode.ReflectiveQuadTo -> reflectiveQuadTo(node.x, node.y)
+                    is PathNode.RelativeReflectiveQuadTo -> reflectiveQuadToRelative(node.dx, node.dy)
+                    is PathNode.ArcTo -> arcTo(node.horizontalEllipseRadius, node.verticalEllipseRadius, node.theta, node.isMoreThanHalf, node.isPositiveArc, node.arcStartX, node.arcStartY)
+                    is PathNode.RelativeArcTo -> arcToRelative(node.horizontalEllipseRadius, node.verticalEllipseRadius, node.theta, node.isMoreThanHalf, node.isPositiveArc, node.arcStartDx, node.arcStartDy)
+                    is PathNode.Close -> close()
                 }
             }
         }
-    }.build()
+    }
+}
 
 // ─── 牵引力控制（TC）───
 // 车身 + 侧滑线，flatten 后单 path（fill=currentColor）。
@@ -170,6 +198,91 @@ val BoostIcon: ImageVector = svgIconMulti(
     ),
     defaultWidth = 24.dp,
     defaultHeight = 12.93.dp
+)
+
+// ── 滑移率反馈（漂移轮胎）───
+// 用户提供 SVG：`viewBox="5.28 12.57 79.37 64.82"`，4 条 path，d 数据逐字搬运
+// （空行/多空格已在搬运时归一为单空格，其余一个字符都没动）。
+// path 0/1/2 = 三道同心弧（漂移痕迹），path 3 = 轮胎 + 拖痕主体。
+// ⚠️ viewBox 原点非零 → 必须传 viewportOriginX/Y，由 svgIconMulti 的
+// group(translationX/Y) 平移（等价于 SVG 的 `<g transform="translate(...)">`）。
+// 验证法：rsvg-convert 渲染原图与"包一层同名 <g>"的参考图，compare -metric AE = 0。
+// ⚠️ 图形比例 ≈1.224:1（扁），intrinsic 尺寸按同比例给 24 × 19.6dp。
+val DriftIcon: ImageVector = svgIconMulti(
+    "DriftIcon", 79.37f, 64.82f,
+    listOf(
+        SvgPath(
+            d = "M65.948,32.912l-2.191,3.074C74.61,45.97,80.901,60.021,80.901,74.882h3.746 C84.647,58.814,77.772,43.621,65.948," +
+                "32.912z"
+        ),
+        SvgPath(
+            d = "M52.354,51.517l-2.219,3.021c5.953,4.896,9.5,12.358,9.5,20.344h3.75 C63.386,65.719,59.276,57.131,52.354,51.517z"
+        ),
+        SvgPath(
+            d = "M59.335,42.006l-2.225,3.032c8.443,7.41,13.385,18.295,13.385,29.844h3.746 C74.241,62.152,68.757,50.142,59.335,4" +
+                "2.006z"
+        ),
+        SvgPath(
+            d = "M40.354,17.423c-0.469-0.318-0.723-0.73-0.703-1.147 c0.047-0.853,1.203-1.489,2.584-1.416c1.375,0.073,2.459,0.81" +
+                "7,2.416,1.672c-0.041,0.853-1.197,1.484-2.578,1.416 C41.423,17.912,40.808,17.724,40.354,17.423z M58.538,30.772c" +
+                "-0.443-0.339-0.828-0.887-1.063-1.521 c-0.484-1.297-0.225-2.589,0.578-2.885c0.797-0.298,1.838,0.516,2.316,1.807" +
+                "c0.484,1.297,0.225,2.589-0.578,2.885 c-0.338,0.125-0.744,0.052-1.141-0.203C58.616,30.828,58.573,30.798,58.538," +
+                "30.772z M48.62,43.517 c-2.145-2.328-4.984-4.88-8.145-7.25c-3.209-2.308-6.49-4.246-9.355-5.594l3.834-7.094c0.06" +
+                "3-0.109,0.109-0.511,1.615-0.36 c1.51,0.147,3.691,0.163,9.979,4.776V28l0.006-0.005c6.281,4.614,6.947,6.693,7.54" +
+                "1,8.084c0.594,1.396,0.229,1.563,0.141,1.651 L48.62,43.517z M22.813,60.328c-2.781-2.041-7.682-6.342-7.734-10.07" +
+                "1l6.078-6.151c1.635,1.859,6.025,5.276,8.438,6.984 c2.354,1.792,6.928,4.958,9.193,5.958l-4.047,7.64C31.167,65.7" +
+                "57,25.595,62.371,22.813,60.328z M9.132,63.443 c-1.162-2.333-1.24-4.176-0.418-5.295l1.975-2.688c0.24,0.443,0.44" +
+                "3,0.865,0.584,1.251c0.76,2.114,0.254,3.473-0.324,4.26 L9.132,63.443z M23.944,74.314l1.816-2.475c0.578-0.787,1." +
+                "719-1.678,3.965-1.583c0.41,0.016,0.875,0.083,1.369,0.182l-1.975,2.687 C28.298,74.246,26.517,74.719,23.944,74.3" +
+                "14z M13.604,72.876c6.891,5.057,14.74,6.005,17.594,2.119l6.24-8.504l2.256,0.249 c1.932,0.214,3.328-2.692,0.473-" +
+                "3.448l-0.316-0.083l21.801-29.704c1.834-2.5,3.016-8.328-7.416-15.989 C43.804,9.86,38.595,12.74,36.761,15.24L14." +
+                "96,44.939l-0.178-0.277c-1.572-2.5-3.928-0.295-3.146,1.486l0.918,2.077L6.308,56.73 C3.46,60.615,6.71,67.814,13." +
+                "604,72.876z"
+        ),
+    ),
+    defaultWidth = 24.dp,
+    defaultHeight = 19.6.dp,
+    viewportOriginX = 5.28f,
+    viewportOriginY = 12.57f
+)
+
+// ── 振动强度（手机 + 两侧波纹）───
+// 用户提供 SVG：`viewBox="10.39 10.54 79.22 78.91"`，单 path，d 数据逐字搬运。
+// ⚠️ 以相对 moveto（`m`）起笔、含 6 个闭合命令（`z`）——两者都必须原样保留。
+// 这正是用 group 平移而非改写坐标的直接原因：d 字符串一个字符都不动。
+// 比例 ≈1.004:1（近正方），intrinsic 用默认 24×24。
+val VibrationIcon: ImageVector = svgIconMulti(
+    "VibrationIcon", 79.22f, 78.91f,
+    listOf(
+        SvgPath(
+            d = "m46.328 23.668c-0.003906 0 0 0 0 0 0.49609 0 0.99609 0.1875 1.375 0.56641 0.75781 0.76172 0.75781 1.9922 0 2.7" +
+                "5l-8.9102 8.9141c-0.38281 0.37891-0.87891 0.57031-1.375 0.57031-0.5 0-0.99609-0.19141-1.375-0.57031-0.76172-0." +
+                "75781-0.76172-1.9922 0-2.75l8.9102-8.9102c0.37891-0.37891 0.875-0.57031 1.3711-0.57031zm7.6484 0.97656c0.5 0 1" +
+                " 0.1875 1.3789 0.57031 0.76172 0.75781 0.76172 1.9883 0 2.75l-15.586 15.586c-0.37891 0.37891-0.87891 0.57031-1" +
+                ".375 0.57031-0.5 0-0.99609-0.19141-1.375-0.57031-0.76172-0.75781-0.76172-1.9883 0-2.75l15.586-15.586c0.37891-0" +
+                ".37891 0.875-0.57031 1.3711-0.57031zm33.652 4.7148c-0.50781 0-1.0117 0.19141-1.3945 0.57812l-6.2188 6.2188c-0." +
+                "37109 0.37109-0.58203 0.875-0.58203 1.3984 0 0.52734 0.21094 1.0273 0.57812 1.3984l4.8242 4.8203-4.8203 4.8203" +
+                "c-0.37109 0.37109-0.58203 0.875-0.58203 1.4023 0 0.52344 0.21094 1.0273 0.58203 1.3984l4.8203 4.8203-4.8242 4." +
+                "8203c-0.76953 0.77344-0.76953 2.0234 0 2.7969l6.2227 6.2188c0.38672 0.38672 0.89062 0.58203 1.3984 0.58203 0.5" +
+                "0391 0 1.0117-0.19531 1.3984-0.58203 0.77344-0.77344 0.77344-2.0234 0-2.7969l-4.8203-4.8203 4.8203-4.8203c0.37" +
+                "109-0.37109 0.57812-0.875 0.57812-1.3984 0-0.52734-0.20703-1.0273-0.57812-1.3984l-4.8203-4.8203 4.8203-4.8242c" +
+                "0.37109-0.36719 0.57812-0.87109 0.57812-1.3984 0-0.52344-0.20703-1.0273-0.57812-1.3984l-4.8203-4.8203 4.8203-4" +
+                ".8203c0.77344-0.77344 0.77344-2.0234 0-2.7969-0.38672-0.38672-0.89453-0.57812-1.4023-0.57812zm-75.27 0c-0.5039" +
+                "1 0-1.0078 0.19531-1.3945 0.57812-0.76953 0.77344-0.76953 2.0234 0 2.7969l4.8203 4.8203-4.8203 4.8203c-0.37109" +
+                " 0.37109-0.58203 0.875-0.58203 1.3984 0 0.52734 0.20703 1.0312 0.57812 1.4023l4.8203 4.8203-4.8203 4.8203c-0.3" +
+                "7109 0.37109-0.58203 0.87109-0.57812 1.3984 0 0.52344 0.20703 1.0273 0.57812 1.3984l4.8203 4.8203-4.8203 4.820" +
+                "3c-0.76953 0.77344-0.76953 2.0234 0 2.7969 0.38672 0.38672 0.89453 0.58203 1.3984 0.58203 0.50781 0 1.0156-0.1" +
+                "9531 1.4023-0.58203l6.2188-6.2188c0.77344-0.77344 0.77344-2.0234 0-2.7969l-4.8203-4.8203 4.8203-4.8203c0.37109" +
+                "-0.37109 0.57812-0.875 0.57812-1.3984 0-0.52734-0.20703-1.0312-0.57812-1.3984l-4.8203-4.8242 4.8203-4.8203c0.3" +
+                "7109-0.37109 0.57812-0.87109 0.57812-1.3984 0-0.52344-0.20703-1.0273-0.57812-1.3984l-6.2188-6.2188c-0.38672-0." +
+                "38672-0.89453-0.57812-1.3984-0.57812zm41.449 47.238h0.019531c1.0742 0 1.9414 0.87109 1.9414 1.9453s-0.87109 1." +
+                "9414-1.9453 1.9453l-7.6523-0.003906c-1.0742 0-1.9414-0.87109-1.9414-1.9453 0-1.0703 0.86719-1.9414 1.9414-1.94" +
+                "14zm-23.117-66.055c-2.9297 0.03125-5.3086 2.4102-5.3125 5.3398v68.219c0.015625 2.9336 2.3828 5.3086 5.3125 5.3" +
+                "477h38.613c2.9297-0.039063 5.2969-2.4141 5.3125-5.3477v-68.219c-0.015626-2.9297-2.3672-5.3086-5.2969-5.3438z"
+        ),
+    ),
+    viewportOriginX = 10.39f,
+    viewportOriginY = 10.54f
 )
 
 // ── 围场（Paddock）底栏 icon：挥舞方格旗 ───

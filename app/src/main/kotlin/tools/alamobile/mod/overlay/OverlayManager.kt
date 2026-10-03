@@ -32,6 +32,7 @@ class OverlayManager(context: Context) {
         private val OWN_TAGS = setOf(
             "ala_tool_toggle",
             "pedal_overlay", "brake_overlay", "gear_shift_overlay", "tc_abs_indicator",
+            "slip_feedback",
             "pedal_overlay_edit", "brake_overlay_edit", "gear_shift_overlay_edit",
             "overlay_dim", "overlay_edit_hint"
         )
@@ -71,6 +72,11 @@ class OverlayManager(context: Context) {
     private var gearView: GearShiftView? = null
     private var toggleButton: ToolButtonView? = null
     private var indicatorView: TcAbsIndicatorView? = null
+    // 滑移率反馈：底部全宽琥珀条（视觉路）。振感路走 slipHaptic（无 view）。
+    // 两路由同一个 view 的主线程轮询循环驱动（见 SlipFeedbackView 的 tick——
+    // 避免两个 60Hz timer 各拉一路电平）。开关关时不创建，零开销。
+    private var slipFeedbackView: SlipFeedbackView? = null
+    private var slipHaptic: SlipHaptic? = null
     private var pedalEditView: OverlayEditView? = null
     private var brakeEditView: OverlayEditView? = null
     private var gearEditView: OverlayEditView? = null
@@ -257,6 +263,10 @@ class OverlayManager(context: Context) {
         brakeView?.visibility = v
         gearView?.visibility = v
         indicatorView?.visibility = v
+        // 滑移条跟随同一套可见性（GONE = 不绘制，视觉自然消失）。但**振感不受
+        // 影响**——SlipFeedbackView 刻意不做可见性门控轮询，GONE 时仍在读电平
+        // 并回调 SlipHaptic（见该类 onVisibilityAggregated 处的说明）。
+        slipFeedbackView?.visibility = v
     }
 
     private fun toggleEditMode() {
@@ -484,6 +494,50 @@ class OverlayManager(context: Context) {
             indicatorView = null
         }
 
+        // 滑移率反馈（用户规格：底部全宽横条，高 = 指示灯两倍；不透明度随
+        // 滑移率连续变化，不是闪烁）。视觉与振感共用一个轮询载体：
+        // - 模式含视觉 → 画出琥珀条；
+        // - 只含振感 → 同一个 view 只做轮询（1×1 px，不绘制、不挡触摸）。
+        // 放在底部：指示灯占顶部，两者不重叠。
+        val slipMode = settings.slipFeedbackMode
+        if (slipMode != ModConfig.SlipFeedbackMode.OFF) {
+            val indicatorHeight = (screenHeight / 30f).roundToInt()
+            val haptic = if (slipMode.hasHaptic) {
+                SlipHaptic.create(appContext, settings.slipHapticIntensity)
+            } else {
+                null
+            }
+            val view = SlipFeedbackView(
+                appContext,
+                // 只开振感时不需要绘制的面积——1×1 保证它不覆盖任何可见区域
+                //（View 默认不消费触摸，但让它小一点更保险）。
+                if (slipMode.hasVisual) screenWidth else 1,
+                if (slipMode.hasVisual) indicatorHeight * 2 else 1,
+                drawVisual = slipMode.hasVisual,
+                maxOpacity = settings.slipVisualOpacity / 100f,
+                style = settings.slipVisualStyle,
+                onLevel = haptic?.let { h ->
+                    { lv: Float, nowMs: Long -> h.tick(lv, nowMs) }
+                },
+            ).apply {
+                tag = "slip_feedback"
+                visibility = View.GONE
+            }
+            haptic?.attachView(view)
+            slipFeedbackView = view
+            slipHaptic = haptic
+            root?.addView(view, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            })
+        } else {
+            slipFeedbackView = null
+            slipHaptic?.release()
+            slipHaptic = null
+        }
+
         // 手动换挡关时不创建换挡控件；gearView 保持 null。
         // DUAL 模式下也不创建——刹车和换挡默认坐标相同（左下角），
         // 同时开会重叠导致触摸冲突。用户明确要求两者不能同时开，
@@ -689,6 +743,7 @@ class OverlayManager(context: Context) {
         parent.findViewWithTag<View>("brake_overlay")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("gear_shift_overlay")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("tc_abs_indicator")?.let { parent.removeView(it) }
+        parent.findViewWithTag<View>("slip_feedback")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("pedal_overlay_edit")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("brake_overlay_edit")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("gear_shift_overlay_edit")?.let { parent.removeView(it) }
@@ -706,6 +761,13 @@ class OverlayManager(context: Context) {
         brakeView = null
         gearView = null
         indicatorView = null
+        // 滑移率反馈：view 与振感一起清。⚠️ 必须先 release()——真振幅路下发的是
+        // `createWaveform(..., repeat=0)` **无限循环**波形，仅断开引用马达不会停，
+        // 用户关开关/折叠控件后马达会一直响。view 的 onDetachedFromWindow 也会归零
+        // 电平触发停机，但那依赖"回调链恰好走通"，这里是不依赖任何回调的硬兜底。
+        slipFeedbackView = null
+        slipHaptic?.release()
+        slipHaptic = null
         pedalEditView = null
         brakeEditView = null
         gearEditView = null
@@ -719,6 +781,7 @@ class OverlayManager(context: Context) {
         parent.findViewWithTag<View>("brake_overlay")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("gear_shift_overlay")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("tc_abs_indicator")?.let { parent.removeView(it) }
+        parent.findViewWithTag<View>("slip_feedback")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("pedal_overlay_edit")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("brake_overlay_edit")?.let { parent.removeView(it) }
         parent.findViewWithTag<View>("gear_shift_overlay_edit")?.let { parent.removeView(it) }
@@ -729,6 +792,10 @@ class OverlayManager(context: Context) {
         gearView = null
         toggleButton = null
         indicatorView = null
+        // 全量重建：同样必须先 release() 停掉可能在响的持续波形（见 removeGamingOverlays）。
+        slipFeedbackView = null
+        slipHaptic?.release()
+        slipHaptic = null
         pedalEditView = null
         brakeEditView = null
         gearEditView = null

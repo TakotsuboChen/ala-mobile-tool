@@ -99,6 +99,59 @@ object ModConfig {
     // TC/ABS 介入指示灯（Overlay 控件区，纯视觉无副作用，默认开启）。
     const val KEY_ENABLE_TC_ABS_INDICATOR = "enable_tc_abs_indicator"
 
+    // 滑移率反馈（振感 + 视觉，游戏原生特性控制区，默认关闭）。
+    // 锚点是**两条独立归一化通道，取大**（单位都是"该轮此刻的轮胎峰值 = 1"）：
+    //   纵向 z = max_i |σ_i|/maxSlip_i   —— 打滑通道，**可满振**
+    //   横向 z = max_i |α_i|/maxAngle_i  —— 用尽抓地力通道，**硬封顶 1/4**
+    // 纵向：z ≤ 1.0 静默、z = 4（"用尽抓地力"）处 1/4 强度（用户 2026-09-22
+    // 规格）、z ≥ 10（σ 饱和点）满振；横向：z ≤ 1.5 静默、z ≥ 4 封顶在 1/4。
+    // ⚠️ 锚点值来自 **2026-10-02 逐帧直方图重标定**（实测：巡航 z≈0.02~0.17、
+    // 普通过弯 0.88~2.40、极限过弯 3.9~7.7、锁死/空转 10.2~10.75）——旧锚点
+    // 0.40/1.0/3.5 把普通过弯全映射到 0.2~0.7，是「低速拐弯太振」的量化根因。
+    // 横向封顶仍是对「低速打方向满振」的结构性修复（α 在低速有 atan 饱和
+    // 假象，实测可达峰值的 7 倍）——完整推导与反汇编依据见
+    // native/src/slip_feedback.h。
+    const val KEY_SLIP_FEEDBACK_MODE = "slip_feedback_mode"
+    const val KEY_SLIP_HAPTIC_INTENSITY = "slip_haptic_intensity"
+    // 视觉路的最大不透明度（%）。与振感的「最大振动强度」同构：都是"这个反馈
+    // 最满能到什么程度"的封顶旋钮，都是 20~100、默认 100。
+    // ⚠️ 为什么不复用同一个键：振感和视觉是两路独立反馈，用户可能只开视觉
+    //（此时振动强度滑块根本不显示），也可能两路都开却要不同的"满格"——
+    // 分开存才不会出现"调了视觉把振感也改了"。
+    const val KEY_SLIP_VISUAL_OPACITY = "slip_visual_opacity"
+    // 视觉绘制风格（弓形光晕 / 实心矩形）。**不给 UI 入口**——见 SlipVisualStyle
+    // 的说明：弓形是用户定案的形状，这个键只是"万一全宽下太淡"时手动改 JSON
+    // 的退路，暴露到配置页反而会诱导用户选回那个被否定的矩形。
+    const val KEY_SLIP_VISUAL_STYLE = "slip_visual_style"
+
+    /**
+     * 滑移率反馈的**纵向满振点**（归一化滑移 `s = |σ| / maxSlip` 轴）。
+     *
+     * `s = 1` 即该轮此刻的轮胎峰值（maxSlip 由 `IRDSWheel.UpdateMaxSlips`
+     * 每帧从 100 点 LUT 按载荷插值），`s ≥ [SLIP_FEEDBACK_FULL_Z]` 即满强度。
+     * **横向通道不使用它**——横向（α/maxAngle）恒硬封顶在 0.25。
+     *
+     * 取 **10.0** 的依据是 **σ 的物理饱和点**（2026-10-02 重标定）：
+     * `slipRatio`(0x104) 在 `RoadForce` 里被显式夹到 ±1.0，而 maxSlip ≈ 0.094~0.103，
+     * 所以 `s` 的硬天花板就是 `1.0 / 0.094 ≈ 10.6`（实测锁死/空转帧恰好落在
+     * 10.2~10.75，即全部顶在饱和点）。把满振点锚在饱和点上 ⇒ "完全锁死"
+     * 恰好等于满振，不会再出现"锁死却振不满"。
+     *
+     * 中段锚点（静默 z=1.0、膝盖 z=4.0 = 1/4 电平）见 native 常量
+     * `MIN_Z` / `KNEE_Z` / `LEVEL_AT_PEAK`。
+     *
+     * ⚠️ **不要再除以 `slipRatioClamp`(0x35C)**——那会把整条量程压到 ≤1/1.05，
+     * 满振点永远够不到，马达又回到"从不满幅"的老问题。
+     *
+     * ⚠️ 历史教训：旧版把满振点定在越过峰值 3.5 倍，但那时分子是**已经归一化
+     * 过的** `slipRatio`（÷maxSlip 即双重归一化），比值上限只有 10、还要再被
+     * 对数压缩到 1.69 ⇒ 电平永远到不了满振。量纲修正后此问题消失。
+     *
+     * ⚠️ 起振点与膝盖处电平（0.25）是用户 2026-09-22 的明确规格，
+     * 写在 native 常量里，**不在配置层**。参见 native/src/slip_feedback.h。
+     */
+    const val SLIP_FEEDBACK_FULL_Z = 10.0f
+
     // Pedal mapping
     const val KEY_PEDAL_MODE = "pedal_mode"
     const val KEY_PEDAL_DEADZONE = "pedal_deadzone"
@@ -262,6 +315,56 @@ object ModConfig {
         companion object {
             fun from(value: String?): PedalPriority {
                 return entries.find { it.value == value } ?: BRAKE_VALUE
+            }
+        }
+    }
+
+    /**
+     * 滑移率反馈形式（振感 / 视觉 / 两者）。
+     *
+     * 语义上是一个**多选**（振感 + 视觉可各自独立开关），但 UI 用单一下拉
+     * 选项菜单表达（用户规格：关闭 / 振感 / 视觉 / 全部）。用 4 值枚举而非
+     * 两个布尔：下拉菜单是单选控件，两布尔要两张开关卡片，与「一行一个
+     * 下拉」的既有版式（线性踏板 / 牵引力控制 / 防抱死制动系统）不一致。
+     *
+     * - OFF：native 不采样，视觉条与振感都停（零开销）。
+     * - HAPTIC / VISUAL：只出一路。
+     * - BOTH：两路同时（共用同一路 60Hz 轮询，不分叉成两个 timer）。
+     */
+    enum class SlipFeedbackMode(val value: String) {
+        OFF("off"),
+        HAPTIC("haptic"),
+        VISUAL("visual"),
+        BOTH("both");
+
+        val hasHaptic: Boolean get() = this == HAPTIC || this == BOTH
+        val hasVisual: Boolean get() = this == VISUAL || this == BOTH
+
+        companion object {
+            fun from(value: String?): SlipFeedbackMode {
+                return entries.find { it.value == value } ?: OFF
+            }
+        }
+    }
+
+    /**
+     * 视觉反馈的绘制风格。
+     *
+     * 两种风格共享同一套几何参数（尺寸/位置/颜色/亮度曲线），只有"怎么填这块
+     * 区域"不同：
+     * - [GLOW]：椭圆弓形 + 径向渐变（中心浓 → 弧边 0）。与 TC/ABS 介入指示灯
+     *   **同构**（几何与渐变逐字复用，见 overlay/SlipBowPainter.kt），观感是
+     *   屏幕底缘一片柔和光晕。默认。
+     * - [BLOCK]：实心矩形，无渐变。备用退路——弓形在 2400px 全宽上展开时竖向
+     *   只有 72px、渐变又吃掉大半亮度，密集场景下可能显得太淡，此时切这个。
+     */
+    enum class SlipVisualStyle(val value: String) {
+        GLOW("glow"),
+        BLOCK("block");
+
+        companion object {
+            fun from(value: String?): SlipVisualStyle {
+                return entries.find { it.value == value } ?: GLOW
             }
         }
     }
@@ -633,6 +736,15 @@ object ModConfig {
         const val HIDE_GAME_PEDALS = false
         // TC/ABS 介入指示灯默认开启（纯视觉，参照"位置记忆默认启用"先例）。
         const val ENABLE_TC_ABS_INDICATOR = true
+        // 滑移率反馈默认关闭（用户规格：默认关闭）。
+        val SLIP_FEEDBACK_MODE = SlipFeedbackMode.OFF
+        // 最大振动强度默认 100%（用户定案）。
+        const val SLIP_HAPTIC_INTENSITY = 100
+        // 视觉最大不透明度默认 100%：与「最大振动强度」同构的封顶旋钮。
+        // 下限 20 而非 0——0% 等价于"画了但看不见"，是关掉视觉的错误表达方式，
+        // 要关就用模式下拉选「关闭」或「振感」。
+        const val SLIP_VISUAL_OPACITY = 100
+        val SLIP_VISUAL_STYLE = SlipVisualStyle.GLOW
         val PEDAL_MODE = PedalMode.SINGLE
         const val PEDAL_DEADZONE = 0.05f
         const val PEDAL_TRANSITION = 0.5f
@@ -760,6 +872,20 @@ object ModConfig {
                     KEY_ENABLE_TC_ABS_INDICATOR,
                     Defaults.ENABLE_TC_ABS_INDICATOR
                 ),
+                slipFeedbackMode = SlipFeedbackMode.from(
+                    json.optString(KEY_SLIP_FEEDBACK_MODE, Defaults.SLIP_FEEDBACK_MODE.value)
+                ),
+                slipHapticIntensity = json.optInt(
+                    KEY_SLIP_HAPTIC_INTENSITY,
+                    Defaults.SLIP_HAPTIC_INTENSITY
+                ).coerceIn(20, 100),
+                slipVisualOpacity = json.optInt(
+                    KEY_SLIP_VISUAL_OPACITY,
+                    Defaults.SLIP_VISUAL_OPACITY
+                ).coerceIn(20, 100),
+                slipVisualStyle = SlipVisualStyle.from(
+                    json.optString(KEY_SLIP_VISUAL_STYLE, Defaults.SLIP_VISUAL_STYLE.value)
+                ),
                 pedalDeadzone = json.optDouble(
                     KEY_PEDAL_DEADZONE,
                     Defaults.PEDAL_DEADZONE.toDouble()
@@ -834,6 +960,10 @@ object ModConfig {
         put(KEY_ENABLE_V10_SOUND, settings.enableV10Sound)
         put(KEY_HIDE_GAME_PEDALS, settings.hideGamePedals)
         put(KEY_ENABLE_TC_ABS_INDICATOR, settings.enableTcAbsIndicator)
+        put(KEY_SLIP_FEEDBACK_MODE, settings.slipFeedbackMode.value)
+        put(KEY_SLIP_HAPTIC_INTENSITY, settings.slipHapticIntensity)
+        put(KEY_SLIP_VISUAL_OPACITY, settings.slipVisualOpacity)
+        put(KEY_SLIP_VISUAL_STYLE, settings.slipVisualStyle.value)
         put(KEY_PEDAL_DEADZONE, settings.pedalDeadzone.toDouble())
         put(KEY_PEDAL_TRANSITION, settings.pedalTransition.toDouble())
         put(KEY_BRAKE_TRANSITION, settings.brakeTransition.toDouble())
@@ -1149,6 +1279,10 @@ object ModConfig {
                 enableV10Sound = j.optBoolean(KEY_ENABLE_V10_SOUND, Defaults.ENABLE_V10_SOUND),
                 hideGamePedals = j.optBoolean(KEY_HIDE_GAME_PEDALS, Defaults.HIDE_GAME_PEDALS),
                 enableTcAbsIndicator = j.optBoolean(KEY_ENABLE_TC_ABS_INDICATOR, Defaults.ENABLE_TC_ABS_INDICATOR),
+                slipFeedbackMode = SlipFeedbackMode.from(j.optString(KEY_SLIP_FEEDBACK_MODE, Defaults.SLIP_FEEDBACK_MODE.value)),
+                slipHapticIntensity = j.optInt(KEY_SLIP_HAPTIC_INTENSITY, Defaults.SLIP_HAPTIC_INTENSITY).coerceIn(20, 100),
+                slipVisualOpacity = j.optInt(KEY_SLIP_VISUAL_OPACITY, Defaults.SLIP_VISUAL_OPACITY).coerceIn(20, 100),
+                slipVisualStyle = SlipVisualStyle.from(j.optString(KEY_SLIP_VISUAL_STYLE, Defaults.SLIP_VISUAL_STYLE.value)),
                 pedalDeadzone = j.optDouble(KEY_PEDAL_DEADZONE, Defaults.PEDAL_DEADZONE.toDouble()).toFloat(),
                 pedalTransition = j.optDouble(KEY_PEDAL_TRANSITION, Defaults.PEDAL_TRANSITION.toDouble()).toFloat(),
                 brakeTransition = j.optDouble(KEY_BRAKE_TRANSITION, Defaults.BRAKE_TRANSITION.toDouble()).toFloat(),
@@ -1374,6 +1508,10 @@ object ModConfig {
             enableV10Sound = Defaults.ENABLE_V10_SOUND,
             hideGamePedals = Defaults.HIDE_GAME_PEDALS,
             enableTcAbsIndicator = Defaults.ENABLE_TC_ABS_INDICATOR,
+            slipFeedbackMode = Defaults.SLIP_FEEDBACK_MODE,
+            slipHapticIntensity = Defaults.SLIP_HAPTIC_INTENSITY,
+            slipVisualOpacity = Defaults.SLIP_VISUAL_OPACITY,
+            slipVisualStyle = Defaults.SLIP_VISUAL_STYLE,
             pedalDeadzone = Defaults.PEDAL_DEADZONE,
             pedalTransition = Defaults.PEDAL_TRANSITION,
             brakeTransition = Defaults.BRAKE_TRANSITION,
@@ -1450,6 +1588,15 @@ object ModConfig {
         val toolButtonPosition: OverlayPosition = Defaults.TOOL_BUTTON_POSITION,
         // TC/ABS 介入指示灯开关（默认开启，纯视觉）。
         val enableTcAbsIndicator: Boolean = Defaults.ENABLE_TC_ABS_INDICATOR,
+        // 滑移率反馈：模式（关闭/振感/视觉/全部，默认关闭）+ 最大振动强度
+        // 百分比 ∈ [20,100]。两个字段同属一个功能组，走 native 采样通道
+        // （slip_feedback.c）。起振点/峰值电平是 native 常量（用户规格，不可调）。
+        val slipFeedbackMode: SlipFeedbackMode = Defaults.SLIP_FEEDBACK_MODE,
+        val slipHapticIntensity: Int = Defaults.SLIP_HAPTIC_INTENSITY,
+        // 视觉路的最大不透明度（%）与绘制风格。与 slipHapticIntensity 同构，
+        // 但**键独立**——详见 KEY_SLIP_VISUAL_OPACITY 处"为什么不复用同一个键"。
+        val slipVisualOpacity: Int = Defaults.SLIP_VISUAL_OPACITY,
+        val slipVisualStyle: SlipVisualStyle = Defaults.SLIP_VISUAL_STYLE,
         // 围场服务器地址覆盖（S4）。空 = 用 PaddockClient 内置默认。
         // 仅 ConfigActivity 设置页可改；游戏进程读取链路经 ConfigReceiver 广播 JSON。
         val paddockServer: String = Defaults.PADDOCK_SERVER

@@ -227,6 +227,88 @@ fun ConfigurePagerMiuix(
                                 checked = uiState.enableOvertakeLatch,
                                 onCheckedChange = actions::setEnableOvertakeLatch
                             )
+                            // 滑移率反馈：把「当前滑移率离抓地力峰值有多远」变成可感知的
+                            // 反馈。起振锚点是轮胎真实峰值 maxSlip（u = |σ|/maxSlip），
+                            // 不是游戏 ABS 的固定阈值 0.15——后者在实测 maxSlip≈0.094 下
+                            // 对应 u≈1.6，即"已越过峰值 60%"才起振，方向相反。
+                            // 视觉条与指示灯同形（贴边横条），但走连续不透明度而非闪烁。
+                            OverlayDropdownPreference(
+                                title = "滑移率反馈",
+                                summary = "提供振感与视觉反馈，增强抓地力感知体验",
+                                items = ModConfig.SlipFeedbackMode.entries.map {
+                                    slipFeedbackModeName(it)
+                                },
+                                startAction = {
+                                    Icon(
+                                        tools.alamobile.mod.ui.DriftIcon,
+                                        modifier = Modifier.padding(end = 6.dp),
+                                        contentDescription = null,
+                                        tint = colorScheme.onBackground
+                                    )
+                                },
+                                selectedIndex = ModConfig.SlipFeedbackMode.entries.indexOf(
+                                    uiState.slipFeedbackMode
+                                ),
+                                onSelectedIndexChange = { index ->
+                                    actions.setSlipFeedbackMode(
+                                        ModConfig.SlipFeedbackMode.entries[index]
+                                    )
+                                },
+                            )
+                            // 起振时机滑条已移除（2026-09-21）：锚点换成逐轮轮胎
+                            // 利用率后，起振点 = 轮胎峰值的 70%（u=0.70）是用户
+                            // 规格定死的，不是可调参数——"接近极限往前一点点"是
+                            // 这条反馈的定义。留一个滑条只会诱导用户把它调丢。
+                            // 见 native/src/slip_feedback.h 的映射表。
+                            AnimatedVisibility(
+                                visible = uiState.slipFeedbackMode != ModConfig.SlipFeedbackMode.OFF,
+                                enter = expandVertically() + fadeIn(),
+                                exit = shrinkVertically() + fadeOut()
+                            ) {
+                                Column {
+                                    // 最大振动强度：只在选了振感时才有意义。范围 20-100%，
+                                    // 默认 100%（用户定案）。落到 native 之外——它作用于
+                                    // Java 侧振幅/时长，native 只出 0..1 电平。
+                                    AnimatedVisibility(
+                                        visible = uiState.slipFeedbackMode.hasHaptic,
+                                        enter = expandVertically() + fadeIn(),
+                                        exit = shrinkVertically() + fadeOut()
+                                    ) {
+                                        SliderPreference(
+                                            title = "最大振动强度",
+                                            // 用户规格：本项无描述。
+                                            value = uiState.slipHapticIntensity.toFloat(),
+                                            onValueChange = { v ->
+                                                actions.setSlipHapticIntensity(v.roundToInt())
+                                            },
+                                            valueRange = 20f..100f,
+                                            displayFormat = { v -> "${v.roundToInt()}%" },
+                                            icon = tools.alamobile.mod.ui.VibrationIcon
+
+                                        )
+                                    }
+                                    // 最大不透明度：与上一项同构（视觉路的封顶旋钮），
+                                    // 只在选了视觉时出现。键与振感强度**独立**——两路都开
+                                    // 时各自有各自的"满格"，见 ModConfig.KEY_SLIP_VISUAL_OPACITY。
+                                    AnimatedVisibility(
+                                        visible = uiState.slipFeedbackMode.hasVisual,
+                                        enter = expandVertically() + fadeIn(),
+                                        exit = shrinkVertically() + fadeOut()
+                                    ) {
+                                        SliderPreference(
+                                            title = "最大不透明度",
+                                            value = uiState.slipVisualOpacity.toFloat(),
+                                            onValueChange = { v ->
+                                                actions.setSlipVisualOpacity(v.roundToInt())
+                                            },
+                                            valueRange = 20f..100f,
+                                            displayFormat = { v -> "${v.roundToInt()}%" },
+                                            icon = Icons.Rounded.Opacity
+
+                                        )
+                                    }
+                                }
+                            }
                             // TC 调节：游戏设置没有任何 TC 参数可调（仅手柄生效的
                             // 开关且被游戏每帧覆写），模块档位是移动端唯一调节途径。
                             // 游戏默认 = 纯透传；自定义展开强度/时机两个滑条。
@@ -765,7 +847,10 @@ fun ConfigurePagerMiuix(
 @Composable
 private fun SliderPreference(
     title: String,
-    summary: String,
+    // 空串 = 不渲染描述行（用户规格："最大振动强度" 项没有描述）。
+    // miuix 原生组件用 null 表达同一语义；本函数是手写的，用空串更省一层
+    // 可空判断——渲染一个空 Text 会留下一行无意义的高度。
+    summary: String = "",
     value: Float,
     onValueChange: (Float) -> Unit,
     valueRange: ClosedFloatingPointRange<Float>,
@@ -796,11 +881,13 @@ private fun SliderPreference(
                     fontSize = MiuixTheme.textStyles.headline1.fontSize,
                     fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
                 )
-                top.yukonga.miuix.kmp.basic.Text(
-                    text = summary,
-                    fontSize = MiuixTheme.textStyles.body2.fontSize,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary
-                )
+                if (summary.isNotEmpty()) {
+                    top.yukonga.miuix.kmp.basic.Text(
+                        text = summary,
+                        fontSize = MiuixTheme.textStyles.body2.fontSize,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary
+                    )
+                }
             }
         }
         SliderGestureBox(
@@ -956,6 +1043,13 @@ private fun absStrengthName(strength: ModConfig.AbsStrength): String = when (str
     ModConfig.AbsStrength.MEDIUM -> "中"
     ModConfig.AbsStrength.HIGH -> "高"
     ModConfig.AbsStrength.MAX -> "最高（默认）"
+}
+
+private fun slipFeedbackModeName(mode: ModConfig.SlipFeedbackMode): String = when (mode) {
+    ModConfig.SlipFeedbackMode.OFF -> "关闭"
+    ModConfig.SlipFeedbackMode.HAPTIC -> "振感"
+    ModConfig.SlipFeedbackMode.VISUAL -> "视觉"
+    ModConfig.SlipFeedbackMode.BOTH -> "全部"
 }
 
 /**

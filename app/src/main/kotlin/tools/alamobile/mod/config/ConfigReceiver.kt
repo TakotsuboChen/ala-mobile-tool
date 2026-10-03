@@ -149,6 +149,27 @@ class ConfigReceiver : BroadcastReceiver() {
                 Logger.i(TAG, "ConfigReceiver: setAbsParams mix=$absMix bOverride=$absBOverride brakeScale=$brakeScale")
             }
 
+            // 实时同步滑移率反馈（振感/视觉）——native 侧每物理帧采样 4 轮的
+            // slipRatio/slipAngle 与载荷自适应峰值，算出**两条独立归一化通道**
+            //（纵向 |σ|/maxSlip 可满振、横向 |α|/maxAngle 硬封顶 1/4）并取大，
+            // 只有 enabled 时才算；disabled 时开销为零。起振点（0.40）与峰值处
+            // 电平（0.25）是用户规格，写在 native 常量里，不在配置层。
+            // 最大振动强度作用于 Java 侧的振幅/时长，不传 native（native 只出 0..1 电平）。
+            val slipMode = ModConfig.SlipFeedbackMode.from(
+                incoming.optString("slip_feedback_mode", "off")
+            )
+            if (tools.alamobile.mod.NativeBridge.isAvailable) {
+                tools.alamobile.mod.NativeBridge.setSlipFeedbackParams(
+                    slipMode != ModConfig.SlipFeedbackMode.OFF,
+                    ModConfig.SLIP_FEEDBACK_FULL_Z
+                )
+                Logger.i(
+                    TAG,
+                    "ConfigReceiver: setSlipFeedbackParams mode=$slipMode " +
+                        "fullZ=${ModConfig.SLIP_FEEDBACK_FULL_Z}"
+                )
+            }
+
             // 圈辅助配置同步（围场积分加成 / 零辅助金标数据源）——
             // 用户在游戏运行中改踏板模式/TC 档/ABS 档，必须立刻让 native 知道：
             // 否则"这一圈中途改过配置"检测不到，会把不一致的圈当成一致上报。

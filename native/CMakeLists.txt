@@ -21,6 +21,7 @@ add_library(
     src/native_log.c
     src/il2cpp_hooks.c
     src/pedal_hook.c
+    src/slip_feedback.c
     src/drs_hook.c
     src/overtake_hook.c
     src/unlock_hook.c

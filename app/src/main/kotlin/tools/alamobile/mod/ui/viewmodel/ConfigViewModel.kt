@@ -59,6 +59,10 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
                 enableV10Sound = s.enableV10Sound,
                 hideGamePedals = s.hideGamePedals,
                 enableTcAbsIndicator = s.enableTcAbsIndicator,
+                slipFeedbackMode = s.slipFeedbackMode,
+                slipHapticIntensity = s.slipHapticIntensity,
+                slipVisualOpacity = s.slipVisualOpacity,
+                slipVisualStyle = s.slipVisualStyle,
                 pedalDeadzone = s.pedalDeadzone,
                 pedalTransition = s.pedalTransition,
                 brakeTransition = s.brakeTransition,
@@ -96,6 +100,8 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
             enableV10Sound = s.enableV10Sound,
             hideGamePedals = s.hideGamePedals,
             enableTcAbsIndicator = s.enableTcAbsIndicator,
+            slipFeedbackMode = s.slipFeedbackMode,
+            slipHapticIntensity = s.slipHapticIntensity,
             pedalDeadzone = s.pedalDeadzone,
             pedalTransition = s.pedalTransition,
             brakeTransition = s.brakeTransition,
@@ -109,6 +115,8 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
             brakeCurve = s.brakeCurve,
             throttleCurvePoints = s.throttleCurvePoints,
             brakeCurvePoints = s.brakeCurvePoints,
+            slipVisualOpacity = s.slipVisualOpacity,
+            slipVisualStyle = s.slipVisualStyle,
             paddockServer = s.paddockServer,
         )
     }
@@ -147,6 +155,11 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
     fun setEnableV10Sound(v: Boolean) { _uiState.value = _uiState.value.copy(enableV10Sound = v); scheduleSave() }
     fun setHideGamePedals(v: Boolean) { _uiState.value = _uiState.value.copy(hideGamePedals = v); scheduleSave() }
     fun setEnableTcAbsIndicator(v: Boolean) { _uiState.value = _uiState.value.copy(enableTcAbsIndicator = v); scheduleSave() }
+    // 滑移率反馈三 setter。起振点与强度都是"只在对应模式下才展示"的
+    // 从属项——切模式不清它们，用户来回切回来保留上次调整值。
+    fun setSlipFeedbackMode(v: ModConfig.SlipFeedbackMode) { _uiState.value = _uiState.value.copy(slipFeedbackMode = v); scheduleSave() }
+    fun setSlipHapticIntensity(v: Int) { _uiState.value = _uiState.value.copy(slipHapticIntensity = v.coerceIn(20, 100)); scheduleSave() }
+    fun setSlipVisualOpacity(v: Int) { _uiState.value = _uiState.value.copy(slipVisualOpacity = v.coerceIn(20, 100)); scheduleSave() }
     fun setPedalDeadzone(v: Float) { _uiState.value = _uiState.value.copy(pedalDeadzone = v); scheduleSave() }
     fun setPedalTransition(v: Float) { _uiState.value = _uiState.value.copy(pedalTransition = v); scheduleSave() }
     fun setBrakeTransition(v: Float) { _uiState.value = _uiState.value.copy(brakeTransition = v); scheduleSave() }
@@ -200,6 +213,11 @@ data class ConfigUiState(
     val hideGamePedals: Boolean,
     // TC/ABS 介入指示灯开关。
     val enableTcAbsIndicator: Boolean,
+    // 滑移率反馈：模式 / 最大振动强度百分比。
+    val slipFeedbackMode: ModConfig.SlipFeedbackMode,
+    val slipHapticIntensity: Int,
+    val slipVisualOpacity: Int,
+    val slipVisualStyle: ModConfig.SlipVisualStyle,
     val pedalDeadzone: Float,
     val pedalTransition: Float,
     val brakeTransition: Float,
@@ -238,6 +256,10 @@ data class ConfigUiState(
         enableV10Sound = enableV10Sound,
         hideGamePedals = hideGamePedals,
         enableTcAbsIndicator = enableTcAbsIndicator,
+        slipFeedbackMode = slipFeedbackMode,
+        slipHapticIntensity = slipHapticIntensity,
+        slipVisualOpacity = slipVisualOpacity,
+        slipVisualStyle = slipVisualStyle,
         pedalDeadzone = pedalDeadzone,
         pedalTransition = pedalTransition,
         brakeTransition = brakeTransition,
