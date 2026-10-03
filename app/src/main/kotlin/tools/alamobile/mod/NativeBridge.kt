@@ -428,6 +428,95 @@ object NativeBridge {
     external fun queryTcAbsIndicator(outTc: IntArray, outAbs: IntArray)
 
     /**
+     * 滑移率反馈参数下发（滑移率反馈功能的振感/视觉开关 + 纵向满振点）。
+     *
+     * - enabled = 模式 ∈ {振感, 视觉, 全部}；关闭时不采样（native 侧电平恒 0）。
+     * - fullZ：**纵向通道**的满振点。`z = max_i |σ_i| / maxSlip_i` 是"该轮此刻
+     *   用了峰值的多少倍"（z = 1 即轮胎峰值），`z ≥ fullZ` 即满强度。
+     *   正常恒为 [ModConfig.SLIP_FEEDBACK_FULL_Z]（= 10.0，即 σ 的物理饱和点）。
+     *   **横向通道（α/maxAngle）硬封顶 0.25，不使用这个参数。**
+     *
+     * ⚠️ 2026-09-22 第八轮定案（**量纲闭合**，前七轮都栽在这里）。
+     * 反汇编 `IRDSWheel.SlipRatio`(0x1a7da24) **全函数**后确认：
+     *
+     *     slipRatio(0x104) = min(1, ω_norm/8) · clamp(−LV.z / max(wMagnitud,1), ≥0)
+     *
+     * 即 `slipRatio` **本身就是那个函数的输出**，内部已经归一化过一次。
+     * 所以旧版算的 `slipRatio / maxSlip` 是**双重归一化**（ψ(σ)/ψ_peak）：
+     * 锁死只有 10、普通起步 3~7，两者差不到一个数量级 ⇒ 纵向永远拉不开档次，
+     * 这才是「起步没打滑也满振」与「锁死振不强」这对矛盾的统一根因。
+     *
+     * 修法三条（都是结构性的，不依赖任何坐标系推断）：
+     * 1. **分子改 `|σ|`、不除 `slipRatioClamp`** ⇒ 量程回到与 maxSlip 同量纲的
+     *    0~10.6（σ 被 RoadForce 夹到 ±1、maxSlip≈0.094~0.103）。
+     * 2. **锚点按实测分档重标定**（2026-10-02）：实测巡航 z≈0.02~0.17、
+     *    普通过弯 0.88~2.40、极限过弯 3.9~7.7、锁死/空转 10.2~10.75。旧锚点
+     *    （静默 0.40 / 膝盖 1.0 / 满振 3.5）把普通过弯全推到 0.2~0.7 电平上
+     *    = 「低速拐弯太振」的量化根因。新锚点：静默 1.0、膝盖 4.0（= 1/4 电平）、
+     *    满振 10.0（= 饱和点）。膝盖以内用幂次（`t^0.6`）保证小滑移连续可感，
+     *    膝盖以后线性且斜率只降不升 ⇒ 用户否定过的「滑了就突然爆发」不可能。
+     * 3. **横向硬封顶 1/4**（静默 1.5 / 封顶 4.0）⇒ `SlipAngle` 在低速的 atan
+     *    饱和假象（分母被 `max(...,1)` 钳住，α 退化成 `atan(LV.x)`，含打舵
+     *    本身的合法横向速度，实测达峰值 7 倍）再大也只是 1/4——恰好是用户对
+     *    "用尽抓地力"的规格值。高速没这个假象，因为游戏自己的
+     *    `LockSteerAtSlipAngle`(0x1a678c8) 不让打大舵角（这解释了「越低速越振」
+     *    「高速打满方向一点都不振」）。
+     *
+     * 四条工况：锁死 → 纵向满振；出弯空转 → 纵向满振；高 G 过弯 → 横向 1/4；
+     * 普通过弯 → 纵向 <0.2 且横向 <0.25 ⇒ 几乎无感。详见 native/src/slip_feedback.h。
+     *
+     * 静默点/膝盖处电平（1.0 / 4.0 / 0.25）是用户规格，写在 native 常量里，
+     * 不在此下发。
+     *
+     * 低频调用（配置变更/启动时），不重装 hook，同 [setTcParams] 模式。
+     */
+    @JvmStatic
+    external fun setSlipFeedbackParams(enabled: Boolean, fullZ: Float)
+
+    /**
+     * 标定探针开关：开启后 native 每约 3 秒往 `ala_tool_native.log` 落一组
+     * 实测数据——逐轮原始 σ/α/峰值、两通道各自的峰值（maxLon/maxLat）、
+     * 车速峰值、Fn、**游戏自己算的 `unitSlip`/`unitAngle`**（量纲外部校验
+     * 锚点）。用于回归校验三条锚点：锁死/空转 maxLon≈10.5、极限过弯 maxLon≈4~8、
+     * 普通过弯 maxLon≤2.4 且 maxLat≤2.7。自限时 10 分钟，到点自动关。
+     *
+     * 只在游戏进程有效（native 侧）。release 构建由 Java 侧显式调
+     * （供需要实测标定的场合使用）。
+     */
+    @JvmStatic
+    external fun setSlipFeedbackProbe(enabled: Boolean)
+
+    /**
+     * 查询滑移率反馈电平 0..1（[tools.alamobile.mod.overlay.SlipFeedbackView]
+     * 主线程 Handler 轮询，~60Hz）。outLevel = float[1]，native 直写缓冲。
+     * native 写侧在物理线程 carController 白名单路径，读侧 volatile 无锁。
+     */
+    @JvmStatic
+    external fun querySlipFeedback(outLevel: FloatArray)
+
+    /**
+     * **按时间窗口批量取电平样本**（第九轮流式路径）。
+     *
+     * 物理帧 50Hz、Java 轮询 60Hz 不同步，只取"最新值"会读重/漏帧。本函数
+     * 返回自 `fromSeq` 以来的全部样本（最多 `max` 个），并回传下一个待读序号。
+     *
+     * 用途是**流式重发振感**：每 20ms 取一次增量，N 个电平各对应一段波形，
+     * 段序 = 物理帧序 ⇒ 幅度起伏 = 真实信号起伏，**没有人为调制频率**——
+     * 这是唯一能做出"不糊"质感的路（人造调制频率受 LRA 机械带宽与 5ms 段长
+     * 双重限制，能渲染出来的必然落在"波动/嗡"感知区，即用户说的"共振感"）。
+     *
+     * @param out     输出缓冲（调用方分配，长度 ≥ max）
+     * @param max     最多取几个（native 侧上限 64）
+     * @param fromSeq 上次返回的 outNext[0]（首次传 0 = 从当前开始）
+     * @param outNext int[1]，回传下一个待读序号
+     * @return 实际写入的样本数
+     */
+    @JvmStatic
+    external fun drainSlipFeedback(
+        out: FloatArray, max: Int, fromSeq: Int, outNext: IntArray
+    ): Int
+
+    /**
      * 初始化"隐藏游戏原生油门/刹车按钮"功能。
      * 启动 native 后台轮询线程，每 2 秒遍历 IRDSUIMobileControls 布局 GameObject
      * 子物体，按名字匹配 "Throttle"/"Brake" 并 SetActive(false)，跳过 "Clutch"。

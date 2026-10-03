@@ -1,6 +1,8 @@
 #include "pedal_hook.h"
 #include "hide_pedals_hook.h"
 #include "native_log.h"
+#include "crash_hook.h"
+#include "slip_feedback.h"
 #include <dlfcn.h>
 #include <inttypes.h>
 #include <pthread.h>
@@ -377,6 +379,15 @@ static void proxy_fixed_update(void *this) {
         if (is_target_player_car(this)) {
             abs_apply_gear(this);
             abs_diag_log(this);
+            // ⚠️ 滑移率反馈的采样**不在这里**：它读的是 IRDSWheel 的
+            // slipRatio/slipAngle/maxSlip/maxAngle，而这些字段由
+            // `multithreadWheelManager.FixedUpdate` → `ComputeWheelPhysics`
+            // 写入。本函数 hook 的是 `IRDSCarControllInput.FixedUpdate`，
+            // 两者是 Unity 的**两个独立 MonoBehaviour 回调，先后顺序不保证**——
+            // 若本回调先跑，读到的就是上一帧的滑移量。
+            // 采样点已移到 `proxy_car_controller` 的 orig 之后：carController
+            // 末尾（0x1a67248-0x1a672c0）正是"累加 4 轮 slipVelo 除轮数"那段，
+            // 必在 ComputeWheelPhysics 之后，此处的轮级字段保证是本帧新值。
         }
 
         // ★ ABS 被编译器内联到 carController 里，HandleABS 方法从不被调用，
@@ -969,6 +980,14 @@ static void proxy_car_controller(void *this) {
     if (g_car_controller_orig != NULL) {
         ((orig_t) g_car_controller_orig)(this);
     }
+
+    // ★ 滑移率反馈采样：放在 carController **之后**。
+    // 理由见 proxy_fixed_update 内同名注释——必须让本帧的
+    // ComputeWheelPhysics（写 slipRatio/slipAngle/maxSlip/maxAngle）先跑完。
+    // 白名单内调用，天然排除 AI 车；本函数只读，不写任何游戏字段。
+    if (is_target_player_car(this)) {
+        slip_feedback_tick(this);
+    }
 }
 
 typedef struct {
@@ -1042,6 +1061,7 @@ bool pedal_install_hooks(const pedal_hook_config_t *config) {
                  err, shadowhook_to_errmsg(err));
         } else {
             LOGI("Hooked setThrottle at 0x%" PRIxPTR, target);
+            crash_hook_register("setThrottle", (void *) target);
         }
     }
 
@@ -1057,6 +1077,7 @@ bool pedal_install_hooks(const pedal_hook_config_t *config) {
                  err, shadowhook_to_errmsg(err));
         } else {
             LOGI("Hooked setBrake at 0x%" PRIxPTR, target);
+            crash_hook_register("setBrake", (void *) target);
         }
     }
 
@@ -1072,6 +1093,7 @@ bool pedal_install_hooks(const pedal_hook_config_t *config) {
                  err, shadowhook_to_errmsg(err));
         } else {
             LOGI("Hooked shiftUp at 0x%" PRIxPTR, target);
+            crash_hook_register("shiftUp", (void *) target);
         }
     }
 
@@ -1087,6 +1109,7 @@ bool pedal_install_hooks(const pedal_hook_config_t *config) {
                  err, shadowhook_to_errmsg(err));
         } else {
             LOGI("Hooked shiftDown at 0x%" PRIxPTR, target);
+            crash_hook_register("shiftDown", (void *) target);
         }
     }
 
@@ -1106,6 +1129,7 @@ bool pedal_install_hooks(const pedal_hook_config_t *config) {
                  err, shadowhook_to_errmsg(err));
         } else {
             LOGI("Hooked FixedUpdate at 0x%" PRIxPTR, target);
+            crash_hook_register("FixedUpdate", (void *) target);
         }
     }
 
@@ -1121,6 +1145,7 @@ bool pedal_install_hooks(const pedal_hook_config_t *config) {
                  err, shadowhook_to_errmsg(err));
         } else {
             LOGI("Hooked DrivetrainFixedUpdate at 0x%" PRIxPTR, target);
+            crash_hook_register("DrivetrainFixedUpdate", (void *) target);
         }
     }
 
@@ -1136,6 +1161,7 @@ bool pedal_install_hooks(const pedal_hook_config_t *config) {
                  err, shadowhook_to_errmsg(err));
         } else {
             LOGI("Hooked DoGearShifting at 0x%" PRIxPTR, target);
+            crash_hook_register("DoGearShifting", (void *) target);
         }
     }
 
@@ -1151,6 +1177,7 @@ bool pedal_install_hooks(const pedal_hook_config_t *config) {
                  err, shadowhook_to_errmsg(err));
         } else {
             LOGI("Hooked TractionFilter at 0x%" PRIxPTR, target);
+            crash_hook_register("TractionFilter", (void *) target);
         }
     }
 
@@ -1166,6 +1193,7 @@ bool pedal_install_hooks(const pedal_hook_config_t *config) {
                  err, shadowhook_to_errmsg(err));
         } else {
             LOGI("Hooked HandleABS at 0x%" PRIxPTR, target);
+            crash_hook_register("HandleABS", (void *) target);
         }
     }
 
@@ -1186,6 +1214,7 @@ bool pedal_install_hooks(const pedal_hook_config_t *config) {
                  err, shadowhook_to_errmsg(err));
         } else {
             LOGI("Hooked carController at 0x%" PRIxPTR, target);
+            crash_hook_register("carController", (void *) target);
         }
     }
 
@@ -1201,6 +1230,7 @@ bool pedal_install_hooks(const pedal_hook_config_t *config) {
                  err, shadowhook_to_errmsg(err));
         } else {
             LOGI("Hooked PlayerControlsUpdate at 0x%" PRIxPTR, target);
+            crash_hook_register("PlayerControlsUpdate", (void *) target);
         }
     }
 

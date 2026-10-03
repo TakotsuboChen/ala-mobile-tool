@@ -580,6 +580,41 @@ class AlaMobileModule : XposedModule() {
                     } catch (e: Throwable) {
                         logX(Log.ERROR, TAG, "setAbsParams failed: ${e.message}")
                     }
+                    // 滑移率反馈（振感/视觉）参数下发：native 只关心"开不开"。
+                    // **六条通道各自映射后取大**（信号源与锚点全部写在 native
+                    // 常量区 `native/src/slip_feedback.c`，不在此下发——它们随
+                    // 实机标定频繁调整，放 Java 侧会让"调参"变成跨语言改动）。
+                    // 最大振动强度作用于 Java 侧振幅，由 OverlayManager 构造
+                    // SlipHaptic 时读取，同样不下发 native。
+                    try {
+                        val slipOn = settings?.slipFeedbackMode?.let {
+                            it != ModConfig.SlipFeedbackMode.OFF
+                        } ?: false
+                        NativeBridge.setSlipFeedbackParams(
+                            slipOn, ModConfig.SLIP_FEEDBACK_FULL_Z
+                        )
+                        logX(
+                            Log.INFO, TAG,
+                            "setSlipFeedbackParams on=$slipOn " +
+                                "fullZ=${ModConfig.SLIP_FEEDBACK_FULL_Z}"
+                        )
+                        // 标定探针：**与滑移率反馈同开关**（native 侧自限时 4 小时，
+                        // 重启游戏即重新计时）。
+                        // 用途 = 回归校验各通道锚点：跑一圈导出 ala_tool_native.log，
+                        // 看 SLIPprobe 的 agg 行（maxLon/maxLat/maxRearMin/maxRearZ/
+                        // speed/betaMax）与逐帧 seqLevel，即可回放任意场景的实际电平。
+                        //
+                        // 常开而非仅 debug：它每 0.5 秒落一组（含逐帧序列），
+                        // 自限时 4 小时（2026-10-03 从 10 分钟提高——10 分钟导致
+                        // "用户报某段有问题时那段已被关掉"，实测 13:03 关、13:08 无数据）。
+                        // 换来的是"用户报手感不对时日志里直接有实测数据"，
+                        // 省掉一轮"先让他装诊断包"的往返。
+                        // ⚠️ 代价：约 5KB/s 日志量（15 行/0.5s），会让 native 日志
+                        // 2MB 滚动窗口缩到 ~7 分钟。当前接受（诊断价值 > 滚动深度）。
+                        NativeBridge.setSlipFeedbackProbe(slipOn)
+                    } catch (e: Throwable) {
+                        logX(Log.ERROR, TAG, "setSlipFeedbackParams failed: ${e.message}")
+                    }
                     // 圈辅助配置下发（围场积分加成 + 零辅助金标的数据源）。
                     // ⚠️ 必须走 **原始配置四维**（LapAssistConfig.from），不能用上面
                     // 派生出的 enableTc/enableAbs——DEFAULT 模式下它们恒 true，

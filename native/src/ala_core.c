@@ -4,6 +4,7 @@
 
 #include "native_log.h"
 #include "pedal_hook.h"
+#include "slip_feedback.h"
 #include "drs_hook.h"
 #include "overtake_hook.h"
 #include "unlock_hook.h"
@@ -516,4 +517,61 @@ Java_tools_alamobile_mod_NativeBridge_queryTcAbsIndicator(JNIEnv *env, jclass cl
     jint abs_buf = abs_active;
     (*env)->SetIntArrayRegion(env, outTc, 0, 1, &tc_buf);
     (*env)->SetIntArrayRegion(env, outAbs, 0, 1, &abs_buf);
+}
+
+// 滑移率反馈参数下发（滑移率反馈功能的振感/视觉开关 + 满振点）。
+// 区间端点在**轮胎利用率轴**上（u = max_i hypot(|σ|/maxSlip, |α|/maxAngle)，
+// u=1 即该轮轮胎峰值）。Java 侧只传开关与 full_u，其余断点（起振 0.70、
+// 峰值处 0.25）是用户规格定死的，见 slip_feedback.h。
+// 低频调用（仅配置变更/启动时），不重装 hook。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_setSlipFeedbackParams(JNIEnv *env, jclass clazz,
+                                                            jboolean enabled,
+                                                            jfloat full_u) {
+    (void) env;
+    (void) clazz;
+    slip_feedback_set_params((int) enabled, full_u);
+}
+
+// 标定探针开关（诊断用；自限时 10 分钟后自动关）。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_setSlipFeedbackProbe(JNIEnv *env, jclass clazz,
+                                                           jboolean enabled) {
+    (void) env;
+    (void) clazz;
+    slip_feedback_set_probe((int) enabled);
+}
+
+// 查询滑移率反馈电平 0..1（SlipFeedbackView 主线程 Handler 轮询）。
+// outLevel = jfloat[1]，SetFloatArrayRegion 直写缓冲，无对象分配。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_querySlipFeedback(JNIEnv *env, jclass clazz,
+                                                        jfloatArray outLevel) {
+    (void) clazz;
+    float level = 0.0f;
+    slip_feedback_query(&level);
+    jfloat buf = level;
+    (*env)->SetFloatArrayRegion(env, outLevel, 0, 1, &buf);
+}
+
+// 按时间窗口批量取电平样本（第九轮流式路径，见 slip_feedback.h 的说明）。
+// out = jfloat[]，返回写入样本数；outNext 是 jint[1]，回传下一个待读序号。
+JNIEXPORT jint JNICALL
+Java_tools_alamobile_mod_NativeBridge_drainSlipFeedback(JNIEnv *env, jclass clazz,
+                                                        jfloatArray out, jint max,
+                                                        jint fromSeq, jintArray outNext) {
+    (void) clazz;
+    float buf[64];
+    int cap = (int) max;
+    if (cap > (int) (sizeof(buf) / sizeof(buf[0]))) {
+        cap = (int) (sizeof(buf) / sizeof(buf[0]));
+    }
+    unsigned int next = (unsigned int) fromSeq;
+    const int n = slip_feedback_drain(buf, cap, (unsigned int) fromSeq, &next);
+    if (n > 0) {
+        (*env)->SetFloatArrayRegion(env, out, 0, n, buf);
+    }
+    jint nextBuf = (jint) next;
+    (*env)->SetIntArrayRegion(env, outNext, 0, 1, &nextBuf);
+    return (jint) n;
 }
