@@ -292,6 +292,10 @@ static void crash_handler(int sig, siginfo_t *info, void *uctx) {
             append_report(snap, (size_t) sn);
         }
     }
+    // 3d. 把异步日志队列里尚未落盘的行尽力刷出（2026-10-04 异步化配套）。
+    // 主线程只入队，后台线程排空；崩溃可能发生在排空之前，此处补写。
+    // 只做 open/write/close，不加锁不分配。
+    native_log_flush();
     append_report("=== end ===\n", 12);
 
     // 4. 链式转发旧 handler（绝不能吞——Unity/系统崩溃上报依赖它）

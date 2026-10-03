@@ -42,6 +42,19 @@ void native_log_print(int prio, const char *tag, const char *fmt, ...);
  */
 int native_log_ring_snapshot(char *out, int cap, int max_lines);
 
+/**
+ * **崩溃前把异步日志队列尽力刷出去**（2026-10-04 异步化配套）。
+ *
+ * 日志改为后台线程异步落盘后，主线程只入队。进程若在后台线程排空前崩溃，
+ * 队列里尚未写盘的行会随进程一起丢。崩溃 handler 内调用本函数可把它们
+ * 补写到文件，尽量保住现场。
+ *
+ * ⚠️ 只做 open/write/close，**不加锁、不分配**，满足 async-signal-safe 约束；
+ * 队列可能正被后台线程消费，读到半行或重复一行都可能——best-effort，
+ * 比"什么都没有"好得多。
+ */
+void native_log_flush(void);
+
 /* 提供给各模块的便捷宏 */
 #define NLOGI(...) native_log_print(ANDROID_LOG_INFO, "AlaMobileTool", __VA_ARGS__)
 #define NLOGW(...) native_log_print(ANDROID_LOG_WARN, "AlaMobileTool", __VA_ARGS__)
