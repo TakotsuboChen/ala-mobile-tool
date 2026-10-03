@@ -160,6 +160,15 @@ sed -i '/<uses-permission android:name="com.android.vending.CHECK_LICENSE"\/>/d'
 # 4.6 加 fused.modules 声明（告诉系统这是融合 split 的单体包）
 # 在 LicenseActivity 声明后加
 sed -i 's|<activity android:exported="false" android:name="com.pairip.licensecheck.LicenseActivity"/>|<activity android:exported="false" android:name="com.pairip.licensecheck.LicenseActivity"/>\n        <meta-data android:name="com.android.dynamic.apk.fused.modules" android:value="UnityDataAssetPack"/>|' AndroidManifest.xml
+
+# 4.7 补 VIBRATE 权限（模块「滑移率反馈」的振感路需要）
+# ⚠️ 游戏官方 manifest **没有** android.permission.VIBRATE（aapt2 dump permissions
+# 实测确认）。模块跑在游戏进程里，故没有该权限就无法走 Vibrator 真振幅路——
+# 线性马达的最佳振感（滑移率 → 振幅连续映射）必须走它。共存版是我们自己的包，
+# 在这里补上；官版用户无此权限，模块会自动回退到免权限的
+# HapticFeedbackConstants 路径（见 app 侧 SlipHaptic 的两路设计）。
+# 加在 CHECK_LICENSE 删除之后，位置无所谓（uses-permission 顺序不影响语义）。
+sed -i '0,/<application/{s|<application|<uses-permission android:name="android.permission.VIBRATE"/>\n    <application|}' AndroidManifest.xml
 ```
 
 ### 阶段 5：删除 stamp 相关文件
