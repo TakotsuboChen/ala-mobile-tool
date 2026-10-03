@@ -598,7 +598,7 @@ class AlaMobileModule : XposedModule() {
                             "setSlipFeedbackParams on=$slipOn " +
                                 "fullZ=${ModConfig.SLIP_FEEDBACK_FULL_Z}"
                         )
-                        // 标定探针：**与滑移率反馈同开关**（native 侧自限时 4 小时，
+                        // 标定探针：**独立于功能开关**（native 侧自限时 4 小时，
                         // 重启游戏即重新计时）。
                         // 用途 = 回归校验各通道锚点：跑一圈导出 ala_tool_native.log，
                         // 看 SLIPprobe 的 agg 行（maxLon/maxLat/maxRearMin/maxRearZ/
@@ -609,9 +609,16 @@ class AlaMobileModule : XposedModule() {
                         // "用户报某段有问题时那段已被关掉"，实测 13:03 关、13:08 无数据）。
                         // 换来的是"用户报手感不对时日志里直接有实测数据"，
                         // 省掉一轮"先让他装诊断包"的往返。
-                        // ⚠️ 代价：约 5KB/s 日志量（15 行/0.5s），会让 native 日志
-                        // 2MB 滚动窗口缩到 ~7 分钟。当前接受（诊断价值 > 滚动深度）。
-                        NativeBridge.setSlipFeedbackProbe(slipOn)
+                        //
+                        // ⚠️ **2026-10-04 修正接线**：探针原先跟随 `slipOn`，于是
+                        // "关掉反馈"只能靠**重启游戏**才停探针（ConfigReceiver 热切换
+                        // 路径从不调 setSlipFeedbackProbe）——实机表现正是用户报的
+                        // 「关掉不恢复、重启才好」+「每 0.5 秒跳一帧」。
+                        // 探针是**诊断数据采集**，与"用户要不要这个功能"无关，故改为
+                        // 常量 true 常开：既符合"随时可抓数据"的原意，也让接线不再有
+                        // 第二个真相源（详见 native_log.c 的异步落盘说明——常开的代价
+                        // 已由异步写盘消除）。
+                        NativeBridge.setSlipFeedbackProbe(true)
                     } catch (e: Throwable) {
                         logX(Log.ERROR, TAG, "setSlipFeedbackParams failed: ${e.message}")
                     }
