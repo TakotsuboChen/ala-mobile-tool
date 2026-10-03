@@ -89,6 +89,13 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 - **信号源为游戏原生执行点**：ShadowHook 指令级拦截 RoadForce 内 ABS 滑移管理写入（命中 = 游戏真实介入，叠加该轮制动压力过滤排除油门打滑空转）；TC 为削减量判定叠加 25Hz 帧相位
 - 介入期间以 25Hz 方波闪烁，与游戏实际介入节奏同频；默认开启，可在 Overlay 控件区关闭
 
+#### 滑移率反馈（振感 + 视觉）
+- **六条通道各自映射后取大**，把「轮胎正在发生什么」翻译成振动强度与屏幕下缘的弓形光斑（与上缘的 TC/ABS 指示灯共用同一套弓形几何）
+- ① 纵向（刹车锁死/空转）② 横向 max（**最佳抓地力提示器**，硬封顶 1/4）③ 横向后轮 min（失控甩尾，可满振）④ **后轮空转（最高优先级，油门门控）** ⑤ 车身侧滑角（松油门后的惯性打转）⑥ 四轮集体饱和（高速宽滑）
+- 信号全部取自游戏自身的轮胎物理字段（滑移率、滑移角、轮面滑移速度），**不自行重算物理量**
+- 振感为 480ms 平顶波形 + 两级重发判据（稳定期零重发、真事件立即下发），视觉为电平驱动的连续透明度
+- 默认开启，可在 Overlay 控件区调整振感强度 / 视觉透明度 / 显示样式（弓形渐变 / 实心矩形）
+
 #### 内购解锁（Unlock / IAP Bypass）
 - 双重锁定路径：**Native inline Hook**（主路径）+ **Java 层 Xposed Hook**（辅助路径）
 - native 路径：`BillingManager.Awake` + `GetInstance`（兜底）+ 15 秒延迟 `forceUnlockNow` one-shot
@@ -328,6 +335,9 @@ Ala Mobile Tool (LSPosed 模块 APK)
 ├── GearShiftView           # 换挡按钮（Canvas View）
 ├── ToolButtonView          # 工具按钮（Canvas View）
 ├── TcAbsIndicatorView      # TC/ABS 介入指示灯（Canvas View）
+├── SlipFeedbackView        # 滑移率反馈弓形光斑（Canvas View，16ms 轮询）
+├── SlipHaptic              # 滑移率反馈振感（平顶波形 + 两级重发判据）
+├── SlipBowPainter          # 弓形光斑几何与渐变（与 TcAbsIndicatorView 共用）
 ├── OverlayManager          # WindowManager 覆盖层管理
 ├── OverlayEditView         # 编辑模式拖拽/缩放层（铺满整屏，矩形为内部状态）
 ├── EditHintView            # 编辑模式屏幕居中三行操作提示
@@ -392,6 +402,7 @@ tools/run-il2cpp-dumper.sh
 - [x] 原生 ABS 控制：开关 + 干预强度档位 + 最大制动压力（carController hook + per-wheel usesABS 双重门控 + 刹车请求饱和重映射）
 - [x] 工具按钮位置记忆（默认启用，无开关）
 - [x] TC/ABS 介入指示灯（游戏原生介入信号 + 25Hz 同步闪烁，默认启用）
+- [x] 滑移率反馈：六通道振动 + 弓形光斑（默认启用，可调强度/透明度/样式）
 - [ ] 多语言支持
 
 ---
