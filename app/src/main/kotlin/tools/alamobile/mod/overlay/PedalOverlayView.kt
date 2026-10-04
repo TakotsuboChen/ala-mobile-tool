@@ -401,23 +401,26 @@ class PedalOverlayView(
         Logger.i("pedal[$role] $action activeId=$activePointerId ptrCount=${event.pointerCount} $extra")
     }
 
-    // 布局诊断：view 实际屏幕位置/尺寸 vs 配置值。两者不一致 = 布局漂移
-    //（共存版 pairip 壳 relayout），是踏板值漂移的候选根因。
+    // 布局诊断：view 实际屏幕位置/尺寸。编辑模式拖拽/缩放后构造时快照
+    // [position] 会过期，**运行时布局才是触摸值换算的基准**（见
+    // updateValuesFromPointer），故这里只报 live 值，不再与快照对拍
+    // （对拍结果必然"不一致"，是噪声不是信号）。
     private fun layoutDiag(): String {
         val loc = IntArray(2)
         getLocationOnScreen(loc)
-        val screenHeight = resources.displayMetrics.heightPixels
-        return "onScreen=(${loc[0]},${loc[1]}) size=${width}x$height " +
-            "cfgTop=${position.topPx(screenHeight)} cfgH=${position.heightPx(context, screenHeight)}"
+        return "onScreen=(${loc[0]},${loc[1]}) size=${width}x$height basis=live"
     }
 
-    // 用 active pointer 的屏幕绝对坐标重建相对坐标。
-    // 不能用 event.getY()（相对 view 左上角）：共存版被 pairip
+    // 用 active pointer 的屏幕绝对坐标重建相对坐标（基准 = 运行时布局）。
+    // 不能用 event.getY() 直接当相对值（相对 view 左上角）：共存版被 pairip
     // 壳反复 relayout，view 实际位置漂移，相对坐标跟着跳，归一化后
-    // throttle/brake 值抖动。rawY 是屏幕绝对坐标，不受 view 位置影响；
-    // 配置值 (topPx/heightPx) 是用户配置的、不依赖运行时 layout，也稳定。
-    // 原版上 view 布局稳定，配置值 == 实际值，行为不变；
-    // 共存版上用配置值绕开漂移，行为与原版一致。
+    // throttle/brake 值抖动。故这里用屏幕绝对坐标减去**运行时**布局 top。
+    //
+    // ⚠️ 早期实现用的是构造时快照 [position]（配置值 topPx/heightPx）而非运行时
+    // 布局：那是 8 月为绕开 pairip relayout 漂移引入的，但 pairip relayout 假设
+    // 随后被 DOWN 布局对比日志证伪（三次 onScreen 完全一致），而它留下的副作用
+    // 是——编辑模式拖拽/缩放后快照不更新，判定基准永远停在原位（见
+    // updateValuesFromPointer 的坐标基准注释）。现改回运行时布局，与 onDraw 同源。
     //
     // 用 findPointerIndex(activePointerId) 而非 getRawY(0)：多指按下/抬起时
     // pointer index 会重新排列，index 0 可能不是控制踏板的手指，导致踏板值
@@ -437,10 +440,11 @@ class PedalOverlayView(
             Logger.i("pedal[$role] MOVE activeId=$activePointerId NOT_FOUND ptrCount=${event.pointerCount}")
             return
         }
-        val screenHeight = resources.displayMetrics.heightPixels
-        val viewTop = position.topPx(screenHeight)
-        val viewHeight = position.heightPx(context, screenHeight).toFloat()
-
+        // ⚠️ 坐标基准必须取**运行时布局**，不能取构造时快照的 [position]：
+        // 编辑模式拖拽/缩放后只改 target 的 layoutParams，快照不变——用快照
+        // 换算会让"视觉已移动、判定基准仍停在原位"，表现为点新位置没反应、
+        // 点旧位置反而给油（实机 2026-10-04）。
+        //
         // 双源坐标交叉校验（校验的是两套坐标通路的一致性，与运动方向、大小、
         // 速度完全正交——直接按满/快速拉动两源同步变化，天然放行，零误杀）。
         // rawY 走 mRawTransform 管道；yOnScreen 走 mTransform + 实时布局 top。
@@ -470,6 +474,14 @@ class PedalOverlayView(
         val yOnScreen = event.getY(pointerIndex) + loc[1]
         val rawX = event.rawXAt(pointerIndex)
         val xOnScreen = event.getX(pointerIndex) + loc[0]
+        // 运行时布局为基准（见上方注释）：布局已完成时一律信布局，仅在未布局
+        // （首帧 width==0）时回退快照 [position]，与 onDraw 的判据同源。
+        // top 用 getLocationOnScreen 的屏幕 y（与 rawY 同为屏幕绝对坐标，
+        // 父容器原点非 0 时也正确；本次已取，零额外开销）。
+        val laidOut = width > 0 && height > 0
+        val viewTop = if (laidOut) loc[1] else position.topPx(resources.displayMetrics.heightPixels)
+        val viewHeight =
+            (if (laidOut) height else position.heightPx(context, resources.displayMetrics.heightPixels)).toFloat()
         // range in-check 改裸比较：`in 0f..X` 每次创建 ClosedFloatingPointRange
         // 对象，同上属热路径隐藏分配。
         val absDiff = abs(rawY - yOnScreen)
@@ -486,17 +498,16 @@ class PedalOverlayView(
                 }
             }
             relativeYForDiag = rawY - viewTop
-            updateValues(relativeYForDiag, viewHeight)
         } else {
             val switched = absDiff > MISMATCH_SWITCH_PX
             relativeYForDiag = (if (switched) yOnScreen else rawY) - viewTop
-            updateValues(relativeYForDiag, viewHeight)
             if (switched && !sticky) {
                 stickyRawPolluted = true
                 cachedLocation[0] = loc[0]; cachedLocation[1] = loc[1]
             }
             logMismatch(event, pointerIndex, rawY, rawX, xOnScreen, yOnScreen, loc, switched)
         }
+        updateValues(relativeYForDiag, viewHeight)
         diagMaybeLogMove(pointerIndex, relativeYForDiag, viewHeight)
     }
 
