@@ -1080,6 +1080,20 @@ object ModConfig {
      * Saves a single overlay position into the existing config without
      * touching other keys. Safe to call from the target game process.
      *
+     * ⚠️ **同时刷新 [KEY_SAVED_AT]**（2026-10-04）：拖拽/缩放位置是"用户刚改过
+     * 配置"，必须让本地源在新鲜度仲裁里排到最新。旧实现只写 position 字段——
+     * 位置更新对仲裁完全不可见，只因 [mergePositionFromLocalPublic] **无条件**用
+     * local 的 position 覆盖仲裁赢家才侥幸生效。这是隐式依赖：一旦有人给该合并
+     * 逻辑加"只信更新的源"之类的优化，拖拽保存的位置就会静默失效（实机日志
+     * 实证：local ts 停在 4 天前，remote 一直赢仲裁）。
+     *
+     * ⚠️ 刷新 saved_at 的**前提是两个写方都代表真实配置变更**：该文件（游戏进程
+     * externalFilesDir 的 JSON）还有第二个写方 [ConfigReceiver]（收模块广播时
+     * 合并写非 position 字段）——它拷贝的是模块 [write] 带下来的 saved_at，同样
+     * 对应一次真实改动，不会把"没改过的配置"顶成"看起来更新"。两条写路径字段
+     * 不相交（本方法只碰 position + saved_at；ConfigReceiver 跳过全部 position），
+     * 不会互相覆盖对方的内容。若日后引入第三个写方，需重新审视这条前提。
+     *
      * If the shared directory cannot be created (e.g. missing storage
      * permission on Android 10+), the save is silently skipped so the
      * overlay editor does not crash the game.
@@ -1090,6 +1104,7 @@ object ModConfig {
             file.parentFile?.mkdirs()
             val json = if (file.exists()) JSONObject(file.readText()) else JSONObject()
             json.put(key, position.toJson())
+            json.put(KEY_SAVED_AT, System.currentTimeMillis())
             file.writeText(json.toString(2))
         } catch (_: Throwable) {
             // Storage may not be writable from the target game process; ignore.
