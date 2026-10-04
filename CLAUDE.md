@@ -31,7 +31,7 @@ Supported game version: **Ala Mobile 8.0.6 (versionCode 200150)**（2026-09-04 �
   - Java layer (libxposed API 102): module entry, overlay injection, configuration reading.
   - Native layer: ByteDance ShadowHook inline hooks on `libil2cpp.so` for gameplay logic.
 - Auto DRS / 主动空力（AA）：**hook `carModifier.OnDRSStateChanged`，捕捉「游戏允许开启」的信号**——状态机推进到 `Deployable(3)` 时游戏在此播 DRS 提示音（反汇编实证 `0x17600C4` 处 `cmp #3` → 播 drsAlert），此刻开启必然合法。收到信号后调 `carModifier.ManualDRSUsage()`（= 玩家按键的真实入口），3→4 的合法性校验/动画/音效/HUD 全部交给游戏。**一个 hook 点覆盖两种车、两套规则**：地效车 DRS 走物理触发区（`carModifier.OnTriggerEnter` + `isDRSGloballyEnabled`(0x101) + 圈数门槛），2026 主动空力走 waypoint 数组协程（`CheckActiveAeroAvailability` 查 `activeAerozone[]` + `isSafeForBoostAndActiveAero`(0x102) + `carType==DoubleDRSEra` 硬门）——两者区域判定方式截然不同（这就是"同赛道两套区域不同"的代码本质），但都汇聚到同一状态机事件，故**模块不需要分析赛道区域数据**。hook 恒装上（信号旁路式，不因开关为假而跳过），运行时开关走 `drs_set_active`。⚠️ `carModifier` 每车一份、`OnDRSStateChanged` 在所有车上触发，必须严格白名单（`icinp`(0xD8) == `pedal_get_controller()`，回落 `playercar`(0x9C)），否则会替 AI 车按 DRS。⚠️ **不要** hook `IRDSCarControllInput.drsToggle`——那是玩家按键入口，自动模式下无人按键、永远触发不了（旧实现即栽于此：hook 装上了却只会把所有玩家 DRS 请求吞掉）；也**不要**直接写 `_currentDRSState`（绕过 `OnDRSStateChanged` 会丢动画/音效/HUD/`previousDRSState`）。
-- 自锁型超车按键（`enableLatchOvertake`）：把 OTK（超车）**屏幕按钮**从「按住才生效」改成「点一下切换」——只改按键抬落语义，**是否允许开超车（ERS 是否解锁 / 电量是否够）完全仍由游戏判定**（模块一行都没改那些守卫，点了没反应与原生一致，也不补提示）。hook 点 = **OTK 按钮自己的**两个 UnityEvent 入口 `odometerHandler.TouchPressOTK`(0x1A0BE24) / `TouchReleaseOTK`(0x1A0BE40)：按下时若 `OvertakeActive`(0xC4) 已真 → 本次点按语义是"关"，转调游戏自己的 `HybridComponent.DisableOTK`(0x1A27494)（保动画/HUD/`UpdateHybridRNCs` 收尾）；抬起时若锁定态由本模块在该实例上建立且超车仍开着、`currentCapacity`(0x74) 仍非零 → 吞掉保持开启。⚠️ **不要改挂 `HybridComponent.EnableOTK`/`DisableOTK`**：它们虽也覆盖触摸路径（`TouchPressOTK` 尾部就是 `b EnableOTK`），但**不是按钮专属**——`HybridComponent.switchHModeUp`(0x1A27484) 是游戏自己的 OTK toggle，被 `odometerHandler.onHybridMapChange` 与 `odometerHandler.Update`（= **ERS 混动模式切换键**）调用，挂那里会把 ERS 模式键的"关超车"一并吞掉。hook 点依据 = 按钮专属方法（全 `.so` 零 `bl` 指向，引用者只有按钮 prefab：`datapack.unity3d` 内 `IRDS.UI.odometerHandler, Assembly-CSharp` + 两方法名 + 同文件 GUID），故无需 this 上的白名单（AI 超车走 `AIHybridManager.ManageOvertake` → `EnableDisableOvertakeModeSwitch`，不经此路）；**升版必核这个调用图**。没 hook 手柄路径（`IRDSPlayerControls.NitroMobile`）——用户诉求是屏幕按钮。hook 恒装上（开关在回调内判），运行时开关走 `overtake_set_active`。
+- 自锁式超车按键（`enableLatchOvertake`）：把 OTK（超车）**屏幕按钮**从「按住才生效」改成「点一下切换」——只改按键抬落语义，**是否允许开超车（ERS 是否解锁 / 电量是否够）完全仍由游戏判定**（模块一行都没改那些守卫，点了没反应与原生一致，也不补提示）。hook 点 = **OTK 按钮自己的**两个 UnityEvent 入口 `odometerHandler.TouchPressOTK`(0x1A0BE24) / `TouchReleaseOTK`(0x1A0BE40)：按下时若 `OvertakeActive`(0xC4) 已真 → 本次点按语义是"关"，转调游戏自己的 `HybridComponent.DisableOTK`(0x1A27494)（保动画/HUD/`UpdateHybridRNCs` 收尾）；抬起时若锁定态由本模块在该实例上建立且超车仍开着、`currentCapacity`(0x74) 仍非零 → 吞掉保持开启。⚠️ **不要改挂 `HybridComponent.EnableOTK`/`DisableOTK`**：它们虽也覆盖触摸路径（`TouchPressOTK` 尾部就是 `b EnableOTK`），但**不是按钮专属**——`HybridComponent.switchHModeUp`(0x1A27484) 是游戏自己的 OTK toggle，被 `odometerHandler.onHybridMapChange` 与 `odometerHandler.Update`（= **ERS 混动模式切换键**）调用，挂那里会把 ERS 模式键的"关超车"一并吞掉。hook 点依据 = 按钮专属方法（全 `.so` 零 `bl` 指向，引用者只有按钮 prefab：`datapack.unity3d` 内 `IRDS.UI.odometerHandler, Assembly-CSharp` + 两方法名 + 同文件 GUID），故无需 this 上的白名单（AI 超车走 `AIHybridManager.ManageOvertake` → `EnableDisableOvertakeModeSwitch`，不经此路）；**升版必核这个调用图**。没 hook 手柄路径（`IRDSPlayerControls.NitroMobile`）——用户诉求是屏幕按钮。hook 恒装上（开关在回调内判），运行时开关走 `overtake_set_active`。
 - Multiplayer: do not detect Photon; show a warning and a master toggle, leave responsibility to the user.
 
 ## High-level Architecture
@@ -150,7 +150,7 @@ Important output files:
 
 **`.tools/` 下的反汇编分析脚本**（gitignore 内，仅本地用；⚠️ 内存红线见下）——改 hook 前先跑一遍，别靠猜：
 - `python3 .tools/disasm_rva.py 0x{VA}...` — 窗口反汇编（按节表把 VA 换算成文件偏移）
-- `python3 .tools/find_callers.py 0x{目标VA}` — 流式扫全节找 `bl`/`b` 调用点。**选 hook 点的第一道关**：只有先确认"这个方法的调用方集合"，才能判断它是"某入口专属"还是"游戏内多处共享"（自锁型超车按键即栽过一次：`HybridComponent.EnableOTK/DisableOTK` 看似是触摸入口，实为游戏自己的 toggle 也被 ERS 模式键调用）
+- `python3 .tools/find_callers.py 0x{目标VA}` — 流式扫全节找 `bl`/`b` 调用点。**选 hook 点的第一道关**：只有先确认"这个方法的调用方集合"，才能判断它是"某入口专属"还是"游戏内多处共享"（自锁式超车按键即栽过一次：`HybridComponent.EnableOTK/DisableOTK` 看似是触摸入口，实为游戏自己的 toggle 也被 ERS 模式键调用）
 - `python3 .tools/find_field_access.py 0x{字段偏移} [ldr|str|...]` — 找某结构体偏移的全部读写点（ARM64 无符号立即数编码按高 22 位比对）
 - `python3 .tools/find_method.py 0x{VA}...` — VA → `类::方法` 查表（建自 `dump.cs`）
 - 环境变量 `SO=` 换目标 `.so`，`SECTIONS=` 给它对应节表（默认 8.0.6 共存版）
@@ -197,7 +197,7 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 - `app/src/main/kotlin/tools/alamobile/mod/util/VersionGate.kt` — version gating.
 - `native/src/ala_core.c` — native entry points and ShadowHook init.
 - `native/src/drs_hook.c` — auto DRS / active aero hook logic. hook `carModifier.OnDRSStateChanged`（见上「Auto DRS / 主动空力」条目的完整设计说明与白名单红线）。
-- `native/src/overtake_hook.c` / `native/src/overtake_hook.h` — 自锁型超车按键：hook OTK 按钮专属的 `odometerHandler.TouchPressOTK`/`TouchReleaseOTK`，把「按住」改成「点按切换」（见上「自锁型超车按键」条目的 hook 点红线）。
+- `native/src/overtake_hook.c` / `native/src/overtake_hook.h` — 自锁式超车按键：hook OTK 按钮专属的 `odometerHandler.TouchPressOTK`/`TouchReleaseOTK`，把「按住」改成「点按切换」（见上「自锁式超车按键」条目的 hook 点红线）。
 - `native/src/unlock_hook.c` — billing/unlock IL2CPP hook logic.
 - `native/src/music_hook.c` — main menu music mute + heartbeat signal.
 - `native/src/intro_hook.c` — intro V10 engine sound: mute introSound + one-shot signal.
