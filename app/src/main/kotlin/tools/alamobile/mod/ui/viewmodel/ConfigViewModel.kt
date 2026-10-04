@@ -196,7 +196,7 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
 data class ConfigUiState(
     val pedalMode: ModConfig.PedalMode,
     val enableAutoDrs: Boolean,
-    /** 自锁型超车按键：OTK 按钮由「按住」改为「点一下切换」。 */
+    /** 自锁式超车按键：OTK 按钮由「按住」改为「点一下切换」。 */
     val enableOvertakeLatch: Boolean,
     val disableAutoGear: Boolean,
     val enableManualShift: Boolean,

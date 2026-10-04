@@ -54,7 +54,7 @@ object ModConfig {
 
     // Feature toggles
     const val KEY_ENABLE_AUTO_DRS = "enable_auto_drs"
-    // 自锁型超车按键：把 OTK（超车）按钮从「按住才生效」改成「点一下切换」。
+    // 自锁式超车按键：把 OTK（超车）按钮从「按住才生效」改成「点一下切换」。
     // 只改按键抬落语义，是否允许开超车（ERS 解锁 / 电量）仍由游戏判定。
     const val KEY_ENABLE_LATCH_OVERTAKE = "enable_latch_overtake"
     const val KEY_DISABLE_AUTO_GEAR = "disable_auto_gear"
@@ -1537,7 +1537,7 @@ object ModConfig {
     data class Settings(
         val pedalMode: PedalMode,
         val enableAutoDrs: Boolean,
-        // 自锁型超车按键（OTK 按钮点按切换）。带默认值 —— PedalOverlayView 的
+        // 自锁式超车按键（OTK 按钮点按切换）。带默认值 —— PedalOverlayView 的
         // 命名参数部分构造（37 行）无需改动即可编译。
         val enableOvertakeLatch: Boolean = Defaults.ENABLE_LATCH_OVERTAKE,
         val disableAutoGear: Boolean,

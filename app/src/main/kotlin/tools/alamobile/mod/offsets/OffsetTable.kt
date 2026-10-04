@@ -49,7 +49,7 @@ object OffsetTable {
     // OnDRSStateChanged 会丢失动画/音效/HUD/previousDRSState 维护）。
     const val CAR_MODIFIER_MANUAL_DRS_USAGE: Long = 0x1767D94L
 
-    // ── 自锁型超车按键（odometerHandler）──
+    // ── 自锁式超车按键（odometerHandler）──
     // OTK 屏幕按钮的 UnityEvent 两个入口。**按钮专属**：全 .so 零 bl 指向，
     // 唯一引用者是按钮 prefab（datapack.unity3d，类名
     // `IRDS.UI.odometerHandler, Assembly-CSharp` + 这两个方法名 + 同文件 GUID，

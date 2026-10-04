@@ -268,7 +268,7 @@ object NativeBridge {
     )
 
     /**
-     * 自锁型超车按键 hooks 安装（不动 init() 参数签名，与 initLap/initIntro 同模式）。
+     * 自锁式超车按键 hooks 安装（不动 init() 参数签名，与 initLap/initIntro 同模式）。
      * hook HybridComponent.EnableOTK/DisableOTK —— 玩家 OTK 输入的唯一汇聚点
      *（屏幕按钮与手柄力学都经此），把「按住」改成「点一下切换」。游戏自己的
      * 合法性判定（ERS 是否解锁 / 电量是否够）完全不动。
@@ -281,7 +281,7 @@ object NativeBridge {
         disableOtk: Long
     )
 
-    /** 运行时开关自锁型超车按键（配置广播到达后调用，不重装 hook）。 */
+    /** 运行时开关自锁式超车按键（配置广播到达后调用，不重装 hook）。 */
     @JvmStatic
     external fun setOvertakeLatch(active: Boolean)
 
@@ -582,7 +582,7 @@ object NativeBridge {
     }
 
     /**
-     * 运行时同步「自锁型超车按键」开关（不重装 hook，同 [setDRSActiveSafe] 模式）。
+     * 运行时同步「自锁式超车按键」开关（不重装 hook，同 [setDRSActiveSafe] 模式）。
      * hook 恒装上，开关在 native 回调内判定。
      */
     @JvmStatic
@@ -592,7 +592,7 @@ object NativeBridge {
     }
 
     /**
-     * 自锁型超车按键 hooks 安装安全包装。native 不可用 / 加载失败时静默降级 ——
+     * 自锁式超车按键 hooks 安装安全包装。native 不可用 / 加载失败时静默降级 ——
      * 等价于功能不生效（按钮保持原生自复位语义），不影响游戏。
      */
     @JvmStatic

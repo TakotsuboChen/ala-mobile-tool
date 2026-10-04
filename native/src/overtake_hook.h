@@ -9,7 +9,7 @@ extern "C" {
 #endif
 
 /**
- * 自锁型超车按键（enableLatchOvertake）。
+ * 自锁式超车按键（enableLatchOvertake）。
  *
  * ── 要解决的问题 ─
  *
@@ -54,7 +54,7 @@ extern "C" {
  */
 
 typedef struct {
-    /** 自锁型超车按键总开关（配置项 enableLatchOvertake）。 */
+    /** 自锁式超车按键总开关（配置项 enableLatchOvertake）。 */
     bool enable_latch_overtake;
 
     /** odometerHandler::TouchPressOTK() —— OTK 按钮按下。 */

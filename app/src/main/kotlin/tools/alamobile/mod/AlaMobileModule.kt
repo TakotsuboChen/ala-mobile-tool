@@ -359,7 +359,7 @@ class AlaMobileModule : XposedModule() {
         val pedalMode = settings?.pedalMode ?: ModConfig.PedalMode.SINGLE
         val enableControlReplacement = pedalMode != ModConfig.PedalMode.OFF
         val enableAutoDrs = settings?.enableAutoDrs ?: false
-        // 自锁型超车按键：把 OTK 按钮从「按住才生效」改成「点一下切换」。
+        // 自锁式超车按键：把 OTK 按钮从「按住才生效」改成「点一下切换」。
         // 只改按键抬落语义，是否允许开超车（ERS 解锁 / 电量）仍由游戏判定。
         val enableOvertakeLatch = settings?.enableOvertakeLatch ?: false
         // 手动换挡开 ⇒ 关闭游戏自动换挡（disableAutoGear 由 enableManualShift 派生）。
@@ -564,7 +564,7 @@ class AlaMobileModule : XposedModule() {
                     } catch (e: Throwable) {
                         logX(Log.ERROR, TAG, "setDRSActive failed: ${e.message}")
                     }
-                    // 自锁型超车按键：hook EnableOTK/DisableOTK 两点（玩家 OTK 输入的
+                    // 自锁式超车按键：hook EnableOTK/DisableOTK 两点（玩家 OTK 输入的
                     // 唯一汇聚点），把「按住」改成「点一下切换」。hook 恒装上，开关在
                     // 回调内判；init 已按配置装好，这里显式同步一次运行时开关。
                     try {

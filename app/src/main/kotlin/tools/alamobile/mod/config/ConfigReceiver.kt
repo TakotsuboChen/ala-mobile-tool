@@ -109,7 +109,7 @@ class ConfigReceiver : BroadcastReceiver() {
                 Logger.i(TAG, "ConfigReceiver: setDRSActive $enableAutoDrs")
             }
 
-            // 实时同步「自锁型超车按键」开关——hook 恒装上（信号旁路式，见
+            // 实时同步「自锁式超车按键」开关——hook 恒装上（信号旁路式，见
             // overtake_hook.c），游戏运行中拨开关立即生效，不需要重装 hook。
             val enableOvertakeLatch = incoming.optBoolean("enable_latch_overtake", false)
             if (tools.alamobile.mod.NativeBridge.isAvailable) {

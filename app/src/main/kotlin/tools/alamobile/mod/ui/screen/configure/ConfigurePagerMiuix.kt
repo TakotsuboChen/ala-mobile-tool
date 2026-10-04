@@ -214,7 +214,7 @@ fun ConfigurePagerMiuix(
                                 onCheckedChange = actions::setEnableAutoDrs
                             )
                             SwitchPreference(
-                                title = "自锁型超车按键",
+                                title = "自锁式超车按键",
                                 summary = "恢复老版的点按切换形式",
                                 startAction = {
                                     Icon(

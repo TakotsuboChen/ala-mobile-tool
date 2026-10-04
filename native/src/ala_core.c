@@ -356,7 +356,7 @@ Java_tools_alamobile_mod_NativeBridge_setDRSActive(JNIEnv *env, jclass clazz, jb
     drs_set_active((int) active);
 }
 
-// ─ 自锁型超车按键早期安装（不动 init() 44 参数签名，与 initUnlock/initIntro 同模式）──
+// ─ 自锁式超车按键早期安装（不动 init() 44 参数签名，与 initUnlock/initIntro 同模式）──
 // 玩家在开场菜单/自由练习里就可能按 OTK，故与 DRS hook 一并走主路径尽早安装。
 JNIEXPORT void JNICALL
 Java_tools_alamobile_mod_NativeBridge_initOvertake(JNIEnv *env, jclass clazz,
@@ -383,7 +383,7 @@ Java_tools_alamobile_mod_NativeBridge_initOvertake(JNIEnv *env, jclass clazz,
     }
 }
 
-// 运行时开关自锁型超车按键（配置广播到达后调用，不重装 hook）。
+// 运行时开关自锁式超车按键（配置广播到达后调用，不重装 hook）。
 JNIEXPORT void JNICALL
 Java_tools_alamobile_mod_NativeBridge_setOvertakeLatch(JNIEnv *env, jclass clazz, jboolean active) {
     (void) env;
