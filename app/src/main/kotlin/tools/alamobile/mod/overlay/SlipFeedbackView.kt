@@ -83,8 +83,16 @@ class SlipFeedbackView(
     private val maxOpacity: Float = 1f,
     /** 视觉风格（弓形光晕 / 实心矩形），配置页可选。 */
     private val style: ModConfig.SlipVisualStyle = ModConfig.SlipVisualStyle.GLOW,
-    /** 每次轮询到新电平后的回调（振感路接在这里，与视觉共用同一次采样）。 */
-    private val onLevel: ((Float, Long) -> Unit)? = null,
+    /** 是否启用路肩采样（用户开关）。false 时**完全不碰 native**，开销为零。 */
+    private val kerbEnabled: Boolean = false,
+    /**
+     * 每次轮询到新电平后的回调（振感路接在这里，与视觉共用同一次采样）。
+     *
+     * ⚠️ **一次轮询回调两条通道**：抓地力电平与路肩（电平 + 目标颗粒率）。
+     * 两个振感必须合成**一条**波形下发（见 [HapticMixer] 类注释「一」），
+     * 所以只能有一个轮询源——分成两个 timer 会让两条波形互相打断。
+     */
+    private val onLevel: ((Float, Float, Float, Long) -> Unit)? = null,
 ) : View(context) {
 
     companion object {
@@ -100,6 +108,8 @@ class SlipFeedbackView(
 
     // 轮询缓冲（复用，无每帧分配）。
     private val levelBuf = FloatArray(1)
+    private val kerbLevelBuf = FloatArray(1)
+    private val kerbRateBuf = FloatArray(1)
 
     private var level = 0f
 
@@ -124,20 +134,35 @@ class SlipFeedbackView(
         // ⚠️ 读**当前值**（querySlipFeedback），不用 drain 队列。
         // 队列语义会把"入环那一刻的样本"推迟到下一次轮询才被读到（最多 +16ms），
         // 而电平是**状态量**不是事件流 —— 没有历史需要回放，只要最新的那一个。
+        var v = 0f
         try {
             NativeBridge.querySlipFeedback(levelBuf)
+            v = levelBuf[0]
         } catch (_: Throwable) {
             return
         }
-        val v = levelBuf[0]
         if (v != level) {
             level = v
             if (drawVisual) invalidate()
         }
+        // 路肩电平 + 颗粒率：同一个 60Hz 轮询里读，两条通道的相位天然对齐。
+        var kerbLevel = 0f
+        var kerbRate = 0f
+        if (kerbEnabled) {
+            try {
+                NativeBridge.queryKerbHaptic(kerbLevelBuf, kerbRateBuf)
+                kerbLevel = kerbLevelBuf[0]
+                kerbRate = kerbRateBuf[0]
+            } catch (_: Throwable) {
+                // native 不可用/异常时按"无路肩"处理，不影响抓地力通道。
+                kerbLevel = 0f
+                kerbRate = 0f
+            }
+        }
         // ⚠️ 振感回调**每轮都调**（不受 `v != level` 去重门控）：振感的重发判据
-        // 在 [SlipHaptic] 内部（滞回 + 限流），这里去重会让"电平平台期"少掉
+        // 在 [HapticMixer] 内部（滞回 + 限流），这里去重会让"电平平台期"少掉
         // 重新计时的机会，反而让限流窗口算错。
-        onLevel?.invoke(v, SystemClock.uptimeMillis())
+        onLevel?.invoke(v, kerbLevel, kerbRate, SystemClock.uptimeMillis())
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -215,7 +240,7 @@ class SlipFeedbackView(
         if (level != 0f) {
             level = 0f
         }
-        onLevel?.invoke(0f, SystemClock.uptimeMillis())
+        onLevel?.invoke(0f, 0f, 0f, SystemClock.uptimeMillis())
         Logger.i(TAG_SLIP, "SlipFeedbackView: poll stopped (detached)")
     }
 }

@@ -585,7 +585,7 @@ class AlaMobileModule : XposedModule() {
                     // 常量区 `native/src/slip_feedback.c`，不在此下发——它们随
                     // 实机标定频繁调整，放 Java 侧会让"调参"变成跨语言改动）。
                     // 最大振动强度作用于 Java 侧振幅，由 OverlayManager 构造
-                    // SlipHaptic 时读取，同样不下发 native。
+                    // HapticMixer 时读取，同样不下发 native。
                     try {
                         val slipOn = settings?.slipFeedbackMode?.let {
                             it != ModConfig.SlipFeedbackMode.OFF
@@ -598,6 +598,13 @@ class AlaMobileModule : XposedModule() {
                             "setSlipFeedbackParams on=$slipOn " +
                                 "fullZ=${ModConfig.SLIP_FEEDBACK_FULL_Z}"
                         )
+                        // 路肩振感反馈：同样只下发"开不开"。信号源 = 游戏自己的
+                        // `IRDSWheel.materialIndex(0x2E8) == -5`（反汇编实证就是
+                        // 游戏判定"在路肩上"的那一条，与路肩音逐帧同步），强度/
+                        // 颗粒率常量在 native/src/kerb_haptic.c，不下发。
+                        val kerbOn = settings?.kerbHapticEnabled ?: false
+                        NativeBridge.setKerbHapticEnabled(kerbOn)
+                        logX(Log.INFO, TAG, "setKerbHapticEnabled on=$kerbOn")
                         // 标定探针：**独立于功能开关**（native 侧自限时 4 小时，
                         // 重启游戏即重新计时）。
                         // 用途 = 回归校验各通道锚点：跑一圈导出 ala_tool_native.log，

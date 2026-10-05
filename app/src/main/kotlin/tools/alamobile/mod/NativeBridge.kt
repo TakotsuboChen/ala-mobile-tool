@@ -517,6 +517,34 @@ object NativeBridge {
     ): Int
 
     /**
+     * 路肩振感开关（低频：配置变更/启动时，不重装 hook）。
+     *
+     * 信号源 = `IRDSWheel.materialIndex(0x2E8) == -5`，**就是游戏自己判定
+     * "在路肩上"的那一条**——反汇编 `IRDSCarVisuals.TireModelVisuals`(0x1A68B4C)
+     * 实证游戏用同一个判断去置 `carController.kerbSound`，而
+     * `IRDSSoundController.kerbSoundUpdate` 读它播路肩音。所以本通道与游戏
+     * 路肩音**逐帧同步**，不需要模块自造判据。
+     *
+     * 强度/颗粒率全部在 native 常量区（`native/src/kerb_haptic.c`）——
+     * 它们随实机标定频繁调整，放 Java 侧会让"调参"变成跨语言改动。
+     */
+    @JvmStatic
+    external fun setKerbHapticEnabled(enabled: Boolean)
+
+    /**
+     * 查询路肩电平 0..1 与**目标颗粒率**（Hz，未压路肩时 0）。
+     *
+     * 颗粒率不在 native 侧合成波形——波形的段长/段数由 LRA 硬件能力决定，
+     * 属 Java 侧 [tools.alamobile.mod.overlay.HapticMixer] 的职责。native 只
+     * 回答"现在该多快"。
+     *
+     * @param outLevel float[1]，电平
+     * @param outRate  float[1]，目标颗粒率（Hz）
+     */
+    @JvmStatic
+    external fun queryKerbHaptic(outLevel: FloatArray, outRate: FloatArray)
+
+    /**
      * 初始化"隐藏游戏原生油门/刹车按钮"功能。
      * 启动 native 后台轮询线程，每 2 秒遍历 IRDSUIMobileControls 布局 GameObject
      * 子物体，按名字匹配 "Throttle"/"Brake" 并 SetActive(false)，跳过 "Clutch"。

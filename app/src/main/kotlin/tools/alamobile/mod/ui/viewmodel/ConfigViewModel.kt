@@ -63,6 +63,7 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
                 slipHapticIntensity = s.slipHapticIntensity,
                 slipVisualOpacity = s.slipVisualOpacity,
                 slipVisualStyle = s.slipVisualStyle,
+                kerbHapticEnabled = s.kerbHapticEnabled,
                 pedalDeadzone = s.pedalDeadzone,
                 pedalTransition = s.pedalTransition,
                 brakeTransition = s.brakeTransition,
@@ -102,6 +103,7 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
             enableTcAbsIndicator = s.enableTcAbsIndicator,
             slipFeedbackMode = s.slipFeedbackMode,
             slipHapticIntensity = s.slipHapticIntensity,
+            kerbHapticEnabled = s.kerbHapticEnabled,
             pedalDeadzone = s.pedalDeadzone,
             pedalTransition = s.pedalTransition,
             brakeTransition = s.brakeTransition,
@@ -160,6 +162,9 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
     fun setSlipFeedbackMode(v: ModConfig.SlipFeedbackMode) { _uiState.value = _uiState.value.copy(slipFeedbackMode = v); scheduleSave() }
     fun setSlipHapticIntensity(v: Int) { _uiState.value = _uiState.value.copy(slipHapticIntensity = v.coerceIn(20, 100)); scheduleSave() }
     fun setSlipVisualOpacity(v: Int) { _uiState.value = _uiState.value.copy(slipVisualOpacity = v.coerceIn(20, 100)); scheduleSave() }
+    // 路肩振感反馈：开关 + 强度。与抓地力反馈同构——切开关不清强度，
+    // 用户关掉再开回来保留上次调整值。
+    fun setKerbHapticEnabled(v: Boolean) { _uiState.value = _uiState.value.copy(kerbHapticEnabled = v); scheduleSave() }
     fun setPedalDeadzone(v: Float) { _uiState.value = _uiState.value.copy(pedalDeadzone = v); scheduleSave() }
     fun setPedalTransition(v: Float) { _uiState.value = _uiState.value.copy(pedalTransition = v); scheduleSave() }
     fun setBrakeTransition(v: Float) { _uiState.value = _uiState.value.copy(brakeTransition = v); scheduleSave() }
@@ -218,6 +223,8 @@ data class ConfigUiState(
     val slipHapticIntensity: Int,
     val slipVisualOpacity: Int,
     val slipVisualStyle: ModConfig.SlipVisualStyle,
+    // 路肩振感反馈：**只有开关**（默认关，2026-10-05 定案）。
+    val kerbHapticEnabled: Boolean,
     val pedalDeadzone: Float,
     val pedalTransition: Float,
     val brakeTransition: Float,
@@ -260,6 +267,7 @@ data class ConfigUiState(
         slipHapticIntensity = slipHapticIntensity,
         slipVisualOpacity = slipVisualOpacity,
         slipVisualStyle = slipVisualStyle,
+        kerbHapticEnabled = kerbHapticEnabled,
         pedalDeadzone = pedalDeadzone,
         pedalTransition = pedalTransition,
         brakeTransition = brakeTransition,

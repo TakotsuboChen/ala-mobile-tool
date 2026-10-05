@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
@@ -126,6 +127,8 @@ fun ConfigurePagerMiuix(
     val barColor = if (blurActive) Color.Transparent else colorScheme.surface
     // ABS 自定义切换警示弹窗：每次从默认切到自定义时弹（不是只弹首次）。
     var showAbsWarnDialog by remember { mutableStateOf(false) }
+    // 路肩振感开启确认弹窗：打开路肩开关且抓地力反馈含振感时弹（每次都要确认）。
+    var showKerbWarnDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -716,6 +719,42 @@ fun ConfigurePagerMiuix(
                                 checked = uiState.enableV10Sound,
                                 onCheckedChange = actions::setEnableV10Sound
                             )
+                            // ── 路肩振感反馈（抓地力反馈上方）──
+                            // 信号源**不是模块自造的判据**：`IRDSWheel.materialIndex
+                            // (0x2E8) == -5` 就是游戏自己判定"在路肩上"的那一条
+                            //（反汇编 IRDSCarVisuals.TireModelVisuals 0x1A68B4C 实证：
+                            // 游戏用同一个判断置 carController.kerbSound，而
+                            // IRDSSoundController.kerbSoundUpdate 读它播路肩音）。
+                            // 所以本功能与游戏路肩音逐帧同步，模块不分析赛道区域。
+                            //
+                            // ⚠️ **不再画任何分隔线**（2026-10-05 用户定案）：路肩
+                            // 原先"开关 + 强度滑条"两行，需要上下沿各一条线分组；滑条
+                            // 删除后只剩一行开关，分隔线已无意义 ⇒ 整块融入卡片，与
+                            // 上下项之间不再画线。同理抓地力反馈的上沿分隔线也**不再
+                            // 因路肩而抑制**（去掉 `&& !kerbHapticEnabled`）。
+                            SwitchPreference(
+                                title = "路肩振感反馈",
+                                summary = "压过路肩时的粗粒度振动",
+                                startAction = {
+                                    Icon(
+                                        tools.alamobile.mod.ui.KerbIcon,
+                                        modifier = Modifier.padding(end = 6.dp),
+                                        contentDescription = null,
+                                        tint = colorScheme.onBackground
+                                    )
+                                },
+                                checked = uiState.kerbHapticEnabled,
+                                // 打开时若抓地力反馈含振感（振感 / 全部）→ 先弹确认：
+                                // 路肩会覆盖抓地力振感，可能影响抓地力判断（用户 2026-10-05 定案）。
+                                // 关闭 / 抓地力无振感 → 直接生效。
+                                onCheckedChange = { on ->
+                                    if (on && uiState.slipFeedbackMode.hasHaptic) {
+                                        showKerbWarnDialog = true
+                                    } else {
+                                        actions.setKerbHapticEnabled(on)
+                                    }
+                                }
+                            )
                             // ── 抓地力反馈（杂项区最下方）──
                             // 把「当前滑移率离抓地力峰值有多远」变成可感知的反馈。
                             // 起振锚点是轮胎真实峰值 maxSlip（u = |σ|/maxSlip），
@@ -724,9 +763,11 @@ fun ConfigurePagerMiuix(
                             // 视觉条与指示灯同形（贴边横条），但走连续不透明度而非闪烁。
                             //
                             // 上方分隔线成组逻辑（与 TC/ABS 区同构）：模式 = 关闭时
-                            // 下方展开区全收，本行与上方「替换开场动画背景音」无分隔线、
-                            // 完全融入卡片；模式 ≠ 关闭（下方弹出折叠滑条卡片）时补一条
-                            // 上分隔线，把「开关行 + 折叠滑条」整块与上方隔开。
+                            // 下方展开区全收，本行与上方无分隔线、完全融入卡片；
+                            // 模式 ≠ 关闭（下方弹出折叠滑条卡片）时补一条上分隔线。
+                            // ⚠️ 2026-10-05：路肩反馈已无分隔线，此处**不再**抑制
+                            //（旧条件 `&& !kerbHapticEnabled` 是为避免与路肩下沿线
+                            // 重合变粗，现已无对象）。
                             AnimatedVisibility(
                                 visible = uiState.slipFeedbackMode != ModConfig.SlipFeedbackMode.OFF,
                                 enter = fadeIn(),
@@ -787,7 +828,7 @@ fun ConfigurePagerMiuix(
                                             },
                                             valueRange = 20f..100f,
                                             displayFormat = { v -> "${v.roundToInt()}%" },
-                                            icon = tools.alamobile.mod.ui.VibrationIcon
+                                            icon = tools.alamobile.mod.ui.VibrationIntensityIcon
 
                                         )
                                     }
@@ -848,6 +889,46 @@ fun ConfigurePagerMiuix(
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.textButtonColorsPrimary()
                 )
+            }
+        }
+    )
+
+    // 路肩振感开启确认（用户 2026-10-05 定案）：打开路肩开关且抓地力反馈含振感时
+    // 弹一次。左灰「取消」= 不改变开关；右蓝「确认」= 真正打开。
+    // 常驻组合树 + show 驱动（与 ABS 警示同模式，禁用 if 挂载以免丢退出动画）。
+    OverlayDialog(
+        show = showKerbWarnDialog,
+        onDismissRequest = { showKerbWarnDialog = false },
+        onDismissFinished = { },
+        content = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                top.yukonga.miuix.kmp.basic.Text(
+                    text = "开启路肩振感反馈后，在路肩上会覆盖抓地力振感反馈，可能会影响抓地力判断，确定要打开吗？",
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+                androidx.compose.foundation.layout.Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+                ) {
+                    TextButton(
+                        text = "取消",
+                        onClick = { showKerbWarnDialog = false },
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(modifier = Modifier.width(20.dp))
+                    TextButton(
+                        text = "确认",
+                        onClick = {
+                            showKerbWarnDialog = false
+                            actions.setKerbHapticEnabled(true)
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.textButtonColorsPrimary(),
+                    )
+                }
             }
         }
     )

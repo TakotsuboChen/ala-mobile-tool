@@ -124,6 +124,19 @@ object ModConfig {
     // 的退路，暴露到配置页反而会诱导用户选回那个被否定的矩形。
     const val KEY_SLIP_VISUAL_STYLE = "slip_visual_style"
 
+    // 路肩振感反馈（开关 + 振动强度，位于「抓地力反馈」上方，默认开启 50%）。
+    // 信号源**不是模块自造的判据**：`IRDSWheel.materialIndex(0x2E8) == -5` 就是
+    // 游戏自己判定"在路肩上"的那一条（反汇编 IRDSCarVisuals.TireModelVisuals
+    // 0x1A68B4C 实证：游戏用同一个判断置 carController.kerbSound，而
+    // IRDSSoundController.kerbSoundUpdate 读它播路肩音）。所以本功能与游戏
+    // 路肩音**逐帧同步**，无需模块分析赛道区域数据。强度/颗粒率常量在
+    // native/src/kerb_haptic.c。
+    const val KEY_KERB_HAPTIC_ENABLED = "kerb_haptic_enabled"
+    // ⚠️ 路肩**没有**独立的"振动强度"配置了（2026-10-05 删除）：走 primitive 的机型
+    //（API 30+ 绝大多数）HAL 忽略 `scale` ⇒ 滑条是空转的，留着会误导用户
+    //（拉了没反应）。路肩强度固定为满幅，见 HapticMixer。旧 JSON 里的
+    // `kerb_haptic_intensity` 键被**忽略**（读取端不再解析它），无需迁移。
+
     /**
      * 滑移率反馈的**纵向满振点**（归一化滑移 `s = |σ| / maxSlip` 轴）。
      *
@@ -745,6 +758,9 @@ object ModConfig {
         // 要关就用模式下拉选「关闭」或「振感」。
         const val SLIP_VISUAL_OPACITY = 100
         val SLIP_VISUAL_STYLE = SlipVisualStyle.GLOW
+        // 路肩振感反馈**默认关闭**（2026-10-05 用户定案）：开启会覆盖抓地力振感，
+        // 可能影响抓地力判断，故默认关 + 开启前弹窗确认（见配置页）。
+        const val KERB_HAPTIC_ENABLED = false
         val PEDAL_MODE = PedalMode.SINGLE
         const val PEDAL_DEADZONE = 0.05f
         const val PEDAL_TRANSITION = 0.5f
@@ -886,6 +902,10 @@ object ModConfig {
                 slipVisualStyle = SlipVisualStyle.from(
                     json.optString(KEY_SLIP_VISUAL_STYLE, Defaults.SLIP_VISUAL_STYLE.value)
                 ),
+                kerbHapticEnabled = json.optBoolean(
+                    KEY_KERB_HAPTIC_ENABLED,
+                    Defaults.KERB_HAPTIC_ENABLED
+                ),
                 pedalDeadzone = json.optDouble(
                     KEY_PEDAL_DEADZONE,
                     Defaults.PEDAL_DEADZONE.toDouble()
@@ -964,6 +984,7 @@ object ModConfig {
         put(KEY_SLIP_HAPTIC_INTENSITY, settings.slipHapticIntensity)
         put(KEY_SLIP_VISUAL_OPACITY, settings.slipVisualOpacity)
         put(KEY_SLIP_VISUAL_STYLE, settings.slipVisualStyle.value)
+        put(KEY_KERB_HAPTIC_ENABLED, settings.kerbHapticEnabled)
         put(KEY_PEDAL_DEADZONE, settings.pedalDeadzone.toDouble())
         put(KEY_PEDAL_TRANSITION, settings.pedalTransition.toDouble())
         put(KEY_BRAKE_TRANSITION, settings.brakeTransition.toDouble())
@@ -1298,6 +1319,7 @@ object ModConfig {
                 slipHapticIntensity = j.optInt(KEY_SLIP_HAPTIC_INTENSITY, Defaults.SLIP_HAPTIC_INTENSITY).coerceIn(20, 100),
                 slipVisualOpacity = j.optInt(KEY_SLIP_VISUAL_OPACITY, Defaults.SLIP_VISUAL_OPACITY).coerceIn(20, 100),
                 slipVisualStyle = SlipVisualStyle.from(j.optString(KEY_SLIP_VISUAL_STYLE, Defaults.SLIP_VISUAL_STYLE.value)),
+                kerbHapticEnabled = j.optBoolean(KEY_KERB_HAPTIC_ENABLED, Defaults.KERB_HAPTIC_ENABLED),
                 pedalDeadzone = j.optDouble(KEY_PEDAL_DEADZONE, Defaults.PEDAL_DEADZONE.toDouble()).toFloat(),
                 pedalTransition = j.optDouble(KEY_PEDAL_TRANSITION, Defaults.PEDAL_TRANSITION.toDouble()).toFloat(),
                 brakeTransition = j.optDouble(KEY_BRAKE_TRANSITION, Defaults.BRAKE_TRANSITION.toDouble()).toFloat(),
@@ -1527,6 +1549,7 @@ object ModConfig {
             slipHapticIntensity = Defaults.SLIP_HAPTIC_INTENSITY,
             slipVisualOpacity = Defaults.SLIP_VISUAL_OPACITY,
             slipVisualStyle = Defaults.SLIP_VISUAL_STYLE,
+            kerbHapticEnabled = Defaults.KERB_HAPTIC_ENABLED,
             pedalDeadzone = Defaults.PEDAL_DEADZONE,
             pedalTransition = Defaults.PEDAL_TRANSITION,
             brakeTransition = Defaults.BRAKE_TRANSITION,
@@ -1612,6 +1635,10 @@ object ModConfig {
         // 但**键独立**——详见 KEY_SLIP_VISUAL_OPACITY 处"为什么不复用同一个键"。
         val slipVisualOpacity: Int = Defaults.SLIP_VISUAL_OPACITY,
         val slipVisualStyle: SlipVisualStyle = Defaults.SLIP_VISUAL_STYLE,
+        // 路肩振感反馈：**只有开关**（默认关，2026-10-05 定案）。原先的独立强度
+        // 滑条已删除（primitive 路径下 HAL 忽略 scale ⇒ 空转）。信号源见
+        // KEY_KERB_HAPTIC_ENABLED 处说明。
+        val kerbHapticEnabled: Boolean = Defaults.KERB_HAPTIC_ENABLED,
         // 围场服务器地址覆盖（S4）。空 = 用 PaddockClient 内置默认。
         // 仅 ConfigActivity 设置页可改；游戏进程读取链路经 ConfigReceiver 广播 JSON。
         val paddockServer: String = Defaults.PADDOCK_SERVER

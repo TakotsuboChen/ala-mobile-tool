@@ -3,6 +3,7 @@
 #include "native_log.h"
 #include "crash_hook.h"
 #include "slip_feedback.h"
+#include "kerb_haptic.h"
 #include <dlfcn.h>
 #include <inttypes.h>
 #include <pthread.h>
@@ -987,6 +988,13 @@ static void proxy_car_controller(void *this) {
     // 白名单内调用，天然排除 AI 车；本函数只读，不写任何游戏字段。
     if (is_target_player_car(this)) {
         slip_feedback_tick(this);
+        // ★ 路肩振感采样：与抓地力反馈**同一个采样点、同一份白名单**。
+        // 读的是 IRDSWheel.materialIndex(0x2E8)，它由 ComputeWheelPhysics →
+        // UpdatePhysicsMaterialFactors 每帧刷新，故此处的值必是本帧新值。
+        // 判据 materialIndex==-5 就是游戏自己判定"在路肩上"的那一条（见
+        // kerb_haptic.h 的反汇编实证）——不发明判据，与游戏路肩音完全同步。
+        // 只读，不写任何游戏字段。
+        kerb_haptic_tick(this);
     }
 }
 

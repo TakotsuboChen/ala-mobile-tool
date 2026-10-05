@@ -170,6 +170,16 @@ class ConfigReceiver : BroadcastReceiver() {
                 )
             }
 
+            // 实时同步路肩振感反馈开关——native 侧每物理帧读玩家车 4 轮的
+            // materialIndex(0x2E8)，== -5（= 游戏自己判定的"在路肩上"，与路肩音
+            // 逐帧同步）时按车速出电平与颗粒率。disabled 时开销为零。
+            // 强度/颗粒率常量在 native/src/kerb_haptic.c，不在此下发。
+            val kerbOn = incoming.optBoolean("kerb_haptic_enabled", true)
+            if (tools.alamobile.mod.NativeBridge.isAvailable) {
+                tools.alamobile.mod.NativeBridge.setKerbHapticEnabled(kerbOn)
+                Logger.i(TAG, "ConfigReceiver: setKerbHapticEnabled on=$kerbOn")
+            }
+
             // 圈辅助配置同步（围场积分加成 / 零辅助金标数据源）——
             // 用户在游戏运行中改踏板模式/TC 档/ABS 档，必须立刻让 native 知道：
             // 否则"这一圈中途改过配置"检测不到，会把不一致的圈当成一致上报。

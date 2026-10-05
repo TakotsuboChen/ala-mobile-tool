@@ -72,11 +72,15 @@ class OverlayManager(context: Context) {
     private var gearView: GearShiftView? = null
     private var toggleButton: ToolButtonView? = null
     private var indicatorView: TcAbsIndicatorView? = null
-    // 滑移率反馈：底部全宽琥珀条（视觉路）。振感路走 slipHaptic（无 view）。
+    // 滑移率反馈：底部全宽琥珀条（视觉路）。振感路走 hapticMixer（无 view）。
     // 两路由同一个 view 的主线程轮询循环驱动（见 SlipFeedbackView 的 tick——
     // 避免两个 60Hz timer 各拉一路电平）。开关关时不创建，零开销。
+    //
+    // ⚠️ **路肩振感反馈共用这一个 view + 一个 mixer**：两条振感必须合成**一条**
+    // 波形下发（两个无限循环波形共用一台马达时谁后发谁赢 ⇒ 路肩上打滑只会剩下
+    // 一个）。所以路肩开关只决定 view 是否多读一路 native 电平，**不新建控件**。
     private var slipFeedbackView: SlipFeedbackView? = null
-    private var slipHaptic: SlipHaptic? = null
+    private var hapticMixer: HapticMixer? = null
     private var pedalEditView: OverlayEditView? = null
     private var brakeEditView: OverlayEditView? = null
     private var gearEditView: OverlayEditView? = null
@@ -265,7 +269,7 @@ class OverlayManager(context: Context) {
         indicatorView?.visibility = v
         // 滑移条跟随同一套可见性（GONE = 不绘制，视觉自然消失）。但**振感不受
         // 影响**——SlipFeedbackView 刻意不做可见性门控轮询，GONE 时仍在读电平
-        // 并回调 SlipHaptic（见该类 onVisibilityAggregated 处的说明）。
+        // 并回调 HapticMixer（见该类 onVisibilityAggregated 处的说明）。
         slipFeedbackView?.visibility = v
     }
 
@@ -499,11 +503,20 @@ class OverlayManager(context: Context) {
         // - 模式含视觉 → 画出琥珀条；
         // - 只含振感 → 同一个 view 只做轮询（1×1 px，不绘制、不挡触摸）。
         // 放在底部：指示灯占顶部，两者不重叠。
+        //
+        // ★ 路肩振感反馈（kerbHapticEnabled）也挂在这同一个 view 上：它没有
+        //   视觉、没有独立控件，只让轮询多读一路 native 电平。两条振感由
+        //   hapticMixer **合成一条波形**（见 HapticMixer 类注释「一」——两个
+        //   无限循环波形共用一台马达时谁后发谁赢，必须合并，否则"路肩上打滑"
+        //   只会剩下一个）。所以"要不要建 view/mixer"看的是**两者任一开启**。
         val slipMode = settings.slipFeedbackMode
-        if (slipMode != ModConfig.SlipFeedbackMode.OFF) {
+        val kerbOn = settings.kerbHapticEnabled
+        val slipHapticOn = slipMode.hasHaptic
+        val wantHaptic = slipHapticOn || kerbOn
+        if (slipMode != ModConfig.SlipFeedbackMode.OFF || kerbOn) {
             val indicatorHeight = (screenHeight / 30f).roundToInt()
-            val haptic = if (slipMode.hasHaptic) {
-                SlipHaptic.create(appContext, settings.slipHapticIntensity)
+            val mixer = if (wantHaptic) {
+                HapticMixer.create(appContext, settings.slipHapticIntensity)
             } else {
                 null
             }
@@ -516,16 +529,19 @@ class OverlayManager(context: Context) {
                 drawVisual = slipMode.hasVisual,
                 maxOpacity = settings.slipVisualOpacity / 100f,
                 style = settings.slipVisualStyle,
-                onLevel = haptic?.let { h ->
-                    { lv: Float, nowMs: Long -> h.tick(lv, nowMs) }
+                kerbEnabled = kerbOn,
+                onLevel = mixer?.let { m ->
+                    { slipLv: Float, kerbLv: Float, kerbRate: Float, nowMs: Long ->
+                        m.tick(slipLv, kerbLv, kerbRate, nowMs)
+                    }
                 },
             ).apply {
                 tag = "slip_feedback"
                 visibility = View.GONE
             }
-            haptic?.attachView(view)
+            mixer?.attachView(view)
             slipFeedbackView = view
-            slipHaptic = haptic
+            hapticMixer = mixer
             root?.addView(view, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT
@@ -534,8 +550,8 @@ class OverlayManager(context: Context) {
             })
         } else {
             slipFeedbackView = null
-            slipHaptic?.release()
-            slipHaptic = null
+            hapticMixer?.release()
+            hapticMixer = null
         }
 
         // 手动换挡关时不创建换挡控件；gearView 保持 null。
@@ -766,8 +782,8 @@ class OverlayManager(context: Context) {
         // 用户关开关/折叠控件后马达会一直响。view 的 onDetachedFromWindow 也会归零
         // 电平触发停机，但那依赖"回调链恰好走通"，这里是不依赖任何回调的硬兜底。
         slipFeedbackView = null
-        slipHaptic?.release()
-        slipHaptic = null
+        hapticMixer?.release()
+        hapticMixer = null
         pedalEditView = null
         brakeEditView = null
         gearEditView = null
@@ -794,8 +810,8 @@ class OverlayManager(context: Context) {
         indicatorView = null
         // 全量重建：同样必须先 release() 停掉可能在响的持续波形（见 removeGamingOverlays）。
         slipFeedbackView = null
-        slipHaptic?.release()
-        slipHaptic = null
+        hapticMixer?.release()
+        hapticMixer = null
         pedalEditView = null
         brakeEditView = null
         gearEditView = null

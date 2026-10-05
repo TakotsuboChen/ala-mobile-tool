@@ -5,6 +5,7 @@
 #include "native_log.h"
 #include "pedal_hook.h"
 #include "slip_feedback.h"
+#include "kerb_haptic.h"
 #include "drs_hook.h"
 #include "overtake_hook.h"
 #include "unlock_hook.h"
@@ -574,4 +575,28 @@ Java_tools_alamobile_mod_NativeBridge_drainSlipFeedback(JNIEnv *env, jclass claz
     jint nextBuf = (jint) next;
     (*env)->SetIntArrayRegion(env, outNext, 0, 1, &nextBuf);
     return (jint) n;
+}
+
+// 路肩振感开关（低频，配置变更/启动时）。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_setKerbHapticEnabled(JNIEnv *env, jclass clazz,
+                                                           jboolean enabled) {
+    (void) env;
+    (void) clazz;
+    kerb_haptic_set_enabled((int) enabled);
+}
+
+// 查询路肩电平 0..1 与目标颗粒率（Hz）——HapticMixer 主线程 Handler 轮询。
+// outLevel = jfloat[1]，outRate = jfloat[1]；native 直写缓冲，无对象分配。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_queryKerbHaptic(JNIEnv *env, jclass clazz,
+                                                      jfloatArray outLevel,
+                                                      jfloatArray outRate) {
+    (void) clazz;
+    float level = 0.0f, rate = 0.0f;
+    kerb_haptic_query(&level, &rate);
+    jfloat lbuf = level;
+    jfloat rbuf = rate;
+    (*env)->SetFloatArrayRegion(env, outLevel, 0, 1, &lbuf);
+    (*env)->SetFloatArrayRegion(env, outRate, 0, 1, &rbuf);
 }
