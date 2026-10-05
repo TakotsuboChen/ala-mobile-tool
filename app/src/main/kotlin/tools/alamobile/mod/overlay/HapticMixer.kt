@@ -5,6 +5,8 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -384,8 +386,51 @@ abstract class HapticMixer internal constructor() {
         private const val KERB_FULL_PCT = 100
         private const val KERB_FULL_SCALE = 1f
 
-        /** [Fallback] 无路肩时的固定叩击间隔：≈31Hz，**越过"脉动"感知上限**。 */
-        private const val FALLBACK_INTERVAL_MS = 22L
+        /**
+         * [Fallback] **抓地力**通道的叩击间隔（由独立 ticker 驱动，见 [Fallback.gripTicker]）。
+         *
+         * ## ⚠️ 这个数字决定"绵密"还是"哒哒哒"，是官版手感的唯一旋钮
+         *
+         * 官版（`com.Vince`）没有 VIBRATE 权限 ⇒ 走 [Fallback]（`performHapticFeedback`
+         * 免权限路），**无法下发自定义波形**——能传 `VibrationEffect` 的 `vibrate()`
+         * 在服务端 `VibratorManagerService.vibrateWithPermissionCheck` 里被
+         * `enforceCallingOrSelfPermission("android.permission.VIBRATE", "vibrate")`
+         * 拦下（设备 services.jar smali 实证），而免权限的 `performHapticFeedback`
+         * 只接受 **int 语义常量**、effect 由系统预置表生成（客户端插不进字节）。
+         * ⇒ 共存版那种 `createWaveform(96×5ms, repeat = 0)` 的平顶无限循环波形
+         * 官版**物理上做不到**，只能用高频叩击逼近"LRA 持续通电"。
+         *
+         * ## 判据：官方的振铃窗口
+         *
+         * Android *Haptics design principles* 明文：一次 10~20ms 的输入之后，
+         * **执行器还会继续振铃 20~50ms**。⇒ 只要叩击间隔落在这个振铃窗口内，
+         * 下一次叩击就赶在马达回落之前 ⇒ 机械上连续 ⇒ 听感绵密。
+         * 反之间隔 > 振铃时长（原值 22ms 叠 16ms 轮询量化后 ≈32ms）就会
+         * "敲一下、停一下"⇒ **"类似路肩的哒哒哒"**（用户 2026-10-05 实机反馈）。
+         *
+         * ## ⚠️ 必须由独立 ticker 驱动，不能只靠 60Hz 轮询
+         *
+         * [fire] 只被 [SlipFeedbackView] 的 16ms 轮询调用 ⇒ 叩击率被**硬钳在
+         * 62.5Hz**：常量写多小都没用，两次 `fire` 之间本来就隔 16ms。所以抓地力
+         * 改由 [Fallback.gripTicker]（100Hz）独立驱动——本常量才真正生效。
+         *
+         * ⚠️ 与 [FALLBACK_KERB_MIN_INTERVAL_MS] **绝不能合并**：两者诉求相反
+         * （抓地力要连续、路肩要离散），共用一个常量会让其中一条必然做错——
+         * 这正是 2026-10-05 那个 bug 的结构性成因（抓地力被动继承了路肩的节奏）。
+         */
+        private const val FALLBACK_GRIP_INTERVAL_MS = 10L
+
+        /**
+         * [Fallback] **路肩**通道的叩击间隔下限。
+         *
+         * 路肩要的就是**离散撞击**（"哒哒哒"是它的设计目标，不是 bug），故下限
+         * 必须 ≥22ms（≈45Hz，flutter 区，见类注释「二」）。
+         *
+         * ⚠️ **绝不能与 [FALLBACK_GRIP_INTERVAL_MS] 合并**：两者诉求相反（抓地力
+         * 要连续、路肩要离散），共用一个常量会让其中一条必然做错——这正是
+         * 2026-10-05 那个 bug 的结构性成因（抓地力被动继承了路肩的节奏）。
+         */
+        private const val FALLBACK_KERB_MIN_INTERVAL_MS = 22L
 
         /**
          * 单个波形段时长。**必须 ≥ HAL 的 `rampStepDurationMs`**（本机 5ms，
@@ -972,19 +1017,45 @@ abstract class HapticMixer internal constructor() {
      * 路径 C：**免权限**（[View.performHapticFeedback]）。
      *
      * 官方文档明确「using HapticFeedbackConstants with a View doesn't require
-     * the VIBRATE permission」。代价是没有任何幅度/波形控制，只能"敲一下子"，
-     * 所以这条路**做不到真正的绵密**——只能在节奏上尽量贴近：
+     * the VIBRATE permission」。代价是**没有任何幅度/波形控制**——这条路做不到
+     * 共存版那种 `createWaveform(96×5ms, repeat = 0)` 的平顶无限循环波形
+     * （能传 `VibrationEffect` 的 `vibrate()` 事务在服务端
+     * `VibratorManagerService.vibrateWithPermissionCheck` 里有
+     * `enforceCallingOrSelfPermission("android.permission.VIBRATE", "vibrate")`，
+     * 反汇编实证），**只能用高频叩击逼近"LRA 持续通电"**。
      *
-     * - **无路肩**：固定 [FALLBACK_INTERVAL_MS]（≈31Hz）反复叩击，强度退化为
-     *   三档常量选择。
-     * - **有路肩**：叩击间隔改为路肩颗粒周期 `1000/rateHz`（20Hz→50ms，
-     *   45Hz→22ms）——这正是"颗粒率随车速变化"在这条路上的自然表达：
-     *   每次叩击 = 一次路肩撞击。强度取两通道的较大者。
+     * ## 两个通道的节奏是**相反**的，必须分开计时
+     *
+     * | 通道 | 目标手感 | 叩击间隔 | 理由 |
+     * |---|---|---|---|
+     * | 抓地力 | **连续绵密** | [FALLBACK_GRIP_INTERVAL_MS]（10ms，≈62Hz 以上） | 推过 60Hz 的 flutter/hum 分界，LRA 来不及回落 |
+     * | 路肩 | **离散撞击** | `max(1000/rateHz, [FALLBACK_KERB_MIN_INTERVAL_MS])`（≥22ms） | 颗粒率随车速；下限卡在 flutter 区 |
+     *
+     * ⚠️ **绝不能共用一个常量 / 一个计时器**——2026-10-05 的 bug 就是这么来的：
+     * 两者共用 22ms（≈31Hz，落在 flutter 区），抓地力被动继承了路肩的节奏 ⇒
+     * 官版抓地力听感 = 「类似路肩的哒哒哒」（用户实机反馈）。抓地力与路肩在
+     * `tick()` 层已经是互斥的（路肩优先），这里也必须各自独立。
      */
     class Fallback : HapticMixer() {
 
         private companion object {
-            /** 强度档 → 候选常量（每档两个，按 ROM 差异取 SDK 支持的第一个）。 */
+            /**
+             * 强度档 → 候选常量（每档两个，按 ROM 差异取 SDK 支持的第一个）。
+             *
+             * ## ⚠️ 三档只恢复"强弱"，**不解决"哒"**
+             *
+             * 2026-10-06 实测两条已证伪的路线（都在官版实机跑过）：
+             * ① 把叩击间隔压到 13~17ms（独立 ticker）⇒ 用户："**更快的**哒哒哒"；
+             * ② 去掉强度档、全程只用 `CLOCK_TICK`（唯一"供重复使用"的常量）⇒
+             *    用户："还是快速的哒哒哒，且**判断不了强弱**"。
+             *
+             * ⇒ 免权限路（[View.performHapticFeedback]）**做不出绵密**：它只接受
+             * 语义常量、效果由系统预置表生成，每次 `requestEnd` 都打断上一次 ⇒
+             * 无论多密都是"敲一下、掐掉、再敲一下"。这是 API 边界，不是参数问题。
+             *
+             * ⇒ 既然绵密做不到，就**别把强度也赔进去**：恢复三档，保住"能判断
+             * 强弱"这个功能维度。
+             */
             val LEVEL_CANDIDATES: Array<IntArray> = arrayOf(
                 // 最弱：极轻的"滴答"。
                 intArrayOf(
@@ -1010,8 +1081,43 @@ abstract class HapticMixer internal constructor() {
 
         private var view: View? = null
 
-        /** 上一次叩击时刻（这条路是事件流而非持续输出，故单独计时）。 */
-        private var lastTapMs = 0L
+        /**
+         * 抓地力通道的**独立高频 ticker**。
+         *
+         * ## 为什么必须脱离 60Hz 轮询
+         *
+         * 本路径唯一的连续感来源是"叩击间隔 ≤ LRA 振铃时长"（见 [FALLBACK_GRIP_INTERVAL_MS]
+         * 的论证）。而 [fire] 只被 [SlipFeedbackView] 的 16ms 轮询调用 ⇒ **叩击率被
+         * 硬钳在 62.5Hz**：把常量写成 10ms 也没用，因为两次 `fire` 之间本来就隔 16ms。
+         * 所以要用一个**比轮询更快**的 ticker 独立驱动抓地力叩击。
+         *
+         * ⚠️ 只在抓地力激活时跑，电平归零即 `removeCallbacks`（见 [stopGripTicker]）——
+         * 常驻轮询会让马达在没信号时也被反复唤醒。
+         */
+        private val gripTicker = object : Runnable {
+            override fun run() {
+                val v = view
+                val level = gripLevel
+                if (v == null || level < MIN_TRIGGER_LEVEL) {
+                    // view 已摘除或电平归零：自己退出并复位标志，避免"标志为真但
+                    // 回调已死"导致后续再也启动不起来。
+                    gripTickerRunning = false
+                    return
+                }
+                fireOne(v, level)
+                handler.postDelayed(this, FALLBACK_GRIP_INTERVAL_MS)
+            }
+        }
+
+        private val handler = Handler(Looper.getMainLooper())
+
+        /** 最近一次 [fire] 收到的抓地力电平（ticker 据此叩击）。 */
+        private var gripLevel = 0f
+
+        private var gripTickerRunning = false
+
+        /** **路肩通道**上一次叩击时刻（路肩走事件流，与 ticker 分开计时）。 */
+        private var lastKerbTapMs = 0L
 
         // 没有持续输出能力：只能按节奏反复叩击（见基类 continuous 的说明）。
         override val continuous: Boolean get() = false
@@ -1022,20 +1128,71 @@ abstract class HapticMixer internal constructor() {
             this.view = view
         }
 
+        /**
+         * ⚠️ **电平归零必须停 ticker 并清电平**。
+         *
+         * [gripLevel] 只在 [fire] 里更新，而 `fire` 在电平跌破 [MIN_TRIGGER_LEVEL]
+         * 时**根本不会被调用**（基类 `tick` 走归零分支直接 return）⇒ 电平会永久
+         * 冻结在最后一次驾驶的值上，ticker 也就永远停不下来（马达无限叩击）。
+         * 基类归零分支会调 [onLevelZero]，这是唯一可靠的清零点。
+         */
+        override fun onLevelZero() {
+            stopGripTicker()
+            gripLevel = 0f
+            lastKerbTapMs = 0L
+        }
+
         override fun fire(slip: Float, kerb: Float, rateHz: Float, grainOn: Boolean) {
             val v = view ?: return
             val now = SystemClock.uptimeMillis()
-            // 路肩：叩击间隔 = 颗粒周期（速率随车速）；无路肩：固定 31Hz。
-            val interval = if (grainOn && rateHz > 1f) {
-                (1000f / rateHz).toLong().coerceAtLeast(FALLBACK_INTERVAL_MS)
-            } else {
-                FALLBACK_INTERVAL_MS
-            }
-            if (lastTapMs != 0L && now - lastTapMs < interval) return
-            lastTapMs = now
 
-            val peak = if (slip > kerb) slip else kerb
-            val idx = (peak * 3f).toInt().coerceIn(0, 2)
+            if (grainOn && rateHz > 1f) {
+                // ── 路肩：**事件流**，叩击间隔 = 颗粒周期（速率随车速），下限 22ms ──
+                // 路肩要的就是**离散撞击**（哒哒哒是它的设计目标），所以下限卡在
+                // flutter 区（≈45Hz），且**不受 ticker 影响**（ticker 只管抓地力）。
+                stopGripTicker()
+                val interval = (1000f / rateHz).toLong()
+                    .coerceAtLeast(FALLBACK_KERB_MIN_INTERVAL_MS)
+                if (lastKerbTapMs != 0L && now - lastKerbTapMs < interval) return
+                lastKerbTapMs = now
+                // ⚠️ 路肩期间**强度只取路肩电平**，不与抓地力取大。
+                // `tick()` 里"路肩优先"已经把抓地力排除在 peak 之外，若这里再用
+                // `max(slip, kerb)` 就把它从后门放回来了（共存版 Envelope.fire 是
+                // 严格只用 kerb 的，两路必须一致）。
+                fireOne(v, kerb)
+                return
+            }
+
+            // ── 抓地力：交给独立 ticker（间隔 [FALLBACK_GRIP_INTERVAL_MS]，远快于轮询）──
+            lastKerbTapMs = 0L
+            gripLevel = slip
+            startGripTicker()
+        }
+
+        /** 启动抓地力 ticker（已在跑则只更新电平，不重排）。 */
+        private fun startGripTicker() {
+            if (gripTickerRunning) return
+            gripTickerRunning = true
+            handler.post(gripTicker)
+        }
+
+        /** 停抓地力 ticker（切到路肩 / 电平归零 / view 摘除时调）。 */
+        private fun stopGripTicker() {
+            if (!gripTickerRunning) return
+            gripTickerRunning = false
+            handler.removeCallbacks(gripTicker)
+        }
+
+        /**
+         * 按电平选强度档并叩一下。
+         *
+         * ⚠️ 这条路**没有幅度维度**（`performHapticFeedback` 只接受语义常量，
+         * 实际效果由系统预置表决定），所以"强度"只能退化为**选哪个常量**。
+         * 三档映射是唯一可用的表达——**别去掉它**：去掉后用户"判断不了强弱"
+         * （2026-10-06 实测），而"哒"的问题**本来就不在这里**（见 [LEVEL_CANDIDATES]）。
+         */
+        private fun fireOne(v: View, level: Float) {
+            val idx = (level * 3f).toInt().coerceIn(0, 2)
             val constant = LEVEL_CANDIDATES[idx].firstOrNull { it != 0 }
                 ?: HapticFeedbackConstants.VIRTUAL_KEY
             runCatching {
@@ -1044,8 +1201,10 @@ abstract class HapticMixer internal constructor() {
         }
 
         override fun stopOutput() {
-            // 免权限路是离散叩击，没有"持续输出"要停，重置计时即可。
-            lastTapMs = 0L
+            // 免权限路是离散叩击，没有"持续输出"要停：停 ticker + 清计时。
+            stopGripTicker()
+            gripLevel = 0f
+            lastKerbTapMs = 0L
         }
     }
 }
