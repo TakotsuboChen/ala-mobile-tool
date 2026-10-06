@@ -8,6 +8,7 @@
 #include "kerb_haptic.h"
 #include "drs_hook.h"
 #include "overtake_hook.h"
+#include "next_lap_hook.h"
 #include "unlock_hook.h"
 #include "music_hook.h"
 #include "intro_hook.h"
@@ -390,6 +391,36 @@ Java_tools_alamobile_mod_NativeBridge_setOvertakeLatch(JNIEnv *env, jclass clazz
     (void) env;
     (void) clazz;
     overtake_set_active((int) active);
+}
+
+// ─ 禁止删除下一圈成绩（不动 init() 44 参数签名，与 initOvertake 同模式）──
+// 玩家一进赛道就可能冲出限制，故与 DRS/overtake hook 一并走主路径尽早安装。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_initNextLap(JNIEnv *env, jclass clazz,
+                                                  jboolean enable_protect_next_lap,
+                                                  jlong invalidate_lap) {
+    (void) env;
+    (void) clazz;
+
+    next_lap_hook_config_t nl_cfg = {
+        .enable_protect_next_lap = (bool) enable_protect_next_lap,
+        .invalidate_lap_offset = (uintptr_t) invalidate_lap,
+    };
+
+    LOGI("initNextLap: protect=%d invalidateLap=0x%lx",
+         (int) enable_protect_next_lap, (unsigned long) invalidate_lap);
+
+    if (!next_lap_install_hooks(&nl_cfg)) {
+        LOGE("Failed to install next-lap hooks");
+    }
+}
+
+// 运行时开关禁止删除下一圈成绩（配置广播到达后调用，不重装 hook）。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_setProtectNextLap(JNIEnv *env, jclass clazz, jboolean active) {
+    (void) env;
+    (void) clazz;
+    next_lap_set_active((int) active);
 }
 
 JNIEXPORT void JNICALL

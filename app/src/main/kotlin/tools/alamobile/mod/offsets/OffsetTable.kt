@@ -66,6 +66,18 @@ object OffsetTable {
     // HybridComponent.DisableOTK —— 解锁路径转调的游戏入口（保持动画/HUD 收尾）。
     const val HYBRID_COMPONENT_DISABLE_OTK: Long = 0x1A27494L
 
+    // ── 禁止删除下一圈成绩（odometerHandler）──
+    // odometerHandler.InvalidateLap(float trackPercentage, bool isInPit) —— 赛道
+    // 限制触发的"作废圈速"唯一入口。trackPercentage > 0.8（.rodata 0x929B2C）
+    // 时连带作废下一圈（alreadyInvalidated[1]=1 + "This and next lap times
+    // deleted"），否则只作废本圈（"Lap time deleted"）。
+    // 模块 hook 它并在开关开启时把 trackPercentage 压到 0 → 游戏自己走 <=0.8
+    // 分支（标志/文案/状态机全部自然正确）。见 native/src/next_lap_hook.c。
+    // ⚠️ 升版必核：全 .so 唯一调用者仍是 carModifier.TractionControlDynamicAssist
+    //（其唯一调用者 carModifier.Update 调用前有 playercar(0x9C) 守卫），
+    // 且 0.8f 阈值与两处 fcmp 仍在方法内。
+    const val ODOMETER_HANDLER_INVALIDATE_LAP: Long = 0x1A0DA2CL
+
     // carModifier 实例字段偏移（0xD8 icinp / 0x9C playercar / 0xF8 _currentDRSState）
     // 按仓库惯例以 native 侧 `#define OFF_*` 维护——字段偏移的升版核对清单
     // 就是 native 里全部 OFF_* 常量（见 CLAUDE.md），不在本表登记。

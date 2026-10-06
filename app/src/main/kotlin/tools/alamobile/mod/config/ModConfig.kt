@@ -57,6 +57,10 @@ object ModConfig {
     // 自锁式超车按键：把 OTK（超车）按钮从「按住才生效」改成「点一下切换」。
     // 只改按键抬落语义，是否允许开超车（ERS 解锁 / 电量）仍由游戏判定。
     const val KEY_ENABLE_LATCH_OVERTAKE = "enable_latch_overtake"
+    // 禁止删除下一圈成绩：赛道后段（trackPercentage > 0.8）冲出赛道限制时，
+    // 游戏会连带作废下一圈成绩。开启后只作废本圈（改写 InvalidateLap 的
+    // trackPercentage 参数，让游戏自己走 <=0.8 分支）。
+    const val KEY_ENABLE_PROTECT_NEXT_LAP = "enable_protect_next_lap"
     const val KEY_DISABLE_AUTO_GEAR = "disable_auto_gear"
     const val KEY_ENABLE_MANUAL_SHIFT = "enable_manual_shift"
     const val KEY_ENABLE_UNLOCK = "enable_unlock"
@@ -726,6 +730,9 @@ object ModConfig {
     private object Defaults {
         const val ENABLE_AUTO_DRS = false
         const val ENABLE_LATCH_OVERTAKE = false
+        // 禁止删除下一圈成绩：默认开启（用户定案 2026-10-06）——游戏原生"连带
+        // 删除下一圈"对刷圈体验损害大，作为默认改善直接生效；用户仍可在配置页关闭。
+        const val ENABLE_PROTECT_NEXT_LAP = true
         const val DISABLE_AUTO_GEAR = false
         const val ENABLE_MANUAL_SHIFT = false
         const val ENABLE_UNLOCK = false
@@ -852,6 +859,10 @@ object ModConfig {
                     KEY_ENABLE_LATCH_OVERTAKE,
                     Defaults.ENABLE_LATCH_OVERTAKE
                 ),
+                enableProtectNextLap = json.optBoolean(
+                    KEY_ENABLE_PROTECT_NEXT_LAP,
+                    Defaults.ENABLE_PROTECT_NEXT_LAP
+                ),
                 disableAutoGear = json.optBoolean(
                     KEY_DISABLE_AUTO_GEAR,
                     Defaults.DISABLE_AUTO_GEAR
@@ -962,6 +973,7 @@ object ModConfig {
         put(KEY_PEDAL_MODE, settings.pedalMode.value)
         put(KEY_ENABLE_AUTO_DRS, settings.enableAutoDrs)
         put(KEY_ENABLE_LATCH_OVERTAKE, settings.enableOvertakeLatch)
+        put(KEY_ENABLE_PROTECT_NEXT_LAP, settings.enableProtectNextLap)
         put(KEY_DISABLE_AUTO_GEAR, settings.disableAutoGear)
         put(KEY_ENABLE_MANUAL_SHIFT, settings.enableManualShift)
         put(KEY_ENABLE_UNLOCK, settings.enableUnlock)
@@ -1300,6 +1312,7 @@ object ModConfig {
                 pedalMode = migratePedalMode(j),
                 enableAutoDrs = j.optBoolean(KEY_ENABLE_AUTO_DRS, Defaults.ENABLE_AUTO_DRS),
                 enableOvertakeLatch = j.optBoolean(KEY_ENABLE_LATCH_OVERTAKE, Defaults.ENABLE_LATCH_OVERTAKE),
+                enableProtectNextLap = j.optBoolean(KEY_ENABLE_PROTECT_NEXT_LAP, Defaults.ENABLE_PROTECT_NEXT_LAP),
                 disableAutoGear = j.optBoolean(KEY_DISABLE_AUTO_GEAR, Defaults.DISABLE_AUTO_GEAR),
                 enableManualShift = j.optBoolean(KEY_ENABLE_MANUAL_SHIFT, Defaults.ENABLE_MANUAL_SHIFT),
                 enableUnlock = j.optBoolean(KEY_ENABLE_UNLOCK, Defaults.ENABLE_UNLOCK),
@@ -1530,6 +1543,7 @@ object ModConfig {
             pedalMode = Defaults.PEDAL_MODE,
             enableAutoDrs = Defaults.ENABLE_AUTO_DRS,
             enableOvertakeLatch = Defaults.ENABLE_LATCH_OVERTAKE,
+            enableProtectNextLap = Defaults.ENABLE_PROTECT_NEXT_LAP,
             disableAutoGear = Defaults.DISABLE_AUTO_GEAR,
             enableManualShift = Defaults.ENABLE_MANUAL_SHIFT,
             enableUnlock = Defaults.ENABLE_UNLOCK,
@@ -1578,6 +1592,9 @@ object ModConfig {
         // 自锁式超车按键（OTK 按钮点按切换）。带默认值 —— PedalOverlayView 的
         // 命名参数部分构造（37 行）无需改动即可编译。
         val enableOvertakeLatch: Boolean = Defaults.ENABLE_LATCH_OVERTAKE,
+        // 禁止删除下一圈成绩（赛道限制作废圈速时只删本圈）。带默认值 ——
+        // PedalOverlayView 的命名参数部分构造无需改动即可编译。
+        val enableProtectNextLap: Boolean = Defaults.ENABLE_PROTECT_NEXT_LAP,
         val disableAutoGear: Boolean,
         val enableManualShift: Boolean,
         val enableUnlock: Boolean,

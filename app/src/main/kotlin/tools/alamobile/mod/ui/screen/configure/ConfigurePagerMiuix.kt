@@ -230,6 +230,20 @@ fun ConfigurePagerMiuix(
                                 checked = uiState.enableOvertakeLatch,
                                 onCheckedChange = actions::setEnableOvertakeLatch
                             )
+                            SwitchPreference(
+                                title = "禁止删除下一圈成绩",
+                                summary = "冲出赛道限制时只删除本圈成绩，大幅提升刷圈效率",
+                                startAction = {
+                                    Icon(
+                                        tools.alamobile.mod.ui.ForbidIcon,
+                                        modifier = Modifier.padding(end = 6.dp),
+                                        contentDescription = null,
+                                        tint = colorScheme.onBackground
+                                    )
+                                },
+                                checked = uiState.enableProtectNextLap,
+                                onCheckedChange = actions::setEnableProtectNextLap
+                            )
                             // TC 调节：游戏设置没有任何 TC 参数可调（仅手柄生效的
                             // 开关且被游戏每帧覆写），模块档位是移动端唯一调节途径。
                             // 游戏默认 = 纯透传；自定义展开强度/时机两个滑条。

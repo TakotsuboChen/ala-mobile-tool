@@ -200,6 +200,24 @@ val BoostIcon: ImageVector = svgIconMulti(
     defaultHeight = 12.93.dp
 )
 
+// ── 禁止删除下一圈成绩（禁止符）───
+// 用户提供 SVG：`viewBox="2.5 2.5 95 95"`，单条 path 三个子路径（外圆 + 斜杠的
+// 两个半月牙），默认 nonzero 填充即得"圆环 + 对角斜杠"。已实测 `compare -metric AE`
+// 确认 nonzero 与 evenodd 渲染结果逐像素相同（子路径绕向已保证 nonzero 不误填）。
+// viewBox 原点非零 → 必须传 viewportOriginX/Y=2.5（由 svgIconMulti 的 group 平移）。
+// 验证法：rsvg-convert 渲染原图与"包一层 `<g transform="translate(-2.5,-2.5)>`"
+// 的参考图，compare -metric AE = 0（实测通过）。图形为正方形 → 默认 24×24dp。
+val ForbidIcon: ImageVector = svgIconMulti(
+    "ForbidIcon", 95f, 95f,
+    listOf(
+        SvgPath(
+            d = "M50,2.5C23.8,2.5,2.5,23.8,2.5,50c0,26.2,21.3,47.5,47.5,47.5S97.5,76.2,97.5,50C97.5,23.8,76.2,2.5,50,2.5z M85.1,50 c0,7.4-2.3,14.3-6.3,20L30,21.2c5.7-4,12.6-6.3,20-6.3C69.4,14.9,85.1,30.6,85.1,50z M14.9,50c0-7.4,2.3-14.3,6.3-20L70,78.8 c-5.7,4-12.6,6.3-20,6.3C30.6,85.1,14.9,69.4,14.9,50z"
+        )
+    ),
+    viewportOriginX = 2.5f,
+    viewportOriginY = 2.5f
+)
+
 // ── 滑移率反馈（漂移轮胎）───
 // 用户提供 SVG：`viewBox="5.28 12.57 79.37 64.82"`，4 条 path，d 数据逐字搬运
 // （空行/多空格已在搬运时归一为单空格，其余一个字符都没动）。

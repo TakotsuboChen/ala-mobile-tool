@@ -46,6 +46,7 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
                 pedalMode = s.pedalMode,
                 enableAutoDrs = s.enableAutoDrs,
                 enableOvertakeLatch = s.enableOvertakeLatch,
+                enableProtectNextLap = s.enableProtectNextLap,
                 disableAutoGear = s.disableAutoGear,
                 enableManualShift = s.enableManualShift,
                 enableUnlock = s.enableUnlock,
@@ -88,6 +89,7 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
             pedalMode = s.pedalMode,
             enableAutoDrs = s.enableAutoDrs,
             enableOvertakeLatch = s.enableOvertakeLatch,
+            enableProtectNextLap = s.enableProtectNextLap,
             disableAutoGear = s.disableAutoGear,
             enableManualShift = s.enableManualShift,
             enableUnlock = s.enableUnlock,
@@ -140,6 +142,7 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
     fun setPedalMode(v: ModConfig.PedalMode) { _uiState.value = _uiState.value.copy(pedalMode = v); scheduleSave() }
     fun setEnableAutoDrs(v: Boolean) { _uiState.value = _uiState.value.copy(enableAutoDrs = v); scheduleSave() }
     fun setEnableOvertakeLatch(v: Boolean) { _uiState.value = _uiState.value.copy(enableOvertakeLatch = v); scheduleSave() }
+    fun setEnableProtectNextLap(v: Boolean) { _uiState.value = _uiState.value.copy(enableProtectNextLap = v); scheduleSave() }
     fun setDisableAutoGear(v: Boolean) { _uiState.value = _uiState.value.copy(disableAutoGear = v); scheduleSave() }
     fun setEnableManualShift(v: Boolean) { _uiState.value = _uiState.value.copy(enableManualShift = v); scheduleSave() }
     fun setEnableUnlock(v: Boolean) { _uiState.value = _uiState.value.copy(enableUnlock = v); scheduleSave() }
@@ -203,6 +206,8 @@ data class ConfigUiState(
     val enableAutoDrs: Boolean,
     /** 自锁式超车按键：OTK 按钮由「按住」改为「点一下切换」。 */
     val enableOvertakeLatch: Boolean,
+    /** 禁止删除下一圈成绩：赛道限制作废圈速时只删本圈。 */
+    val enableProtectNextLap: Boolean,
     val disableAutoGear: Boolean,
     val enableManualShift: Boolean,
     val enableUnlock: Boolean,
@@ -245,6 +250,7 @@ data class ConfigUiState(
         pedalMode = pedalMode,
         enableAutoDrs = enableAutoDrs,
         enableOvertakeLatch = enableOvertakeLatch,
+        enableProtectNextLap = enableProtectNextLap,
         disableAutoGear = disableAutoGear,
         enableManualShift = enableManualShift,
         enableUnlock = enableUnlock,

@@ -30,6 +30,7 @@ add_library(
     src/intro_hook.c
     src/hide_pedals_hook.c
     src/lap_hook.c
+    src/next_lap_hook.c
     src/crash_hook.c
 )
 

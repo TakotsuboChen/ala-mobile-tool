@@ -362,6 +362,9 @@ class AlaMobileModule : XposedModule() {
         // 自锁式超车按键：把 OTK 按钮从「按住才生效」改成「点一下切换」。
         // 只改按键抬落语义，是否允许开超车（ERS 解锁 / 电量）仍由游戏判定。
         val enableOvertakeLatch = settings?.enableOvertakeLatch ?: false
+        // 禁止删除下一圈成绩：赛道限制作废圈速时只删本圈（改写 InvalidateLap 的
+        // trackPercentage 参数，让游戏自己走 <=0.8 分支）。
+        val enableProtectNextLap = settings?.enableProtectNextLap ?: false
         // 手动换挡开 ⇒ 关闭游戏自动换挡（disableAutoGear 由 enableManualShift 派生）。
         // 当前 enableManualShift 默认 false，所以 disableAutoGear=false，游戏自动换挡保持原样。
         val enableManualShift = settings?.enableManualShift ?: false
@@ -572,6 +575,14 @@ class AlaMobileModule : XposedModule() {
                         logX(Log.INFO, TAG, "initOvertake latch=$enableOvertakeLatch")
                     } catch (e: Throwable) {
                         logX(Log.ERROR, TAG, "initOvertake failed: ${e.message}")
+                    }
+                    // 禁止删除下一圈成绩：hook odometerHandler.InvalidateLap（赛道
+                    // 限制作废圈速的唯一入口）。hook 恒装上，开关在回调内判。
+                    try {
+                        NativeBridge.initNextLapSafe(enableProtectNextLap)
+                        logX(Log.INFO, TAG, "initNextLap protect=$enableProtectNextLap")
+                    } catch (e: Throwable) {
+                        logX(Log.ERROR, TAG, "initNextLap failed: ${e.message}")
                     }
                     // ABS 档位下发：同 TC 模式（init 兜底为不覆写/不缩放，这里补用户档位）。
                     try {

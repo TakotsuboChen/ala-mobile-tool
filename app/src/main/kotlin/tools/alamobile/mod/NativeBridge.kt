@@ -286,6 +286,23 @@ object NativeBridge {
     external fun setOvertakeLatch(active: Boolean)
 
     /**
+     * 禁止删除下一圈成绩 hooks 安装（不动 init() 参数签名，与 initOvertake 同模式）。
+     * hook odometerHandler.InvalidateLap(float trackPercentage, bool isInPit) ——
+     * 赛道限制作废圈速的唯一入口。开关开启时把 trackPercentage 压到 0，让游戏
+     * 自己走 <=0.8 分支：只作废本圈、保住下一圈，提示文案同步变为
+     * "Lap time deleted"（与模块实际行为一致）。
+     */
+    @JvmStatic
+    external fun initNextLap(
+        enableProtectNextLap: Boolean,
+        invalidateLap: Long
+    )
+
+    /** 运行时开关禁止删除下一圈成绩（配置广播到达后调用，不重装 hook）。 */
+    @JvmStatic
+    external fun setProtectNextLap(active: Boolean)
+
+    /**
      * 计时赛有效圈速监听 hooks 安装（log-only，无 UI）。
      * - IRDSLevelLoadVariables.Awake：捕获 LLV 单例 → 读 trackToRace 赛道名
      *   （16 条 GP 赛道自动识别）。
@@ -617,6 +634,32 @@ object NativeBridge {
     fun setOvertakeLatchSafe(active: Boolean) {
         if (!isAvailable) return
         try { setOvertakeLatch(active) } catch (e: Throwable) { Logger.w(TAG, "setOvertakeLatch failed", e) }
+    }
+
+    /**
+     * 禁止删除下一圈成绩 hooks 安装安全包装。native 不可用 / 加载失败时静默降级 ——
+     * 等价于功能不生效（赛道限制照常连带删除下一圈），不影响游戏。
+     */
+    @JvmStatic
+    fun initNextLapSafe(enableProtectNextLap: Boolean) {
+        if (!isAvailable) return
+        try {
+            initNextLap(
+                enableProtectNextLap = enableProtectNextLap,
+                invalidateLap = OffsetTable.ODOMETER_HANDLER_INVALIDATE_LAP
+            )
+        } catch (e: Throwable) {
+            Logger.w(TAG, "initNextLap failed", e)
+        }
+    }
+
+    /**
+     * 运行时同步「禁止删除下一圈成绩」开关（不重装 hook，同 [setOvertakeLatchSafe] 模式）。
+     */
+    @JvmStatic
+    fun setProtectNextLapSafe(active: Boolean) {
+        if (!isAvailable) return
+        try { setProtectNextLap(active) } catch (e: Throwable) { Logger.w(TAG, "setProtectNextLap failed", e) }
     }
 
     /**
