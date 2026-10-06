@@ -8,15 +8,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.Dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import tools.alamobile.mod.ui.navigation3.Navigator
-import tools.alamobile.mod.ui.viewmodel.ConfigViewModel
+import tools.alamobile.mod.ui.viewmodel.LocalConfigViewModel
 
 /**
  * 照搬 KernelSU `HomePager`（HomeScreen.kt:32）wrapper 模式：
  * 实例化 ViewModel、收集 uiState、构造 actions、dispatch 到 Miuix composable。
  *
  * Ala Mobile 只用 miuix（无 Material 分支），但保留 wrapper 层级对齐 KernelSU。
+ *
+ * ⚠️ VM 取 **Activity 层共享实例**（[LocalConfigViewModel]）而非
+ * `viewModel<ConfigViewModel>()`：后者在 NavEntry 粒度下每个入口各一份
+ * （详见 [LocalConfigViewModel] 注释）。
  */
 @Composable
 fun OverviewPager(
@@ -24,7 +27,7 @@ fun OverviewPager(
     bottomInnerPadding: Dp,
     isCurrentPage: Boolean = true
 ) {
-    val viewModel = viewModel<ConfigViewModel>()
+    val viewModel = LocalConfigViewModel.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     var hasActivated by remember { mutableStateOf(false) }

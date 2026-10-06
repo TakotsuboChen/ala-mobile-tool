@@ -2,6 +2,7 @@ package tools.alamobile.mod.ui.viewmodel
 
 import android.app.Application
 import android.content.Context
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -13,6 +14,23 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import tools.alamobile.mod.config.ModConfig
+
+/**
+ * 全局共享的 [ConfigViewModel]（ConfigActivity 在 Activity 层创建并 provide）。
+ *
+ * ⚠️ **必须共享，不能让各页面各自 `viewModel<ConfigViewModel>()`**：
+ * `ViewModelStoreNavEntryDecorator`（lifecycle-viewmodel-navigation3）给**每个
+ * NavEntry** 一个独立的 `ViewModelStoreOwner`（字节码实证：
+ * `rememberViewModelStoreOwner(entry.contentKey, storeProvider, savedStateRegistryOwner)`），
+ * 所以配置 Hub 页与四个二级页若各自取 VM，会拿到**四份独立实例**：
+ * ① 各自持有陈旧快照，二级页 A 的改动会随二级页 B 的 `scheduleSave()` 被整份覆盖；
+ * ② 更隐蔽的丢数据路径——`scheduleSave()` 是 `delay(300)` 后写盘，而 VM 被 clear
+ * 时 `viewModelScope` 会取消 pending job ⇒ **拖完滑条立刻返回，改动被取消丢失**。
+ * 提到 Activity 层后 viewModelScope 随 Activity 存活，导航不再取消在途写入。
+ */
+val LocalConfigViewModel = staticCompositionLocalOf<ConfigViewModel> {
+    error("LocalConfigViewModel not provided")
+}
 
 /**
  * 管理 [ModConfig] 业务设置（踏板/DRS/解锁/曲线等）。
@@ -201,8 +219,7 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
  * 不可变 UI 状态快照。@Stable 不需要——data class 全部是 val + 基本类型/枚举，
  * Compose 编译器自动判定为 stable。
  */
-data class ConfigUiState(
-    val pedalMode: ModConfig.PedalMode,
+data class ConfigUiState(    val pedalMode: ModConfig.PedalMode,
     val enableAutoDrs: Boolean,
     /** 自锁式超车按键：OTK 按钮由「按住」改为「点一下切换」。 */
     val enableOvertakeLatch: Boolean,
