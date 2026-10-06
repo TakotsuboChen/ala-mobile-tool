@@ -6,9 +6,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
@@ -16,10 +18,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
-import androidx.compose.ui.unit.LayoutDirection
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.add
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,8 +28,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.add
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Lightbulb
 import androidx.compose.material.icons.rounded.GraphicEq
@@ -55,6 +57,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -76,8 +79,15 @@ import androidx.compose.ui.util.lerp
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import tools.alamobile.mod.config.ModConfig
+import tools.alamobile.mod.ui.MiscIcon
+import tools.alamobile.mod.ui.NativeFeatureIcon
+import tools.alamobile.mod.ui.OverlayIcon
+import tools.alamobile.mod.ui.ResponseCurveIcon
+import tools.alamobile.mod.ui.navigation3.LocalNavigator
+import tools.alamobile.mod.ui.navigation3.Route
 import tools.alamobile.mod.ui.theme.LocalEnableBlur
 import tools.alamobile.mod.ui.util.BlurredBar
 import tools.alamobile.mod.ui.util.LocalGestureDirectionLock
@@ -90,11 +100,11 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
-import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
+import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -103,16 +113,15 @@ import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
 /**
- * 照搬 KernelSU `SettingPagerMiuix`（SettingsMiuix.kt:69）结构，且每个 preference 项
- * 全部用 miuix preference 组件（不是手写 Row+Column+Text+Switch）。
+ * 配置页 Hub（2026-10-06 改版）：原本一页到底的四个区块（原生特性控制 / Overlay 控件 /
+ * 响应曲线 / 杂项）拆成四张互不相连的入口卡片，点进去各是一个独立二级页。
  *
- * 这是本次重构的核心步骤：手写 SwitchRow/SliderRow 产生过多 RenderNode（trace 显示 72 次
- * calculateBounds），miuix SwitchPreference 是优化过的单节点 composable，GPU 纹理复用率更高。
+ * 结构照搬 KernelSU 的 "设置页 → ColorPalette/About 二级页" 模式：Hub 用
+ * [ArrowPreference]（标题 + 右侧箭头 + 点击），二级页由 [Route] 驱动 push，
+ * 页面骨架统一走 [ConfigureSubPageScaffold]。
  *
- * SliderRow 的替代：miuix 没有 SliderPreference，所以把 Slider 包在 Card 里，
- * 外层用 Column+Text 显示标题/当前值——这部分的 Text 节点不可避免（KernelSU 也是这么做的，
- * 它的 Slider 项在 HomeMiuix 的 UpdateCard 里同样是 Column+Slider 手写）。
- * 关键差异是：之前的 SwitchRow 全部换成 SwitchPreference，这是 RenderNode 减少的大头。
+ * ⚠️ **不要给 Hub 卡片传 summary**（用户规格：无需描述文字）；卡片高度靠
+ * [CONFIGURE_HUB_CARD_MIN_HEIGHT] 撑到"两行高度"，而不是靠空描述行凑。
  */
 @Composable
 fun ConfigurePagerMiuix(
@@ -120,15 +129,12 @@ fun ConfigurePagerMiuix(
     actions: ConfigViewModel,
     bottomInnerPadding: Dp,
 ) {
+    val navigator = LocalNavigator.current
     val scrollBehavior = MiuixScrollBehavior()
     val enableBlur = LocalEnableBlur.current
     val backdrop = rememberBlurBackdrop(enableBlur)
     val blurActive = backdrop != null
     val barColor = if (blurActive) Color.Transparent else colorScheme.surface
-    // ABS 自定义切换警示弹窗：每次从默认切到自定义时弹（不是只弹首次）。
-    var showAbsWarnDialog by remember { mutableStateOf(false) }
-    // 路肩振感开启确认弹窗：打开路肩开关且抓地力反馈含振感时弹（每次都要确认）。
-    var showKerbWarnDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -166,712 +172,414 @@ fun ConfigurePagerMiuix(
                 item {
                     Column(
                         modifier = Modifier.padding(vertical = 12.dp),
-                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // ── Section 1: 游戏原生特性控制 ──
-                        SmallTitle(
-                            text = "游戏原生特性控制",
-                            insideMargin = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                        ConfigureHubCard(
+                            icon = NativeFeatureIcon,
+                            title = "原生特性控制",
+                            onClick = { navigator.push(Route.ConfigureNativeFeatures) },
                         )
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            SwitchPreference(
-                                title = "解锁付费内容",
-                                summary = "强制解锁 DLC 和 IAP",
-                                startAction = {
-                                    Icon(
-                                        Icons.Rounded.LockOpen,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = null,
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                checked = uiState.enableUnlock,
-                                onCheckedChange = actions::setEnableUnlock
-                            )
-                            SwitchPreference(
-                                title = "隐藏油门和刹车按键",
-                                summary = "隐藏原生油门和刹车，保留离合",
-                                startAction = {
-                                    Icon(
-                                        Icons.Rounded.VisibilityOff,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = null,
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                checked = uiState.hideGamePedals,
-                                onCheckedChange = actions::setHideGamePedals
-                            )
-                            SwitchPreference(
-                                title = "自动 DRS 与 AA",
-                                summary = "在规定的区域自动打开减阻系统与主动空力套件",
-                                startAction = {
-                                    Icon(
-                                        Icons.Rounded.Air,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = null,
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                checked = uiState.enableAutoDrs,
-                                onCheckedChange = actions::setEnableAutoDrs
-                            )
-                            SwitchPreference(
-                                title = "自锁式超车按键",
-                                summary = "恢复老版的点按切换形式",
-                                startAction = {
-                                    Icon(
-                                        tools.alamobile.mod.ui.BoostIcon,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = null,
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                checked = uiState.enableOvertakeLatch,
-                                onCheckedChange = actions::setEnableOvertakeLatch
-                            )
-                            SwitchPreference(
-                                title = "禁止删除下一圈成绩",
-                                summary = "冲出赛道限制时只删除本圈成绩，大幅提升刷圈效率",
-                                startAction = {
-                                    Icon(
-                                        tools.alamobile.mod.ui.ForbidIcon,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = null,
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                checked = uiState.enableProtectNextLap,
-                                onCheckedChange = actions::setEnableProtectNextLap
-                            )
-                            // TC 调节：游戏设置没有任何 TC 参数可调（仅手柄生效的
-                            // 开关且被游戏每帧覆写），模块档位是移动端唯一调节途径。
-                            // 游戏默认 = 纯透传；自定义展开强度/时机两个滑条。
-                            // 分隔线成组逻辑：游戏默认（子卡片全收）时 TC 行与前后
-                            // 行无分隔线，完全融入卡片；自定义时整块上下各一条线
-                            //（下线在 Column 内部，跟随内层收回动画——TC 关闭时
-                            // 贴削减强度下边缘，不关时贴介入时机下边缘）。
-                            AnimatedVisibility(
-                                visible = uiState.tcMode == ModConfig.TcMode.CUSTOM,
-                                enter = fadeIn(),
-                                exit = fadeOut()
-                            ) {
-                                top.yukonga.miuix.kmp.basic.HorizontalDivider(
-                                    modifier = Modifier.padding(horizontal = 16.dp)
-                                )
-                            }
-                            OverlayDropdownPreference(
-                                title = "牵引力控制",
-                                summary = "调整游戏原生 TC",
-                                items = ModConfig.TcMode.entries.map { tcModeName(it) },
-                                startAction = {
-                                    Icon(
-                                        tools.alamobile.mod.ui.TcIcon,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = null,
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                selectedIndex = ModConfig.TcMode.entries.indexOf(uiState.tcMode),
-                                onSelectedIndexChange = { index ->
-                                    actions.setTcMode(ModConfig.TcMode.entries[index])
-                                },
-                            )
-                            AnimatedVisibility(
-                                visible = uiState.tcMode == ModConfig.TcMode.CUSTOM,
-                                enter = expandVertically() + fadeIn(),
-                                exit = shrinkVertically() + fadeOut()
-                            ) {
-                                Column {
-                                    // 强度档 = TractionFilter 返回值插值 mix
-                                    //（等价于把游戏削减系数 0.85 缩放为 0.85×mix）。
-                                    SliderPreference(
-                                        title = "削减强度",
-                                        summary = "修改 TractionFilter 返回值",
-                                        value = ModConfig.TcStrength.entries.indexOf(uiState.tcStrength).toFloat(),
-                                        onValueChange = { v ->
-                                            actions.setTcStrength(
-                                                ModConfig.TcStrength.entries[
-                                                    v.roundToInt().coerceIn(0, ModConfig.TcStrength.entries.lastIndex)
-                                                ]
-                                            )
-                                        },
-                                        valueRange = 0f..(ModConfig.TcStrength.entries.lastIndex).toFloat(),
-                                        displayFormat = { v ->
-                                            tcStrengthName(
-                                                ModConfig.TcStrength.entries[
-                                                    v.roundToInt().coerceIn(0, ModConfig.TcStrength.entries.lastIndex)
-                                                ]
-                                            )
-                                        },
-                                        icon = Icons.Rounded.Tune
-                                    )
-                                    // 强度=关闭时 TC 整体不介入，时机无意义 → 卡片收回，
-                                    // 走既有 enableTc=false 的 return accel 关闭路径。
-                                    AnimatedVisibility(
-                                        visible = uiState.tcStrength != ModConfig.TcStrength.OFF,
-                                        enter = expandVertically() + fadeIn(),
-                                        exit = shrinkVertically() + fadeOut()
-                                    ) {
-                                        SliderPreference(
-                                            title = "介入时机",
-                                            summary = "修改介入的滑移指标条件",
-                                            value = ModConfig.TcTiming.entries.indexOf(uiState.tcTiming).toFloat(),
-                                            onValueChange = { v ->
-                                                actions.setTcTiming(
-                                                    ModConfig.TcTiming.entries[
-                                                        v.roundToInt().coerceIn(0, ModConfig.TcTiming.entries.lastIndex)
-                                                    ]
-                                                )
-                                            },
-                                            valueRange = 0f..(ModConfig.TcTiming.entries.lastIndex).toFloat(),
-                                            displayFormat = { v ->
-                                                tcTimingName(
-                                                    ModConfig.TcTiming.entries[
-                                                        v.roundToInt().coerceIn(0, ModConfig.TcTiming.entries.lastIndex)
-                                                    ]
-                                                )
-                                            },
-                                            icon = Icons.Rounded.Bolt
-                                        )
-                                    }
-                                    // TC 区域下分隔线：放 Column 末尾使其跟随内层
-                                    // 收回动画，下边缘自动贴住最后可见项。
-                                    top.yukonga.miuix.kmp.basic.HorizontalDivider(
-                                        modifier = Modifier.padding(horizontal = 16.dp)
-                                    )
-                                }
-                            }
-                            // ABS 调节：游戏默认 ABS 方波泄压（b=0）过度保护——
-                            // 全段几乎不锁死；且制动基数病态地强（关 ABS 100% 重刹
-                            // 秒锁死）。游戏默认 = 纯透传；自定义展开干预强度滑条。
-                            // "最大制动压力"是 ABS 下方独立项：制动基数修复与 ABS
-                            // 模式正交（默认/关闭档下也生效）。分隔线成组逻辑同 TC 区，
-                            // 上分隔线与 TC 区下分隔线条件互斥（TC 自定义时其内层
-                            // Column 末尾已有下线，两条背靠背会叠成一条粗线）。
-                            AnimatedVisibility(
-                                visible = uiState.absMode == ModConfig.AbsMode.CUSTOM &&
-                                    uiState.tcMode != ModConfig.TcMode.CUSTOM,
-                                enter = fadeIn(),
-                                exit = fadeOut()
-                            ) {
-                                top.yukonga.miuix.kmp.basic.HorizontalDivider(
-                                    modifier = Modifier.padding(horizontal = 16.dp)
-                                )
-                            }
-                            OverlayDropdownPreference(
-                                title = "防抱死制动系统",
-                                summary = "调整游戏原生 ABS",
-                                items = ModConfig.AbsMode.entries.map { absModeName(it) },
-                                startAction = {
-                                    Icon(
-                                        tools.alamobile.mod.ui.AbsIcon,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = null,
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                selectedIndex = ModConfig.AbsMode.entries.indexOf(uiState.absMode),
-                                onSelectedIndexChange = { index ->
-                                    val newMode = ModConfig.AbsMode.entries[index]
-                                    // 每次从默认切到自定义：弹警示——减弱干预后重刹
-                                    // 易锁死，提醒配合下调最大制动压力。
-                                    if (uiState.absMode == ModConfig.AbsMode.DEFAULT &&
-                                        newMode == ModConfig.AbsMode.CUSTOM
-                                    ) {
-                                        showAbsWarnDialog = true
-                                    }
-                                    actions.setAbsMode(newMode)
-                                },
-                            )
-                            AnimatedVisibility(
-                                visible = uiState.absMode == ModConfig.AbsMode.CUSTOM,
-                                enter = expandVertically() + fadeIn(),
-                                exit = shrinkVertically() + fadeOut()
-                            ) {
-                                Column {
-                                    // 干预强度 = pulse 释放深度 b(0x3E0) 覆写：
-                                    // 游戏默认配平下 b=0，pulse 帧完全泄压，方波
-                                    // [F_base·Ω, 0] 平均 0.5；抬 b 抬方波平均 (1+b)/2。
-                                    SliderPreference(
-                                        title = "干预强度",
-                                        summary = "修改干预制动偏置",
-                                        value = ModConfig.AbsStrength.entries.indexOf(uiState.absStrength).toFloat(),
-                                        onValueChange = { v ->
-                                            actions.setAbsStrength(
-                                                ModConfig.AbsStrength.entries[
-                                                    v.roundToInt().coerceIn(0, ModConfig.AbsStrength.entries.lastIndex)
-                                                ]
-                                            )
-                                        },
-                                        valueRange = 0f..(ModConfig.AbsStrength.entries.lastIndex).toFloat(),
-                                        displayFormat = { v ->
-                                            absStrengthName(
-                                                ModConfig.AbsStrength.entries[
-                                                    v.roundToInt().coerceIn(0, ModConfig.AbsStrength.entries.lastIndex)
-                                                ]
-                                            )
-                                        },
-                                        icon = Icons.Rounded.Tune
-                                    )
-                                    // ABS 区域下分隔线：放 Column 末尾跟随收回
-                                    // 动画，下边缘自动贴住最后可见项（同 TC 区）。
-                                    top.yukonga.miuix.kmp.basic.HorizontalDivider(
-                                        modifier = Modifier.padding(horizontal = 16.dp)
-                                    )
-                                }
-                            }
-                            // 最大制动压力（v6，2026-08-29）：踏板行程标尺等比映射
-                            // 0-100% → 0-s·T_b，任何车速下允许的压力上限封顶保持在
-                            // 原生 F_base(v)（输出 = min(s·T_b·p, F_base)），与 ABS
-                            // 档位/开关完全无关（native abs_remap_brake_request，
-                            // 0xF0 饱和重映射）。50-100% 无级（下限 50% 防呆保留）。
-                            SliderPreference(
-                                title = "最大制动压力",
-                                summary = "调整游戏制动摩擦扭矩上限",
-                                value = uiState.absPressure,
-                                onValueChange = { v ->
-                                    actions.setAbsPressure((v * 100).roundToInt() / 100f)
-                                },
-                                valueRange = 0.5f..1.0f,
-                                displayFormat = { v -> "${(v * 100).roundToInt()}%" },
-                                icon = tools.alamobile.mod.ui.BrakeCurveIcon
-                            )
-                        }
-
-                        // ── Section 2: Overlay 控件 ──
-                        SmallTitle(
-                            text = "Overlay 控件",
-                            insideMargin = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                        ConfigureHubCard(
+                            icon = OverlayIcon,
+                            title = "Overlay 控件",
+                            onClick = { navigator.push(Route.ConfigureOverlay) },
                         )
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            OverlayDropdownPreference(
-                                title = "线性踏板",
-                                summary = "悬浮窗踏板覆盖游戏输入",
-                                items = ModConfig.PedalMode.entries.map { modeName(it) },
-                                startAction = {
-                                    Icon(
-                                        tools.alamobile.mod.ui.PedalsIcon,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = null,
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                selectedIndex = ModConfig.PedalMode.entries.indexOf(uiState.pedalMode),
-                                onSelectedIndexChange = { index ->
-                                    actions.setPedalMode(ModConfig.PedalMode.entries[index])
-                                },
-                            )
-                            // 死区和过渡点只在单踏板模式下有意义。
-                            AnimatedVisibility(
-                                visible = uiState.pedalMode == ModConfig.PedalMode.SINGLE,
-                                enter = expandVertically() + fadeIn(),
-                                exit = shrinkVertically() + fadeOut()
-                            ) {
-                                Column {
-                                    SliderPreference(
-                                        title = "死区",
-                                        summary = "踏板中间过渡区域的无效范围",
-                                        value = uiState.pedalDeadzone,
-                                        onValueChange = actions::setPedalDeadzone,
-                                        valueRange = 0f..0.2f,
-                                        displayFormat = { String.format("%.0f%%", it * 100) },
-                                        icon = Icons.Rounded.Straighten
-                                    )
-                                    SliderPreference(
-                                        title = "过渡点",
-                                        summary = "油门和刹车的分界位置",
-                                        value = uiState.pedalTransition,
-                                        onValueChange = actions::setPedalTransition,
-                                        valueRange = 0.2f..0.8f,
-                                        displayFormat = { String.format("%.0f%%", it * 100) },
-                                        icon = Icons.Rounded.SwapVert
-                                    )
-                                }
-                            }
-                            // 双踏板模式专属配置。
-                            AnimatedVisibility(
-                                visible = uiState.pedalMode == ModConfig.PedalMode.DUAL,
-                                enter = expandVertically() + fadeIn(),
-                                exit = shrinkVertically() + fadeOut()
-                            ) {
-                                Column {
-                                    OverlayDropdownPreference(
-                                        title = "踏板优先级",
-                                        summary = "双踏板同时按下时的优先策略",
-                                        items = ModConfig.PedalPriority.entries.map { priorityName(it) },
-                                        startAction = {
-                                            Icon(
-                                                Icons.Rounded.PriorityHigh,
-                                                modifier = Modifier.padding(end = 6.dp),
-                                                contentDescription = null,
-                                                tint = colorScheme.onBackground
-                                            )
-                                        },
-                                        selectedIndex = ModConfig.PedalPriority.entries.indexOf(uiState.pedalPriority),
-                                        onSelectedIndexChange = { index ->
-                                            actions.setPedalPriority(ModConfig.PedalPriority.entries[index])
-                                        },
-                                    )
-                                    // 根据油门数值判断 → 显示油门过渡点滑块
-                                    AnimatedVisibility(
-                                        visible = uiState.pedalPriority == ModConfig.PedalPriority.THROTTLE_VALUE,
-                                        enter = expandVertically() + fadeIn(),
-                                        exit = shrinkVertically() + fadeOut()
-                                    ) {
-                                        SliderPreference(
-                                            title = "油门过渡点",
-                                            summary = "油门值超过此点则油门优先，否则刹车优先",
-                                            value = uiState.throttleTransition,
-                                            onValueChange = actions::setThrottleTransition,
-                                            valueRange = 0.01f..0.99f,
-                                            displayFormat = { String.format("%.0f%%", it * 100) },
-                                            icon = Icons.Rounded.SwapVert
-                                        )
-                                    }
-                                    // 根据刹车数值判断 → 显示刹车过渡点滑块
-                                    AnimatedVisibility(
-                                        visible = uiState.pedalPriority == ModConfig.PedalPriority.BRAKE_VALUE,
-                                        enter = expandVertically() + fadeIn(),
-                                        exit = shrinkVertically() + fadeOut()
-                                    ) {
-                                        SliderPreference(
-                                            title = "刹车过渡点",
-                                            summary = "刹车值超过此点则刹车优先，否则油门优先",
-                                            value = uiState.brakeTransition,
-                                            onValueChange = actions::setBrakeTransition,
-                                            valueRange = 0.01f..0.99f,
-                                            displayFormat = { String.format("%.0f%%", it * 100) },
-                                            icon = Icons.Rounded.SwapVert
-                                        )
-                                    }
-                                    OverlayDropdownPreference(
-                                        title = "踏板方向反转",
-                                        summary = "反转踏板的行程填充方向",
-                                        items = ModConfig.PedalInvert.entries.map { invertName(it) },
-                                        startAction = {
-                                            Icon(
-                                                Icons.Rounded.Flip,
-                                                modifier = Modifier.padding(end = 6.dp),
-                                                contentDescription = null,
-                                                tint = colorScheme.onBackground
-                                            )
-                                        },
-                                        selectedIndex = ModConfig.PedalInvert.entries.indexOf(uiState.pedalInvert),
-                                        onSelectedIndexChange = { index ->
-                                            actions.setPedalInvert(ModConfig.PedalInvert.entries[index])
-                                        },
-                                    )
-                                }
-                            }
-
-                            // ── Overlay 视觉属性（所有踏板模式通用）──
-                            SliderPreference(
-                                title = "控件透明度",
-                                summary = "整个控件的透明度",
-                                value = uiState.overlayAlpha,
-                                onValueChange = actions::setOverlayAlpha,
-                                valueRange = 0f..1f,
-                                displayFormat = { String.format("%.0f%%", it * 100) },
-                                icon = Icons.Rounded.Opacity
-                            )
-                            SliderPreference(
-                                title = "边框粗细",
-                                summary = "控件边框宽度，0 表示不显示边框",
-                                value = uiState.overlayBorderWidth,
-                                onValueChange = actions::setOverlayBorderWidth,
-                                valueRange = 0f..10f,
-                                displayFormat = { String.format("%.1f dp", it) },
-                                icon = Icons.Rounded.BorderOuter
-                            )
-                            SliderPreference(
-                                title = "边框圆角",
-                                summary = "圆角半径 = 比例 × 短边/2，0% 时为直角",
-                                value = uiState.overlayCornerRadius,
-                                onValueChange = actions::setOverlayCornerRadius,
-                                valueRange = 0f..1f,
-                                displayFormat = { String.format("%.0f%%", it * 100) },
-                                icon = Icons.Rounded.RoundedCorner
-                            )
-                            // TC/ABS 介入指示灯——Overlay 控件区最后一项。
-                            // 开关只控制 Java 层 view 创建，广播重建即生效。
-                            SwitchPreference(
-                                title = "TC/ABS 介入指示灯",
-                                summary = "在牵引力控制和防抱死制动系统干预时显示闪烁的指示灯",
-                                startAction = {
-                                    Icon(
-                                        Icons.Rounded.Lightbulb,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = null,
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                checked = uiState.enableTcAbsIndicator,
-                                onCheckedChange = actions::setEnableTcAbsIndicator
-                            )
-                        }
-
-                        // ── Section 3: 响应曲线 ──
-                        // 线性踏板关闭（OFF）时整个响应曲线 Section 也收回——
-                        // 没有踏板就没有曲线可调。
-                        AnimatedVisibility(
-                            visible = uiState.pedalMode != ModConfig.PedalMode.OFF,
-                            enter = expandVertically() + fadeIn(),
-                            exit = shrinkVertically() + fadeOut()
-                        ) {
-                            Column {
-                        SmallTitle(
-                            text = "响应曲线",
-                            insideMargin = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                        ConfigureHubCard(
+                            icon = ResponseCurveIcon,
+                            title = "响应曲线",
+                            onClick = { navigator.push(Route.ConfigureCurves) },
                         )
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            OverlayDropdownPreference(
-                                title = "油门响应曲线",
-                                summary = "油门踏板控件行程到游戏原生油门的映射方式",
-                                items = ModConfig.PedalCurve.entries.map { curveName(it) },
-                                startAction = {
-                                    Icon(
-                                        Icons.Rounded.Speed,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = null,
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                selectedIndex = ModConfig.PedalCurve.entries.indexOf(uiState.throttleCurve),
-                                onSelectedIndexChange = { index ->
-                                    actions.setThrottleCurve(ModConfig.PedalCurve.entries[index])
-                                },
-                            )
-                            AnimatedVisibility(
-                                visible = uiState.throttleCurve == ModConfig.PedalCurve.CUSTOM,
-                                enter = expandVertically() + fadeIn(),
-                                exit = shrinkVertically() + fadeOut()
-                            ) {
-                                Column {
-                                    // 油门响应曲线 与 图表 之间的分隔线。
-                                    top.yukonga.miuix.kmp.basic.HorizontalDivider(
-                                        modifier = Modifier.padding(horizontal = 16.dp)
-                                    )
-                                    CurveEditor(
-                                        points = uiState.throttleCurvePoints,
-                                        onPointsChange = actions::setThrottleCurvePoints,
-                                    )
-                                    // 图表 与 刹车响应曲线 之间的分隔线。
-                                    top.yukonga.miuix.kmp.basic.HorizontalDivider(
-                                        modifier = Modifier.padding(horizontal = 16.dp)
-                                    )
-                                }
-                            }
-                            OverlayDropdownPreference(
-                                title = "刹车响应曲线",
-                                summary = "刹车踏板控件行程到游戏原生刹车的映射方式",
-                                items = ModConfig.PedalCurve.entries.map { curveName(it) },
-                                startAction = {
-                                    Icon(
-                                        tools.alamobile.mod.ui.BrakeCurveIcon,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = null,
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                selectedIndex = ModConfig.PedalCurve.entries.indexOf(uiState.brakeCurve),
-                                onSelectedIndexChange = { index ->
-                                    actions.setBrakeCurve(ModConfig.PedalCurve.entries[index])
-                                },
-                            )
-                            AnimatedVisibility(
-                                visible = uiState.brakeCurve == ModConfig.PedalCurve.CUSTOM,
-                                enter = expandVertically() + fadeIn(),
-                                exit = shrinkVertically() + fadeOut()
-                            ) {
-                                Column {
-                                    // 刹车响应曲线 与 图表 之间的分隔线。
-                                    top.yukonga.miuix.kmp.basic.HorizontalDivider(
-                                        modifier = Modifier.padding(horizontal = 16.dp)
-                                    )
-                                    CurveEditor(
-                                        points = uiState.brakeCurvePoints,
-                                        onPointsChange = actions::setBrakeCurvePoints,
-                                    )
-                                }
-                            }
-                        }
-                            }
-                        }
-
-                        // ── Section 4: 杂项 ──
-                        SmallTitle(
-                            text = "杂项",
-                            insideMargin = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                        ConfigureHubCard(
+                            icon = MiscIcon,
+                            title = "杂项",
+                            onClick = { navigator.push(Route.ConfigureMisc) },
                         )
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            SwitchPreference(
-                                title = "替换主菜单音乐",
-                                summary = "更改为 Hans Zimmer - F1",
-                                startAction = {
-                                    Icon(
-                                        Icons.Rounded.MusicNote,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = null,
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                checked = uiState.enableMusicReplace,
-                                onCheckedChange = actions::setEnableMusicReplace
-                            )
-                            SwitchPreference(
-                                title = "替换开场动画背景音",
-                                summary = "更改为 V10 引擎声浪",
-                                startAction = {
-                                    Icon(
-                                        Icons.Rounded.GraphicEq,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = null,
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                checked = uiState.enableV10Sound,
-                                onCheckedChange = actions::setEnableV10Sound
-                            )
-                            // ── 路肩振感反馈（抓地力反馈上方）──
-                            // 信号源**不是模块自造的判据**：`IRDSWheel.materialIndex
-                            // (0x2E8) == -5` 就是游戏自己判定"在路肩上"的那一条
-                            //（反汇编 IRDSCarVisuals.TireModelVisuals 0x1A68B4C 实证：
-                            // 游戏用同一个判断置 carController.kerbSound，而
-                            // IRDSSoundController.kerbSoundUpdate 读它播路肩音）。
-                            // 所以本功能与游戏路肩音逐帧同步，模块不分析赛道区域。
-                            //
-                            // ⚠️ **不再画任何分隔线**（2026-10-05 用户定案）：路肩
-                            // 原先"开关 + 强度滑条"两行，需要上下沿各一条线分组；滑条
-                            // 删除后只剩一行开关，分隔线已无意义 ⇒ 整块融入卡片，与
-                            // 上下项之间不再画线。同理抓地力反馈的上沿分隔线也**不再
-                            // 因路肩而抑制**（去掉 `&& !kerbHapticEnabled`）。
-                            SwitchPreference(
-                                title = "路肩振感反馈",
-                                summary = "压过路肩时的粗粒度振动",
-                                startAction = {
-                                    Icon(
-                                        tools.alamobile.mod.ui.KerbIcon,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = null,
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                checked = uiState.kerbHapticEnabled,
-                                // 打开时若抓地力反馈含振感（振感 / 全部）→ 先弹确认：
-                                // 路肩会覆盖抓地力振感，可能影响抓地力判断（用户 2026-10-05 定案）。
-                                // 关闭 / 抓地力无振感 → 直接生效。
-                                onCheckedChange = { on ->
-                                    if (on && uiState.slipFeedbackMode.hasHaptic) {
-                                        showKerbWarnDialog = true
-                                    } else {
-                                        actions.setKerbHapticEnabled(on)
-                                    }
-                                }
-                            )
-                            // ── 抓地力反馈（杂项区最下方）──
-                            // 把「当前滑移率离抓地力峰值有多远」变成可感知的反馈。
-                            // 起振锚点是轮胎真实峰值 maxSlip（u = |σ|/maxSlip），
-                            // 不是游戏 ABS 的固定阈值 0.15——后者在实测 maxSlip≈0.094 下
-                            // 对应 u≈1.6，即"已越过峰值 60%"才起振，方向相反。
-                            // 视觉条与指示灯同形（贴边横条），但走连续不透明度而非闪烁。
-                            //
-                            // 上方分隔线成组逻辑（与 TC/ABS 区同构）：模式 = 关闭时
-                            // 下方展开区全收，本行与上方无分隔线、完全融入卡片；
-                            // 模式 ≠ 关闭（下方弹出折叠滑条卡片）时补一条上分隔线。
-                            // ⚠️ 2026-10-05：路肩反馈已无分隔线，此处**不再**抑制
-                            //（旧条件 `&& !kerbHapticEnabled` 是为避免与路肩下沿线
-                            // 重合变粗，现已无对象）。
-                            AnimatedVisibility(
-                                visible = uiState.slipFeedbackMode != ModConfig.SlipFeedbackMode.OFF,
-                                enter = fadeIn(),
-                                exit = fadeOut()
-                            ) {
-                                top.yukonga.miuix.kmp.basic.HorizontalDivider(
-                                    modifier = Modifier.padding(horizontal = 16.dp)
-                                )
-                            }
-                            OverlayDropdownPreference(
-                                title = "抓地力反馈",
-                                summary = "1/4 强度为最佳抓地力，打滑、空转和锁死达到最大强度",
-                                items = ModConfig.SlipFeedbackMode.entries.map {
-                                    slipFeedbackModeName(it)
-                                },
-                                startAction = {
-                                    Icon(
-                                        tools.alamobile.mod.ui.DriftIcon,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = null,
-                                        tint = colorScheme.onBackground
-                                    )
-                                },
-                                selectedIndex = ModConfig.SlipFeedbackMode.entries.indexOf(
-                                    uiState.slipFeedbackMode
-                                ),
-                                onSelectedIndexChange = { index ->
-                                    actions.setSlipFeedbackMode(
-                                        ModConfig.SlipFeedbackMode.entries[index]
-                                    )
-                                },
-                            )
-                            // 起振时机滑条已移除（2026-09-21）：锚点换成逐轮轮胎
-                            // 利用率后，起振点 = 轮胎峰值的 70%（u=0.70）是用户
-                            // 规格定死的，不是可调参数——"接近极限往前一点点"是
-                            // 这条反馈的定义。留一个滑条只会诱导用户把它调丢。
-                            // 见 native/src/slip_feedback.h 的映射表。
-                            AnimatedVisibility(
-                                visible = uiState.slipFeedbackMode != ModConfig.SlipFeedbackMode.OFF,
-                                enter = expandVertically() + fadeIn(),
-                                exit = shrinkVertically() + fadeOut()
-                            ) {
-                                Column {
-                                    // 最大振动强度：只在选了振感时才有意义。范围 20-100%，
-                                    // 默认 50%（用户 2026-10-04 定案）。落到 native 之外——
-                                    // 它作用于 Java 侧振幅/时长，native 只出 0..1 电平。
-                                    AnimatedVisibility(
-                                        visible = uiState.slipFeedbackMode.hasHaptic,
-                                        enter = expandVertically() + fadeIn(),
-                                        exit = shrinkVertically() + fadeOut()
-                                    ) {
-                                        SliderPreference(
-                                            title = "最大振动强度",
-                                            // 用户规格：本项无描述。
-                                            value = uiState.slipHapticIntensity.toFloat(),
-                                            onValueChange = { v ->
-                                                actions.setSlipHapticIntensity(v.roundToInt())
-                                            },
-                                            valueRange = 20f..100f,
-                                            displayFormat = { v -> "${v.roundToInt()}%" },
-                                            icon = tools.alamobile.mod.ui.VibrationIntensityIcon
-
-                                        )
-                                    }
-                                    // 最大不透明度：与上一项同构（视觉路的封顶旋钮），
-                                    // 只在选了视觉时出现。键与振感强度**独立**——两路都开
-                                    // 时各自有各自的"满格"，见 ModConfig.KEY_SLIP_VISUAL_OPACITY。
-                                    AnimatedVisibility(
-                                        visible = uiState.slipFeedbackMode.hasVisual,
-                                        enter = expandVertically() + fadeIn(),
-                                        exit = shrinkVertically() + fadeOut()
-                                    ) {
-                                        SliderPreference(
-                                            title = "最大不透明度",
-                                            value = uiState.slipVisualOpacity.toFloat(),
-                                            onValueChange = { v ->
-                                                actions.setSlipVisualOpacity(v.roundToInt())
-                                            },
-                                            valueRange = 20f..100f,
-                                            displayFormat = { v -> "${v.roundToInt()}%" },
-                                            icon = Icons.Rounded.Opacity
-
-                                        )
-                                    }
-                                }
-                            }
-                        }
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Hub 入口卡片高度。**= 一行普通 preference 项的"两行高度"**（标题 17sp + 描述 14sp
+ * + 上下各 16dp 内边距 ≈ 72dp）。Hub 卡片只有标题一行，若不设下限会比普通设置项
+ * 明显矮一截（BasicComponent 自身下限只有 56dp），观感不统一（用户 2026-10-06 明确
+ * 要求"维持两行的高度"）。
+ */
+private val CONFIGURE_HUB_CARD_MIN_HEIGHT = 72.dp
+
+/** Hub 入口卡片：Card 包裹的 ArrowPreference（标题 + 图标 + 右侧箭头 + 点击）。 */
+@Composable
+private fun ConfigureHubCard(
+    icon: ImageVector,
+    title: String,
+    onClick: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        ArrowPreference(
+            title = title,
+            modifier = Modifier.heightIn(min = CONFIGURE_HUB_CARD_MIN_HEIGHT),
+            startAction = {
+                Icon(
+                    imageVector = icon,
+                    modifier = Modifier.padding(end = 6.dp),
+                    contentDescription = null,
+                    tint = colorScheme.onBackground,
+                )
+            },
+            onClick = onClick,
+        )
+    }
+}
+
+/**
+ * 四个配置二级页共用的骨架：TopAppBar（标题 + 返回箭头）+ 毛玻璃 + LazyColumn。
+ *
+ * 与 Hub 页外壳一致（同 12dp 页边距 / 12dp 卡间距 / 同 blur backdrop / 同边到边
+ * inset 处理），差别只有：标题可变、多一个返回箭头、内容由调用方传入。
+ */
+@Composable
+private fun ConfigureSubPageScaffold(
+    title: String,
+    bottomInnerPadding: Dp,
+    content: @Composable () -> Unit,
+) {
+    val navigator = LocalNavigator.current
+    val scrollBehavior = MiuixScrollBehavior()
+    val enableBlur = LocalEnableBlur.current
+    val backdrop = rememberBlurBackdrop(enableBlur)
+    val blurActive = backdrop != null
+    val barColor = if (blurActive) Color.Transparent else colorScheme.surface
+
+    Scaffold(
+        topBar = {
+            BlurredBar(backdrop) {
+                TopAppBar(
+                    title = title,
+                    color = barColor,
+                    scrollBehavior = scrollBehavior,
+                    navigationIcon = {
+                        // ⚠️ Icon 自身没有点击事件，必须显式 clickable（既有二级页同款写法）。
+                        Icon(
+                            Icons.AutoMirrored.Rounded.ArrowBack,
+                            modifier = Modifier
+                                .padding(12.dp)
+                                .clickable { navigator.pop() },
+                            contentDescription = "返回",
+                        )
+                    },
+                )
+            }
+        },
+        popupHost = { },
+        contentWindowInsets = WindowInsets.systemBars.add(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal),
+    ) { innerPadding ->
+        Box(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .scrollEndHaptic()
+                    .overScrollVertical()
+                    .nestedScroll(scrollBehavior.nestedScrollConnection)
+                    .padding(horizontal = 12.dp),
+                contentPadding = PaddingValues(
+                    top = innerPadding.calculateTopPadding(),
+                    bottom = innerPadding.calculateBottomPadding() + bottomInnerPadding,
+                    start = innerPadding.calculateStartPadding(LayoutDirection.Ltr),
+                    end = innerPadding.calculateEndPadding(LayoutDirection.Ltr),
+                ),
+                overscrollEffect = null,
+            ) {
+                item {
+                    Column(
+                        modifier = Modifier.padding(vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        content()
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── 二级页 1：原生特性控制 ──
+
+@Composable
+fun ConfigureNativeFeaturesScreen(
+    uiState: ConfigUiState,
+    actions: ConfigViewModel,
+    bottomInnerPadding: Dp,
+) {
+    // ABS 自定义切换警示弹窗：每次从默认切到自定义时弹（不是只弹首次）。
+    var showAbsWarnDialog by remember { mutableStateOf(false) }
+
+    ConfigureSubPageScaffold("原生特性控制", bottomInnerPadding) {
+        Card(modifier = Modifier.fillMaxWidth()) {
+            SwitchPreference(
+                title = "解锁付费内容",
+                summary = "强制解锁 DLC 和 IAP",
+                startAction = {
+                    Icon(
+                        Icons.Rounded.LockOpen,
+                        modifier = Modifier.padding(end = 6.dp),
+                        contentDescription = null,
+                        tint = colorScheme.onBackground
+                    )
+                },
+                checked = uiState.enableUnlock,
+                onCheckedChange = actions::setEnableUnlock
+            )
+            SwitchPreference(
+                title = "隐藏油门和刹车按键",
+                summary = "隐藏原生油门和刹车，保留离合",
+                startAction = {
+                    Icon(
+                        Icons.Rounded.VisibilityOff,
+                        modifier = Modifier.padding(end = 6.dp),
+                        contentDescription = null,
+                        tint = colorScheme.onBackground
+                    )
+                },
+                checked = uiState.hideGamePedals,
+                onCheckedChange = actions::setHideGamePedals
+            )
+            SwitchPreference(
+                title = "自动 DRS 与 AA",
+                summary = "在规定的区域自动打开减阻系统与主动空力套件",
+                startAction = {
+                    Icon(
+                        Icons.Rounded.Air,
+                        modifier = Modifier.padding(end = 6.dp),
+                        contentDescription = null,
+                        tint = colorScheme.onBackground
+                    )
+                },
+                checked = uiState.enableAutoDrs,
+                onCheckedChange = actions::setEnableAutoDrs
+            )
+            SwitchPreference(
+                title = "自锁式超车按键",
+                summary = "恢复老版的点按切换形式",
+                startAction = {
+                    Icon(
+                        tools.alamobile.mod.ui.BoostIcon,
+                        modifier = Modifier.padding(end = 6.dp),
+                        contentDescription = null,
+                        tint = colorScheme.onBackground
+                    )
+                },
+                checked = uiState.enableOvertakeLatch,
+                onCheckedChange = actions::setEnableOvertakeLatch
+            )
+            SwitchPreference(
+                title = "禁止删除下一圈成绩",
+                summary = "冲出赛道限制时只删除本圈成绩，大幅提升刷圈效率",
+                startAction = {
+                    Icon(
+                        tools.alamobile.mod.ui.ForbidIcon,
+                        modifier = Modifier.padding(end = 6.dp),
+                        contentDescription = null,
+                        tint = colorScheme.onBackground
+                    )
+                },
+                checked = uiState.enableProtectNextLap,
+                onCheckedChange = actions::setEnableProtectNextLap
+            )
+            // TC 调节：游戏设置没有任何 TC 参数可调（仅手柄生效的
+            // 开关且被游戏每帧覆写），模块档位是移动端唯一调节途径。
+            // 游戏默认 = 纯透传；自定义展开强度/时机两个滑条。
+            // 分隔线成组逻辑：游戏默认（子卡片全收）时 TC 行与前后
+            // 行无分隔线，完全融入卡片；自定义时整块上下各一条线
+            //（下线在 Column 内部，跟随内层收回动画——TC 关闭时
+            // 贴削减强度下边缘，不关时贴介入时机下边缘）。
+            AnimatedVisibility(
+                visible = uiState.tcMode == ModConfig.TcMode.CUSTOM,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                top.yukonga.miuix.kmp.basic.HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+            }
+            OverlayDropdownPreference(
+                title = "牵引力控制",
+                summary = "调整游戏原生 TC",
+                items = ModConfig.TcMode.entries.map { tcModeName(it) },
+                startAction = {
+                    Icon(
+                        tools.alamobile.mod.ui.TcIcon,
+                        modifier = Modifier.padding(end = 6.dp),
+                        contentDescription = null,
+                        tint = colorScheme.onBackground
+                    )
+                },
+                selectedIndex = ModConfig.TcMode.entries.indexOf(uiState.tcMode),
+                onSelectedIndexChange = { index ->
+                    actions.setTcMode(ModConfig.TcMode.entries[index])
+                },
+            )
+            AnimatedVisibility(
+                visible = uiState.tcMode == ModConfig.TcMode.CUSTOM,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column {
+                    // 强度档 = TractionFilter 返回值插值 mix
+                    //（等价于把游戏削减系数 0.85 缩放为 0.85×mix）。
+                    SliderPreference(
+                        title = "削减强度",
+                        summary = "修改 TractionFilter 返回值",
+                        value = ModConfig.TcStrength.entries.indexOf(uiState.tcStrength).toFloat(),
+                        onValueChange = { v ->
+                            actions.setTcStrength(
+                                ModConfig.TcStrength.entries[
+                                    v.roundToInt().coerceIn(0, ModConfig.TcStrength.entries.lastIndex)
+                                ]
+                            )
+                        },
+                        valueRange = 0f..(ModConfig.TcStrength.entries.lastIndex).toFloat(),
+                        displayFormat = { v ->
+                            tcStrengthName(
+                                ModConfig.TcStrength.entries[
+                                    v.roundToInt().coerceIn(0, ModConfig.TcStrength.entries.lastIndex)
+                                ]
+                            )
+                        },
+                        icon = Icons.Rounded.Tune
+                    )
+                    // 强度=关闭时 TC 整体不介入，时机无意义 → 卡片收回，
+                    // 走既有 enableTc=false 的 return accel 关闭路径。
+                    AnimatedVisibility(
+                        visible = uiState.tcStrength != ModConfig.TcStrength.OFF,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        SliderPreference(
+                            title = "介入时机",
+                            summary = "修改介入的滑移指标条件",
+                            value = ModConfig.TcTiming.entries.indexOf(uiState.tcTiming).toFloat(),
+                            onValueChange = { v ->
+                                actions.setTcTiming(
+                                    ModConfig.TcTiming.entries[
+                                        v.roundToInt().coerceIn(0, ModConfig.TcTiming.entries.lastIndex)
+                                    ]
+                                )
+                            },
+                            valueRange = 0f..(ModConfig.TcTiming.entries.lastIndex).toFloat(),
+                            displayFormat = { v ->
+                                tcTimingName(
+                                    ModConfig.TcTiming.entries[
+                                        v.roundToInt().coerceIn(0, ModConfig.TcTiming.entries.lastIndex)
+                                    ]
+                                )
+                            },
+                            icon = Icons.Rounded.Bolt
+                        )
+                    }
+                    // TC 区域下分隔线：放 Column 末尾使其跟随内层
+                    // 收回动画，下边缘自动贴住最后可见项。
+                    top.yukonga.miuix.kmp.basic.HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                }
+            }
+            // ABS 调节：游戏默认 ABS 方波泄压（b=0）过度保护——
+            // 全段几乎不锁死；且制动基数病态地强（关 ABS 100% 重刹
+            // 秒锁死）。游戏默认 = 纯透传；自定义展开干预强度滑条。
+            // "最大制动压力"是 ABS 下方独立项：制动基数修复与 ABS
+            // 模式正交（默认/关闭档下也生效）。分隔线成组逻辑同 TC 区，
+            // 上分隔线与 TC 区下分隔线条件互斥（TC 自定义时其内层
+            // Column 末尾已有下线，两条背靠背会叠成一条粗线）。
+            AnimatedVisibility(
+                visible = uiState.absMode == ModConfig.AbsMode.CUSTOM &&
+                    uiState.tcMode != ModConfig.TcMode.CUSTOM,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                top.yukonga.miuix.kmp.basic.HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+            }
+            OverlayDropdownPreference(
+                title = "防抱死制动系统",
+                summary = "调整游戏原生 ABS",
+                items = ModConfig.AbsMode.entries.map { absModeName(it) },
+                startAction = {
+                    Icon(
+                        tools.alamobile.mod.ui.AbsIcon,
+                        modifier = Modifier.padding(end = 6.dp),
+                        contentDescription = null,
+                        tint = colorScheme.onBackground
+                    )
+                },
+                selectedIndex = ModConfig.AbsMode.entries.indexOf(uiState.absMode),
+                onSelectedIndexChange = { index ->
+                    val newMode = ModConfig.AbsMode.entries[index]
+                    // 每次从默认切到自定义：弹警示——减弱干预后重刹
+                    // 易锁死，提醒配合下调最大制动压力。
+                    if (uiState.absMode == ModConfig.AbsMode.DEFAULT &&
+                        newMode == ModConfig.AbsMode.CUSTOM
+                    ) {
+                        showAbsWarnDialog = true
+                    }
+                    actions.setAbsMode(newMode)
+                },
+            )
+            AnimatedVisibility(
+                visible = uiState.absMode == ModConfig.AbsMode.CUSTOM,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column {
+                    // 干预强度 = pulse 释放深度 b(0x3E0) 覆写：
+                    // 游戏默认配平下 b=0，pulse 帧完全泄压，方波
+                    // [F_base·Ω, 0] 平均 0.5；抬 b 抬方波平均 (1+b)/2。
+                    SliderPreference(
+                        title = "干预强度",
+                        summary = "修改干预制动偏置",
+                        value = ModConfig.AbsStrength.entries.indexOf(uiState.absStrength).toFloat(),
+                        onValueChange = { v ->
+                            actions.setAbsStrength(
+                                ModConfig.AbsStrength.entries[
+                                    v.roundToInt().coerceIn(0, ModConfig.AbsStrength.entries.lastIndex)
+                                ]
+                            )
+                        },
+                        valueRange = 0f..(ModConfig.AbsStrength.entries.lastIndex).toFloat(),
+                        displayFormat = { v ->
+                            absStrengthName(
+                                ModConfig.AbsStrength.entries[
+                                    v.roundToInt().coerceIn(0, ModConfig.AbsStrength.entries.lastIndex)
+                                ]
+                            )
+                        },
+                        icon = Icons.Rounded.Tune
+                    )
+                    // ABS 区域下分隔线：放 Column 末尾跟随收回
+                    // 动画，下边缘自动贴住最后可见项（同 TC 区）。
+                    top.yukonga.miuix.kmp.basic.HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                }
+            }
+            // 最大制动压力（v6，2026-08-29）：踏板行程标尺等比映射
+            // 0-100% → 0-s·T_b，任何车速下允许的压力上限封顶保持在
+            // 原生 F_base(v)（输出 = min(s·T_b·p, F_base)），与 ABS
+            // 档位/开关完全无关（native abs_remap_brake_request，
+            // 0xF0 饱和重映射）。50-100% 无级（下限 50% 防呆保留）。
+            SliderPreference(
+                title = "最大制动压力",
+                summary = "调整游戏制动摩擦扭矩上限",
+                value = uiState.absPressure,
+                onValueChange = { v ->
+                    actions.setAbsPressure((v * 100).roundToInt() / 100f)
+                },
+                valueRange = 0.5f..1.0f,
+                displayFormat = { v -> "${(v * 100).roundToInt()}%" },
+                icon = tools.alamobile.mod.ui.BrakeCurveIcon
+            )
         }
     }
 
@@ -906,6 +614,453 @@ fun ConfigurePagerMiuix(
             }
         }
     )
+}
+
+// ── 二级页 2：Overlay 控件 ──
+
+@Composable
+fun ConfigureOverlayScreen(
+    uiState: ConfigUiState,
+    actions: ConfigViewModel,
+    bottomInnerPadding: Dp,
+) {
+    ConfigureSubPageScaffold("Overlay 控件", bottomInnerPadding) {
+        Card(modifier = Modifier.fillMaxWidth()) {
+            OverlayDropdownPreference(
+                title = "线性踏板",
+                summary = "悬浮窗踏板覆盖游戏输入",
+                items = ModConfig.PedalMode.entries.map { modeName(it) },
+                startAction = {
+                    Icon(
+                        tools.alamobile.mod.ui.PedalsIcon,
+                        modifier = Modifier.padding(end = 6.dp),
+                        contentDescription = null,
+                        tint = colorScheme.onBackground
+                    )
+                },
+                selectedIndex = ModConfig.PedalMode.entries.indexOf(uiState.pedalMode),
+                onSelectedIndexChange = { index ->
+                    actions.setPedalMode(ModConfig.PedalMode.entries[index])
+                },
+            )
+            // 死区和过渡点只在单踏板模式下有意义。
+            AnimatedVisibility(
+                visible = uiState.pedalMode == ModConfig.PedalMode.SINGLE,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column {
+                    SliderPreference(
+                        title = "死区",
+                        summary = "踏板中间过渡区域的无效范围",
+                        value = uiState.pedalDeadzone,
+                        onValueChange = actions::setPedalDeadzone,
+                        valueRange = 0f..0.2f,
+                        displayFormat = { String.format("%.0f%%", it * 100) },
+                        icon = Icons.Rounded.Straighten
+                    )
+                    SliderPreference(
+                        title = "过渡点",
+                        summary = "油门和刹车的分界位置",
+                        value = uiState.pedalTransition,
+                        onValueChange = actions::setPedalTransition,
+                        valueRange = 0.2f..0.8f,
+                        displayFormat = { String.format("%.0f%%", it * 100) },
+                        icon = Icons.Rounded.SwapVert
+                    )
+                }
+            }
+            // 双踏板模式专属配置。
+            AnimatedVisibility(
+                visible = uiState.pedalMode == ModConfig.PedalMode.DUAL,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column {
+                    OverlayDropdownPreference(
+                        title = "踏板优先级",
+                        summary = "双踏板同时按下时的优先策略",
+                        items = ModConfig.PedalPriority.entries.map { priorityName(it) },
+                        startAction = {
+                            Icon(
+                                Icons.Rounded.PriorityHigh,
+                                modifier = Modifier.padding(end = 6.dp),
+                                contentDescription = null,
+                                tint = colorScheme.onBackground
+                            )
+                        },
+                        selectedIndex = ModConfig.PedalPriority.entries.indexOf(uiState.pedalPriority),
+                        onSelectedIndexChange = { index ->
+                            actions.setPedalPriority(ModConfig.PedalPriority.entries[index])
+                        },
+                    )
+                    // 根据油门数值判断 → 显示油门过渡点滑块
+                    AnimatedVisibility(
+                        visible = uiState.pedalPriority == ModConfig.PedalPriority.THROTTLE_VALUE,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        SliderPreference(
+                            title = "油门过渡点",
+                            summary = "油门值超过此点则油门优先，否则刹车优先",
+                            value = uiState.throttleTransition,
+                            onValueChange = actions::setThrottleTransition,
+                            valueRange = 0.01f..0.99f,
+                            displayFormat = { String.format("%.0f%%", it * 100) },
+                            icon = Icons.Rounded.SwapVert
+                        )
+                    }
+                    // 根据刹车数值判断 → 显示刹车过渡点滑块
+                    AnimatedVisibility(
+                        visible = uiState.pedalPriority == ModConfig.PedalPriority.BRAKE_VALUE,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        SliderPreference(
+                            title = "刹车过渡点",
+                            summary = "刹车值超过此点则刹车优先，否则油门优先",
+                            value = uiState.brakeTransition,
+                            onValueChange = actions::setBrakeTransition,
+                            valueRange = 0.01f..0.99f,
+                            displayFormat = { String.format("%.0f%%", it * 100) },
+                            icon = Icons.Rounded.SwapVert
+                        )
+                    }
+                    OverlayDropdownPreference(
+                        title = "踏板方向反转",
+                        summary = "反转踏板的行程填充方向",
+                        items = ModConfig.PedalInvert.entries.map { invertName(it) },
+                        startAction = {
+                            Icon(
+                                Icons.Rounded.Flip,
+                                modifier = Modifier.padding(end = 6.dp),
+                                contentDescription = null,
+                                tint = colorScheme.onBackground
+                            )
+                        },
+                        selectedIndex = ModConfig.PedalInvert.entries.indexOf(uiState.pedalInvert),
+                        onSelectedIndexChange = { index ->
+                            actions.setPedalInvert(ModConfig.PedalInvert.entries[index])
+                        },
+                    )
+                }
+            }
+
+            // ── Overlay 视觉属性（所有踏板模式通用）──
+            SliderPreference(
+                title = "控件透明度",
+                summary = "整个控件的透明度",
+                value = uiState.overlayAlpha,
+                onValueChange = actions::setOverlayAlpha,
+                valueRange = 0f..1f,
+                displayFormat = { String.format("%.0f%%", it * 100) },
+                icon = Icons.Rounded.Opacity
+            )
+            SliderPreference(
+                title = "边框粗细",
+                summary = "控件边框宽度，0 表示不显示边框",
+                value = uiState.overlayBorderWidth,
+                onValueChange = actions::setOverlayBorderWidth,
+                valueRange = 0f..10f,
+                displayFormat = { String.format("%.1f dp", it) },
+                icon = Icons.Rounded.BorderOuter
+            )
+            SliderPreference(
+                title = "边框圆角",
+                summary = "圆角半径 = 比例 × 短边/2，0% 时为直角",
+                value = uiState.overlayCornerRadius,
+                onValueChange = actions::setOverlayCornerRadius,
+                valueRange = 0f..1f,
+                displayFormat = { String.format("%.0f%%", it * 100) },
+                icon = Icons.Rounded.RoundedCorner
+            )
+            // TC/ABS 介入指示灯——Overlay 控件区最后一项。
+            // 开关只控制 Java 层 view 创建，广播重建即生效。
+            SwitchPreference(
+                title = "TC/ABS 介入指示灯",
+                summary = "在牵引力控制和防抱死制动系统干预时显示闪烁的指示灯",
+                startAction = {
+                    Icon(
+                        Icons.Rounded.Lightbulb,
+                        modifier = Modifier.padding(end = 6.dp),
+                        contentDescription = null,
+                        tint = colorScheme.onBackground
+                    )
+                },
+                checked = uiState.enableTcAbsIndicator,
+                onCheckedChange = actions::setEnableTcAbsIndicator
+            )
+        }
+    }
+}
+
+// ── 二级页 3：响应曲线 ──
+//
+// ⚠️ 拆成独立页后**不再按踏板模式收起**（2026-10-06 用户定案）：旧配置页把整块
+// 响应曲线包在 `pedalMode != OFF` 的 AnimatedVisibility 里（"没有踏板就没有曲线
+// 可调"），但独立页面上该条件会让整页变空白——用户点进来只看到标题栏。曲线设置在
+// 踏板关闭时确实无作用，但保留可见性比"点进去什么都没有"更好。
+
+@Composable
+fun ConfigureCurvesScreen(
+    uiState: ConfigUiState,
+    actions: ConfigViewModel,
+    bottomInnerPadding: Dp,
+) {
+    ConfigureSubPageScaffold("响应曲线", bottomInnerPadding) {
+        Card(modifier = Modifier.fillMaxWidth()) {
+            OverlayDropdownPreference(
+                title = "油门响应曲线",
+                summary = "油门踏板控件行程到游戏原生油门的映射方式",
+                items = ModConfig.PedalCurve.entries.map { curveName(it) },
+                startAction = {
+                    Icon(
+                        Icons.Rounded.Speed,
+                        modifier = Modifier.padding(end = 6.dp),
+                        contentDescription = null,
+                        tint = colorScheme.onBackground
+                    )
+                },
+                selectedIndex = ModConfig.PedalCurve.entries.indexOf(uiState.throttleCurve),
+                onSelectedIndexChange = { index ->
+                    actions.setThrottleCurve(ModConfig.PedalCurve.entries[index])
+                },
+            )
+            AnimatedVisibility(
+                visible = uiState.throttleCurve == ModConfig.PedalCurve.CUSTOM,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column {
+                    // 油门响应曲线 与 图表 之间的分隔线。
+                    top.yukonga.miuix.kmp.basic.HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                    CurveEditor(
+                        points = uiState.throttleCurvePoints,
+                        onPointsChange = actions::setThrottleCurvePoints,
+                    )
+                    // 图表 与 刹车响应曲线 之间的分隔线。
+                    top.yukonga.miuix.kmp.basic.HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                }
+            }
+            OverlayDropdownPreference(
+                title = "刹车响应曲线",
+                summary = "刹车踏板控件行程到游戏原生刹车的映射方式",
+                items = ModConfig.PedalCurve.entries.map { curveName(it) },
+                startAction = {
+                    Icon(
+                        tools.alamobile.mod.ui.BrakeCurveIcon,
+                        modifier = Modifier.padding(end = 6.dp),
+                        contentDescription = null,
+                        tint = colorScheme.onBackground
+                    )
+                },
+                selectedIndex = ModConfig.PedalCurve.entries.indexOf(uiState.brakeCurve),
+                onSelectedIndexChange = { index ->
+                    actions.setBrakeCurve(ModConfig.PedalCurve.entries[index])
+                },
+            )
+            AnimatedVisibility(
+                visible = uiState.brakeCurve == ModConfig.PedalCurve.CUSTOM,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column {
+                    // 刹车响应曲线 与 图表 之间的分隔线。
+                    top.yukonga.miuix.kmp.basic.HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                    CurveEditor(
+                        points = uiState.brakeCurvePoints,
+                        onPointsChange = actions::setBrakeCurvePoints,
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ── 二级页 4：杂项 ──
+
+@Composable
+fun ConfigureMiscScreen(
+    uiState: ConfigUiState,
+    actions: ConfigViewModel,
+    bottomInnerPadding: Dp,
+) {
+    // 路肩振感开启确认弹窗：打开路肩开关且抓地力反馈含振感时弹（每次都要确认）。
+    var showKerbWarnDialog by remember { mutableStateOf(false) }
+
+    ConfigureSubPageScaffold("杂项", bottomInnerPadding) {
+        Card(modifier = Modifier.fillMaxWidth()) {
+            SwitchPreference(
+                title = "替换主菜单音乐",
+                summary = "更改为 Hans Zimmer - F1",
+                startAction = {
+                    Icon(
+                        Icons.Rounded.MusicNote,
+                        modifier = Modifier.padding(end = 6.dp),
+                        contentDescription = null,
+                        tint = colorScheme.onBackground
+                    )
+                },
+                checked = uiState.enableMusicReplace,
+                onCheckedChange = actions::setEnableMusicReplace
+            )
+            SwitchPreference(
+                title = "替换开场动画背景音",
+                summary = "更改为 V10 引擎声浪",
+                startAction = {
+                    Icon(
+                        Icons.Rounded.GraphicEq,
+                        modifier = Modifier.padding(end = 6.dp),
+                        contentDescription = null,
+                        tint = colorScheme.onBackground
+                    )
+                },
+                checked = uiState.enableV10Sound,
+                onCheckedChange = actions::setEnableV10Sound
+            )
+            // ── 路肩振感反馈（抓地力反馈上方）──
+            // 信号源**不是模块自造的判据**：`IRDSWheel.materialIndex
+            // (0x2E8) == -5` 就是游戏自己判定"在路肩上"的那一条
+            //（反汇编 IRDSCarVisuals.TireModelVisuals 0x1A68B4C 实证：
+            // 游戏用同一个判断置 carController.kerbSound，而
+            // IRDSSoundController.kerbSoundUpdate 读它播路肩音）。
+            // 所以本功能与游戏路肩音逐帧同步，模块不分析赛道区域。
+            //
+            // ⚠️ **不再画任何分隔线**（2026-10-05 用户定案）：路肩
+            // 原先"开关 + 强度滑条"两行，需要上下沿各一条线分组；滑条
+            // 删除后只剩一行开关，分隔线已无意义 ⇒ 整块融入卡片，与
+            // 上下项之间不再画线。同理抓地力反馈的上沿分隔线也**不再
+            // 因路肩而抑制**（去掉 `&& !kerbHapticEnabled`）。
+            SwitchPreference(
+                title = "路肩振感反馈",
+                summary = "压过路肩时的粗粒度振动",
+                startAction = {
+                    Icon(
+                        tools.alamobile.mod.ui.KerbIcon,
+                        modifier = Modifier.padding(end = 6.dp),
+                        contentDescription = null,
+                        tint = colorScheme.onBackground
+                    )
+                },
+                checked = uiState.kerbHapticEnabled,
+                // 打开时若抓地力反馈含振感（振感 / 全部）→ 先弹确认：
+                // 路肩会覆盖抓地力振感，可能影响抓地力判断（用户 2026-10-05 定案）。
+                // 关闭 / 抓地力无振感 → 直接生效。
+                onCheckedChange = { on ->
+                    if (on && uiState.slipFeedbackMode.hasHaptic) {
+                        showKerbWarnDialog = true
+                    } else {
+                        actions.setKerbHapticEnabled(on)
+                    }
+                }
+            )
+            // ── 抓地力反馈（杂项区最下方）──
+            // 把「当前滑移率离抓地力峰值有多远」变成可感知的反馈。
+            // 起振锚点是轮胎真实峰值 maxSlip（u = |σ|/maxSlip），
+            // 不是游戏 ABS 的固定阈值 0.15——后者在实测 maxSlip≈0.094 下
+            // 对应 u≈1.6，即"已越过峰值 60%"才起振，方向相反。
+            // 视觉条与指示灯同形（贴边横条），但走连续不透明度而非闪烁。
+            //
+            // 上方分隔线成组逻辑（与 TC/ABS 区同构）：模式 = 关闭时
+            // 下方展开区全收，本行与上方无分隔线、完全融入卡片；
+            // 模式 ≠ 关闭（下方弹出折叠滑条卡片）时补一条上分隔线。
+            // ⚠️ 2026-10-05：路肩反馈已无分隔线，此处**不再**抑制
+            //（旧条件 `&& !kerbHapticEnabled` 是为避免与路肩下沿线
+            // 重合变粗，现已无对象）。
+            AnimatedVisibility(
+                visible = uiState.slipFeedbackMode != ModConfig.SlipFeedbackMode.OFF,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                top.yukonga.miuix.kmp.basic.HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+            }
+            OverlayDropdownPreference(
+                title = "抓地力反馈",
+                summary = "1/4 强度为最佳抓地力，打滑、空转和锁死达到最大强度",
+                items = ModConfig.SlipFeedbackMode.entries.map {
+                    slipFeedbackModeName(it)
+                },
+                startAction = {
+                    Icon(
+                        tools.alamobile.mod.ui.DriftIcon,
+                        modifier = Modifier.padding(end = 6.dp),
+                        contentDescription = null,
+                        tint = colorScheme.onBackground
+                    )
+                },
+                selectedIndex = ModConfig.SlipFeedbackMode.entries.indexOf(
+                    uiState.slipFeedbackMode
+                ),
+                onSelectedIndexChange = { index ->
+                    actions.setSlipFeedbackMode(
+                        ModConfig.SlipFeedbackMode.entries[index]
+                    )
+                },
+            )
+            // 起振时机滑条已移除（2026-09-21）：锚点换成逐轮轮胎
+            // 利用率后，起振点 = 轮胎峰值的 70%（u=0.70）是用户
+            // 规格定死的，不是可调参数——"接近极限往前一点点"是
+            // 这条反馈的定义。留一个滑条只会诱导用户把它调丢。
+            // 见 native/src/slip_feedback.h 的映射表。
+            AnimatedVisibility(
+                visible = uiState.slipFeedbackMode != ModConfig.SlipFeedbackMode.OFF,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column {
+                    // 最大振动强度：只在选了振感时才有意义。范围 20-100%，
+                    // 默认 50%（用户 2026-10-04 定案）。落到 native 之外——
+                    // 它作用于 Java 侧振幅/时长，native 只出 0..1 电平。
+                    AnimatedVisibility(
+                        visible = uiState.slipFeedbackMode.hasHaptic,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        SliderPreference(
+                            title = "最大振动强度",
+                            // 用户规格：本项无描述。
+                            value = uiState.slipHapticIntensity.toFloat(),
+                            onValueChange = { v ->
+                                actions.setSlipHapticIntensity(v.roundToInt())
+                            },
+                            valueRange = 20f..100f,
+                            displayFormat = { v -> "${v.roundToInt()}%" },
+                            icon = tools.alamobile.mod.ui.VibrationIntensityIcon
+
+                        )
+                    }
+                    // 最大不透明度：与上一项同构（视觉路的封顶旋钮），
+                    // 只在选了视觉时出现。键与振感强度**独立**——两路都开
+                    // 时各自有各自的"满格"，见 ModConfig.KEY_SLIP_VISUAL_OPACITY。
+                    AnimatedVisibility(
+                        visible = uiState.slipFeedbackMode.hasVisual,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        SliderPreference(
+                            title = "最大不透明度",
+                            value = uiState.slipVisualOpacity.toFloat(),
+                            onValueChange = { v ->
+                                actions.setSlipVisualOpacity(v.roundToInt())
+                            },
+                            valueRange = 20f..100f,
+                            displayFormat = { v -> "${v.roundToInt()}%" },
+                            icon = Icons.Rounded.Opacity
+
+                        )
+                    }
+                }
+            }
+        }
+    }
 
     // 路肩振感开启确认（用户 2026-10-05 定案）：打开路肩开关且抓地力反馈含振感时
     // 弹一次。左灰「取消」= 不改变开关；右蓝「确认」= 真正打开。
@@ -925,7 +1080,7 @@ fun ConfigurePagerMiuix(
                 Spacer(modifier = Modifier.height(20.dp))
                 androidx.compose.foundation.layout.Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     TextButton(
                         text = "取消",
@@ -973,7 +1128,7 @@ private fun SliderPreference(
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
         androidx.compose.foundation.layout.Row(
-            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth()
         ) {
             Icon(
@@ -1223,7 +1378,7 @@ private fun CurveEditor(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 8.dp),
-            contentAlignment = androidx.compose.ui.Alignment.Center
+            contentAlignment = Alignment.Center
         ) {
             // 坐标轴标签（绘制在 Canvas 上，避免额外节点）。
             ChartCanvas(

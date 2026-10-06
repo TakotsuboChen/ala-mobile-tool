@@ -19,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
@@ -161,6 +162,11 @@ class ConfigActivity : ComponentActivity() {
                 LocalEnableFloatingBottomBarBlur provides uiState.enableFloatingBottomBarBlur,
                 LocalEnableNavigationBadge provides uiState.enableNavigationBadge,
                 tools.alamobile.mod.ui.LocalUiMode provides uiState.uiMode,
+                // 业务配置 VM 提到 Activity 层共享（2026-10-06）：NavEntry 粒度的
+                // ViewModelStoreOwner 会让各页面各拿一份实例，导致跨页状态覆盖 +
+                // 300ms debounce 写入被导航取消（详见 LocalConfigViewModel 注释）。
+                tools.alamobile.mod.ui.viewmodel.LocalConfigViewModel provides
+                    viewModel<tools.alamobile.mod.ui.viewmodel.ConfigViewModel>(),
             ) {
                 MiuixTheme(
                     colors = if (darkMode) darkColorScheme() else lightColorScheme()
@@ -188,6 +194,21 @@ class ConfigActivity : ComponentActivity() {
                                 entry<Route.About> { AboutScreen() }
                                 entry<Route.Paddock> { tools.alamobile.mod.ui.screen.paddock.LeaderboardScreen() }
                                 entry<Route.Avatar> { tools.alamobile.mod.ui.screen.paddock.AvatarScreen() }
+                                // 配置 Hub 的四个二级页（2026-10-06）。push 进来后
+                                // NavDisplay 只渲染栈顶，MainScreen（含底栏）整页让位，
+                                // 故不需要底栏内边距 → bottomInnerPadding = 0.dp。
+                                entry<Route.ConfigureNativeFeatures> {
+                                    tools.alamobile.mod.ui.screen.configure.ConfigureNativeFeaturesPager(0.dp)
+                                }
+                                entry<Route.ConfigureOverlay> {
+                                    tools.alamobile.mod.ui.screen.configure.ConfigureOverlayPager(0.dp)
+                                }
+                                entry<Route.ConfigureCurves> {
+                                    tools.alamobile.mod.ui.screen.configure.ConfigureCurvesPager(0.dp)
+                                }
+                                entry<Route.ConfigureMisc> {
+                                    tools.alamobile.mod.ui.screen.configure.ConfigureMiscPager(0.dp)
+                                }
                             }
                         )
                     }

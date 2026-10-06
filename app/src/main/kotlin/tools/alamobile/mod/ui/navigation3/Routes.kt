@@ -39,4 +39,21 @@ sealed interface Route : NavKey, Parcelable {
     @Parcelize
     @Serializable
     data object About : Route
+
+    // ── 配置页 Hub 的四个二级页（配置首页拆成四张入口卡片）──
+    @Parcelize
+    @Serializable
+    data object ConfigureNativeFeatures : Route
+
+    @Parcelize
+    @Serializable
+    data object ConfigureOverlay : Route
+
+    @Parcelize
+    @Serializable
+    data object ConfigureCurves : Route
+
+    @Parcelize
+    @Serializable
+    data object ConfigureMisc : Route
 }
