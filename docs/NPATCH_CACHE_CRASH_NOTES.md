@@ -1,6 +1,18 @@
-# NPatch 缓存损坏导致的启动闪退 — 调查记录
+# NPatch 缓存问题导致的启动闪退 — 调查记录
 
-> 结论一句话：**这是 NPatch（本地注入框架）框架层的 bug，与 `ala-mobile-tool` 模块无关。**
+> ⚠️ **本文件记录两个不同的 NPatch 缓存 bug，症状极像、根因完全不同，排查前先对号入座**：
+>
+> | | Bug A（#147，§1–§10） | Bug B（Android 16 W^X，§11） |
+> |---|---|---|
+> | 崩溃栈 | `Unable to instantiate application` → `Resources.getAssets()` **NPE** | `Unable to instantiate application` → `SecurityException: Writable dex file ... is not allowed` |
+> | 根因 | 缓存 **内容损坏**（无完整性校验/无 fsync/无锁） | 缓存**权限可写**（未设只读） |
+> | 触发条件 | 任意 Android 版本 | **Android 14+（本机 Android 16 实证）** |
+> | 用户侧解法 | **清「游戏」缓存**（不是 NPatch 数据） | **无效**（清缓存重建后权限仍是 600）→ 只能升级 NPatch 到 **830+**（已修） |
+> | 上游状态 | 1.0.8 已修（原子写 + 锁） | **830 测试版已修**（维护者 @nikobe918 确认：修了缓存未设只读） |
+>
+> **一句话区分**：崩溃栈里出现 `Writable dex file ... is not allowed` = Bug B；出现 `Resources.getAssets()` null = Bug A。
+
+> 结论一句话（Bug A）：**这是 NPatch（本地注入框架）框架层的 bug，与 `ala-mobile-tool` 模块无关。**
 > 根因 = NPatch 保存的 origin-apk 缓存文件损坏，而 NPatch 对缓存命中**只检查文件是否存在、不校验完整性**，导致每次启动都用坏文件构建 Resources → 系统静默失败 → 实例化 Application 时 NPE。
 >
 > **用户侧解法：清「游戏」的缓存（不是 NPatch 的数据），或卸载重装。** 见 §8.1。
@@ -208,3 +220,45 @@ AOSP 侧无负缓存、无重试：`null` 一旦赋进 `mResources` 就**永久�
 ## 10. 一句话总结
 
 **NPatch 的 origin-apk 缓存无完整性校验 + 无 fsync + 无锁（同仓库别处都有）→ 缓存一旦写坏就常驻 → 每次启动以坏文件建 Resources → AOSP 静默吞成 null → `getAssets()` NPE → 系统包成「无法实例化 Application」。与模块、PairIP、作用域、重启、Android 版本均无关；**清「游戏」的缓存即修**（三次报告验证，例 3 一次即愈）——**清 NPatch 管理器的数据无效且有害**。**
+
+---
+
+## 11. Bug B：Android 16 W^X「可写 dex」拒绝加载（2026-10-06 新增）
+
+> **与 §1–§10 的 Bug A（#147）是两回事**：症状同（都崩在 `Unable to instantiate application`），
+> 但 Bug A 是缓存**内容坏**、Bug B 是缓存**权限可写**。⚠️ **Bug B 清游戏缓存无效**（重建后权限仍是 600）。
+
+### 11.1 现象与证据链 [V]
+
+| 证据 | 值 |
+|---|---|
+| 崩溃栈 | `RuntimeException: Unable to instantiate application ... : SecurityException: Writable dex file '/data/user/0/<pkg>/cache/code_cache/<hash>.apk' is not allowed`（`Caused by` 在 `dalvik.system.DexFile.openDexFileNative`） |
+| 设备 | MEIZU 20 / Flyme 12.6 / **Android 16（API 36）** |
+| 缓存 APK 权限 | `-rw-------`（**600，owner 可写**） |
+| 崩溃时刻 | 装新包后首次启动；**旧缓存（1.0.7 写的）启动正常** |
+| 修复验证 | NPatch **830 测试版**：同一文件权限变 **`-r--------`（400，只读）** → 启动成功、模块正常加载 [V] |
+| 上游确认 | 维护者 @nikobe918 确认 830 **修了"缓存未设只读"** [V] |
+
+### 11.2 机制 [V]
+
+Android 14+ 的 **W^X（Write xor Execute）** 规则：**dex 文件若位于应用可写目录（如 `cache/code_cache/`），就不能带写权限位**。NPatch 把 `origin.apk` 解包到游戏的 `cache/code_cache/` 时若保留可写权限，Android 16 的 `DexFile.openDexFileNative` 直接抛 `SecurityException` → Application 实例化失败 → 白屏闪退。
+
+**为什么是"修 A 引入 B"的回归**：NPatch 0.7.4 的更新日志明写「**自動將快取後的 APK 設為「唯讀」狀態**」——即**曾经设过只读**。1.0.8 为修 #147 重写了 origin.apk 写入路径（临时文件 + fsync + 原子 rename），**把 `setReadOnly()` 那步弄丢了** → Android 16 上必崩。**与打包版本、模块、PairIP、作用域均无关**（崩在模块加载之前）。
+
+### 11.3 用户侧处置 [V]
+
+- **唯一可行解法 = 升级 NPatch 到 830+**（清缓存/清数据**均无效**——权限由框架写入决定，重建后仍 600）。
+- ⚠️ **不能靠"清游戏缓存"救**（那是 Bug A 的处方）——这正是两 bug 必须区分的原因：误用 Bug A 处方会让用户白折腾。
+- 用户群 99% 无 root（见记忆 [[users-cannot-use-adb]]），**`chmod 400` 这个 workaround 对终端用户不可行**，只能等/用修复版 NPatch。
+- 判定指纹（无 adb）：崩溃栈含 `Writable dex file ... is not allowed` 即本 bug，与 Android 版本强相关（14+，本机 16 实证）。
+
+### 11.4 与 Bug A 的对照速查
+
+| | Bug A（#147） | Bug B（本节） |
+|---|---|---|
+| 崩溃栈关键行 | `Resources.getAssets()` **NPE** | `SecurityException: Writable dex file` |
+| 根因 | 缓存内容损坏 | 缓存权限可写 |
+| 触发系统 | 任意 | **Android 14+** |
+| 清游戏缓存 | **有效** | **无效** |
+| 解法 | 清游戏缓存 / 重装 | **升级 NPatch 830+** |
+| 上游状态 | 1.0.8 已修 | 830 测试版已修 |
