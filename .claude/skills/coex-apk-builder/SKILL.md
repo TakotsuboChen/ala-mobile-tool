@@ -171,6 +171,36 @@ sed -i 's|<activity android:exported="false" android:name="com.pairip.licenseche
 sed -i '0,/<application/{s|<application|<uses-permission android:name="android.permission.VIBRATE"/>\n    <application|}' AndroidManifest.xml
 ```
 
+### 阶段 4.8：打「打包修订号」后缀（2026-10-06 引入）
+
+**背景**：同一引擎版本期间对共存包做改动时（NPatch 版本升级、补权限、修打包问题），
+`versionCode` **必须保持与官版一致**（= `200150`）——它同时是 IL2CPP 偏移安全键和围场
+榜单分区键。为了仍能区分"旧共存包 / 新共存包"，把**打包修订号**写进 `versionName` 后缀：
+
+```
+官版    versionName = "8.0.6"          ← 完全不动
+共存版  versionName = "8.0.6 Fix 1"    ← Fix N = 本次打包修订号
+```
+
+模块的 `VersionGate` 据此判定：共存版要求 `Fix N >= MIN_COEX_FIX`（当前 = 1），
+旧共存包（无后缀 = Fix 0）被拦截（零 hook + Toast 提示下载最新共存版）。
+
+```bash
+cd v8.0.X-coex-dec
+# ⚠️ apktool 2.7.0 把 versionName 存在 apktool.yml 的 versionInfo，**不在 AndroidManifest.xml**
+# （实测 manifest 里 grep android:versionName 零命中）。改这里：
+VER=8.0.6; FIX=1
+sed -i "s/^  versionName: .*/  versionName: $VER Fix $FIX/" apktool.yml
+# 验证（yml）：
+grep -A2 versionInfo apktool.yml
+```
+
+⚠️ **`versionCode` 一个字都不要动**（保持与官版相同）。
+⚠️ **新引擎版本（如 8.0.7）按最新标准打包时，不需要 Fix 后缀**——此时模块的
+`SUPPORTED_VERSION_NAME/CODE` 会随升版一起更新，官版/共存版都用裸版本名即可，Fix 从 0 重新起算。
+⚠️ 改完务必用 `aapt2 dump badging <apk> | grep versionName` 复核成品（确认 apktool 把
+yml 的 versionName 正确写回了 manifest）。
+
 ### 阶段 5：删除 stamp 相关文件
 
 ```bash
@@ -329,6 +359,11 @@ adb push "<本地路径>/Ala Mobile 8.0.6 Takotsubo 共存版.apk" "/sdcard/Down
 
 ⚠️ **目标必须写完整文件路径**——只给 `/sdcard/Download/` 时中文+空格文件名会解析失败报 `remote couldn't create file: Is a directory`（且输出仍显示 "1 file pushed" 假成功）。推完必须 `adb shell "md5sum '<手机路径>'"` 与本地 md5 对照。
 
+⚠️ **NPatch 注入会写入 `assets/npatch/`（config.json/loader.bin/origin.apk/libnpatch.so 等），
+所以推给用户的是「裸共存版（无 npatch 段）」**——本流程产出的即裸包，用户在自己的手机上用
+NPatch 注入 + 自签。**不要在本地做 NPatch 注入**（注入产物是用户专属的 origin.apk 快照，
+与用户的 NPatch 版本/配置绑定，必须由用户在手机上生成）。
+
 ### 阶段 9：安装与验证
 
 ```bash
@@ -438,6 +473,19 @@ sed -i '/splits0/d' res/values/public.xml
 
 **修复**：用 `apksigner`（不是 `jarsigner`）签名，确保 v2/v3。targetSdk 35 强制 v3。
 
+### 6.7 装好后启动**白屏然后闪退**，日志含 `Writable dex file ... is not allowed`
+
+**症状**：NPatch 注入 + 安装成功，但一开就白屏闪退；NPatch 日志（`Android/media/<游戏包>/npatch/log/`）里
+`Unable to instantiate application ... Caused by: java.lang.SecurityException: Writable dex file
+'/data/user/0/<游戏包>/cache/code_cache/<hash>.apk' is not allowed`。
+
+**根因**：**NPatch 框架 bug（不是共存包/模块的问题）**。Android 14+ 的 **W^X 规则**禁止加载
+**位于可写目录且带写权限**的 dex；NPatch 1.0.8 把 origin.apk 缓存解包到 `cache/code_cache/` 时
+**未设只读**（权限 600）→ Android 16 拒绝 → 崩。⚠️ **清游戏缓存无效**（重建后仍是 600）。
+
+**修复**：升级 **NPatch 到 830+**（维护者已确认修复缓存未设只读）。**不要**让用户"清游戏缓存"
+（那是另一个 bug #147 的处方，对本问题无效）。详见 `docs/NPATCH_CACHE_CRASH_NOTES.md` §11。
+
 ## 7. Keystore 信息
 
 - **路径**：`/home/takotsubo/projects/ala-mobile-tool/ala-mobile-tool.keystore`
@@ -488,7 +536,7 @@ cp coex-8.0.X-signed.apk "../../安装包/Ala Mobile 8.0.X Takotsubo 共存版.a
 3. **对比 LicenseClient.smali**：检查 `checkLicense` / `initializeLicenseCheck` / `performLocalInstallerCheck` 方法签名是否变化
 4. **对比 manifest**：检查是否有新的 `com.android.stamp.*` / `com.android.vending.*` metadata
 5. **生成新 doNotCompress 列表**：`find v8.0.X-coex-dec/assets -type f`（排除 .dat）
-6. **更新 VersionGate.kt**：加入新 versionCode
+6. **更新 VersionGate.kt**：改 `SUPPORTED_VERSION_NAME/CODE`（新引擎版本）；同引擎内只改打包时**不动**这两个常量，只走阶段 4.8 的 Fix 后缀
 7. **更新 OffsetTable.kt**：重新跑 Il2CppDumper，提取新偏移量
 8. **制作共存版 APK**：按本 skill 流程
 9. **真机验证**：不跳 Play + 不黑屏 + 模块功能正常
