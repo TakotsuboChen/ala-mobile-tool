@@ -499,16 +499,42 @@ sed -i '/splits0/d' res/values/public.xml
 
 ## 8. 产物归档
 
-制作完成后：
-```bash
-# 复制到安装包目录
-cp coex-8.0.X-signed.apk "../../安装包/Ala Mobile 8.0.X Takotsubo 共存版.apk"
+### 8.1 命名约定（2026-10-06 用户定案，固定遵循）
 
-# 保留 build 下副本
-# coex-8.0.X-signed.apk（最终签名版）
-# coex-8.0.X-rebuilt.apk（apktool 打包未签名）
-# coex-8.0.X-bak.apk（上一版备份，可选）
+共存版产物统一以**应用名 `Ala Mobile Pro`** 开头（不用 `Takotsubo 共存版`），按是否已 NPatch 修补区分：
+
 ```
+已修补 + 自签 → 安装包/Ala Mobile Pro <引擎版本> Fix <N>.apk
+未修补 + 自签 → 安装包/Ala Mobile Pro <引擎版本> Fix <N> 原版.apk
+```
+
+例：`Ala Mobile Pro 8.0.6 Fix 1.apk`（NPatch 修补后）/ `Ala Mobile Pro 8.0.6 Fix 1 原版.apk`（裸包）。
+
+- **「原版」= 未修补的裸包**（`assets/npatch/` 段为空，签名 `CN=AlaMobileTool`）——给用户 NPatch 注入用。
+- **无「原版」后缀 = 已 NPatch 修补**（含 5 个 `assets/npatch/` 条目，被 NPatch 重签）。
+- 判别指纹：`unzip -l <apk> | grep -c "assets/npatch/"` → `0` = 原版裸包，`5` = 已修补。
+- `Fix <N>` 与模块门控判据同源（见阶段 4.8）：`Fix 1` 起，同引擎内改动递增；新引擎版本（如 8.0.7）按最新标准打包、无 Fix 后缀。
+
+### 8.2 归档动作
+
+```bash
+# 1. 裸包（apktool 产出 + apksigner 自签）→ 安装包/<名字> 原版.apk
+cp build/v8.0.X-official/coex-8.0.X-fixN-signed.apk \
+   "安装包/Ala Mobile Pro 8.0.X Fix N 原版.apk"
+
+# 2. 推裸包到手机 Download，用户用 NPatch 注入 + 自签（阶段 8a）
+# 3. 用户修补完成后，从手机拉回 → 安装包/<名字>.apk（无「原版」后缀）
+adb pull "/sdcard/Download/Ala Mobile Pro 8.0.X Fix N.apk" \
+         "安装包/Ala Mobile Pro 8.0.X Fix N.apk"
+md5sum "安装包/Ala Mobile Pro 8.0.X Fix N.apk"   # 与 adb shell md5sum 对照
+
+# build 下保留中间产物：
+#   coex-8.0.X-fixN-rebuilt.apk（apktool 打包未签名）
+#   coex-8.0.X-fixN-aligned.apk（zipalign 后）
+#   coex-8.0.X-fixN-signed.apk（最终签名 = 原版.apk 的来源）
+```
+
+⚠️ **旧命名的历史包（`Ala Mobile 8.0.6 Takotsubo 共存版.apk` 等）保留不动**，不回溯重命名（用户 2026-10-06 定案）。
 
 ## 9. 与模块的集成
 
