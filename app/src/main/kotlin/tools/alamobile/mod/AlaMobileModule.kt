@@ -91,6 +91,12 @@ class AlaMobileModule : XposedModule() {
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         logX(Log.INFO, TAG, "Module loaded in process ${param.processName}")
         markActivated()
+        // ⚠️ 日志初始化必须先于一切门控 return（2026-10-06 修复）：门控激活时
+        // 各路径在 Logger.init 之前 return，导致"被拦截"这一最需诊断的场景
+        // **零文件日志**（只有 logcat，游戏进程 logcat 极吵，约 1 分钟被冲掉）
+        // ——用户导出日志读到的是上一次正常跑的日志，排查方向被误导。
+        // Logger.init 只设日志目录、不装任何 hook，不违反"判定前零 Hook"红线。
+        initGameLogger()
         // 启动门控——最早的判定点（先于一切 hook）。onModuleLoaded 是框架注入
         // 的第一个回调，早于 onPackageLoaded/onPackageReady 的所有延迟块。
         // 两种失配都在此拦截：① 游戏版本不匹配（错版本装 hook = 开屏闪退，见
@@ -101,6 +107,23 @@ class AlaMobileModule : XposedModule() {
             tools.alamobile.mod.update.ForceUpdateGate.evaluate(getAppContext())
         } catch (e: Throwable) {
             logX(Log.WARN, TAG, "ForceUpdateGate onModuleLoaded failed (fail-open): ${e.message}")
+        }
+    }
+
+    /**
+     * 初始化游戏进程的 Logger 文件目录（幂等）。**必须在所有门控 return 之前调用**——
+     * 门控激活（拦截）路径同样要写文件日志，否则导出日志看不到拦截现场（见
+     * [onModuleLoaded] 注释）。只设置日志目录、不装 hook，与门控语义无冲突。
+     *
+     * context 为 null（NPatch 早期）时静默跳过，由 [doPackageReadyDeferred] 在
+     * 主线程 next loop（context 通常已可用）补一次。
+     */
+    private fun initGameLogger() {
+        try {
+            val ctx = getAppContext() ?: return
+            Logger.init(ctx, isModuleProcess = false)
+        } catch (_: Throwable) {
+            // 日志初始化失败不影响功能
         }
     }
 
@@ -130,6 +153,9 @@ class AlaMobileModule : XposedModule() {
         //（native SetUnlocked 才是主路径），延迟几毫秒不影响功能。
         logX(Log.INFO, TAG, "NPatch: deferring BillingHook.install to next main loop")
         Handler(Looper.getMainLooper()).post {
+            // 门控 return 之前先确保文件日志已初始化（本路径的"skipping
+            // BillingHook.install"同样要落盘，见 initGameLogger 注释）。幂等。
+            initGameLogger()
             // 启动门控：BillingHook 是 Java 辅助路径，任一失配激活时同样禁装。
             // 主线程 200ms 轮询等判定完成（绝不阻塞主线程——await/Thread.sleep
             // 会 ANR）：判定完成后才装 hook，杜绝「检查未出结果就装 hook」的抢跑。
@@ -196,6 +222,12 @@ class AlaMobileModule : XposedModule() {
             logX(Log.INFO, TAG, "Delayed deferred context: $context")
         }
 
+        // ⚠️ 日志初始化必须在**所有门控 return 之前**（2026-10-06 修复）：门控激活
+        // 时本函数在旧位置（下方 settings 之后）的 Logger.init 之前就 return，导致
+        // 拦截现场零文件日志。这里 context 通常已可用（onModuleLoaded 时多为 null）；
+        // 只设日志目录、不装 hook，不违反"判定前零 Hook"红线。幂等，重复调用无害。
+        initGameLogger()
+
         // 诊断：检查设备 GMS 状态（onPackageReady 时 context 才可用）
         if (context != null) {
             try {
@@ -218,7 +250,11 @@ class AlaMobileModule : XposedModule() {
         }
 
         if (context != null && !isSupportedVersion(context)) {
-            logX(Log.WARN, TAG, "Unsupported game version (ForceUpdateGate will have blocked all hooks)")
+            logX(
+                Log.WARN, TAG,
+                "Unsupported game version (ForceUpdateGate will have blocked all hooks), " +
+                    "installed=${tools.alamobile.mod.util.installedVersionDescription(context)}"
+            )
         }
 
         // 启动门控：两种失配任一命中时激活（游戏版本不匹配 / 模块落后最新
@@ -387,12 +423,8 @@ class AlaMobileModule : XposedModule() {
             ModConfig.absEffectiveParams(settings.absMode, settings.absStrength, settings.absPressure)
         } else Triple(1.0f, -1f, 1.0f)
 
-        // 初始化 Logger：游戏进程用 externalFilesDir 写日志文件。
-        // 日志无条件开启（2026-09-06 移除 logEnabled 开关——排查闪退时关日志=丢现场）。
-        val loggerCtx = context ?: getAppContext()
-        if (loggerCtx != null) {
-            Logger.init(loggerCtx, isModuleProcess = false)
-        }
+        // Logger 已在本函数入口（所有门控 return 之前）经 [initGameLogger] 初始化，
+        // 此处不再重复——见上方注释。
         // ⚠️ enableUnlock 兜底：settings==null（context 还没可用，NPatch 下 onPackageReady
         // 早期常 context=null）时默认 true，不默认 false。
         // 根因：NPatch 启动慢，context 要 15s 才可用，但 BillingManager.Awake() 在 ~2s
