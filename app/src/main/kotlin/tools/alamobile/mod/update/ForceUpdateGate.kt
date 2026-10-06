@@ -9,6 +9,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import tools.alamobile.mod.AlaMobileModule
 import tools.alamobile.mod.PaddockClient
 import tools.alamobile.mod.util.isSupportedVersion
+import tools.alamobile.mod.util.installedVersionDescription
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -56,6 +57,13 @@ object ForceUpdateGate {
         "模块已更新，该版本功能失效，请到模块 App、GitHub 或 QQ 群下载更新！"
     private const val TOAST_TEXT_GAME =
         "游戏版本不匹配，功能失效，请到 QQ 群下载最新版本游戏！"
+    /**
+     * 共存版专用文案（2026-10-06）：共存包引擎版本正确但**打包修订号过旧**
+     * （旧共存包无 Fix 后缀 = Fix 0，或 Fix < MIN_COEX_FIX）。用户需要的不是
+     * "下载最新版本游戏"，而是"下载最新的共存版安装包"。
+     */
+    private const val TOAST_TEXT_GAME_COEX =
+        "共存版安装包版本过旧，功能失效，请到 QQ 群下载最新共存版！"
     private const val TOAST_TEXT_BOTH =
         "游戏版本不匹配且模块已更新，功能失效，请到 QQ 群更新游戏和模块！"
     private const val TOAST_TEXT_NOT_LOGIN =
@@ -71,6 +79,13 @@ object ForceUpdateGate {
 
     /** 游戏版本不匹配（同步本地判定，终局无 fail-open）。 */
     private val gameMismatch = AtomicBoolean(false)
+
+    /**
+     * 游戏版本失配的**具体原因**是"共存版打包修订号过旧"（2026-10-06）——
+     * 引擎版本正确、只是共存包旧（如旧共存包无 Fix 后缀）。用于给共存版用户
+     * 更准确的 Toast 文案（"下载最新共存版"而非"下载最新版本游戏"）。
+     */
+    private val coexBuildOutdated = AtomicBoolean(false)
 
     /** 游戏版本已确认匹配（≠ 不匹配）：verdict 放行的前置条件之一。 */
     private val gameVersionVerified = AtomicBoolean(false)
@@ -149,15 +164,21 @@ object ForceUpdateGate {
                 gameVersionVerified.set(true)
                 AlaMobileModule.logX(
                     android.util.Log.INFO, TAG,
-                    "game version verified ok (8.0.6/200150)"
+                    "game version verified ok (8.0.6/200150), installed=${installedVersionDescription(context)}"
                 )
             } else {
                 gameMismatch.set(true)
+                // 判定失配原因：共存包引擎正确但修订号过旧（旧共存包无 Fix 后缀）。
+                if (pkg == GAME_PKG_COEX && isCoexBuildOutdated(context)) {
+                    coexBuildOutdated.set(true)
+                }
                 // 更新优先于登录：版本失配命中后登录门控退出竞争。
                 notLoggedIn.set(true)
                 AlaMobileModule.logX(
                     android.util.Log.WARN, TAG,
-                    "game version MISMATCH → zero hooks (offset crash guard), toast loop started"
+                    "game version MISMATCH → zero hooks (offset crash guard), " +
+                        "installed=${installedVersionDescription(context)}, " +
+                        "coexOutdated=${coexBuildOutdated.get()}, toast loop started"
                 )
                 startToastLoop(context)
                 verdictDone.set(true)
@@ -404,9 +425,37 @@ object ForceUpdateGate {
 
     private fun currentToastText(): String = when {
         gameMismatch.get() && moduleOutdated.get() -> TOAST_TEXT_BOTH
+        gameMismatch.get() && coexBuildOutdated.get() -> TOAST_TEXT_GAME_COEX
         gameMismatch.get() -> TOAST_TEXT_GAME
         moduleOutdated.get() -> TOAST_TEXT_MODULE
         notLoggedIn.get() -> TOAST_TEXT_NOT_LOGIN
         else -> TOAST_TEXT_MODULE
+    }
+
+    /**
+     * 判定"共存包引擎版本正确、仅打包修订号过旧"：versionCode == 200150 且
+     * versionName 的 base 等于适配版本、fix < MIN_COEX_FIX。与
+     * [tools.alamobile.mod.util.checkGameVersion] 的 OutdatedBuild 判据同源。
+     */
+    private fun isCoexBuildOutdated(context: Context): Boolean {
+        return try {
+            val info = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.getPackageInfo(
+                    context.packageName,
+                    android.content.pm.PackageManager.PackageInfoFlags.of(0)
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo(context.packageName, 0)
+            }
+            if (androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(info) !=
+                tools.alamobile.mod.util.SUPPORTED_VERSION_CODE.toLong()
+            ) return false
+            val gv = tools.alamobile.mod.util.parseGameVersionName(info.versionName) ?: return false
+            gv.base == tools.alamobile.mod.util.SUPPORTED_VERSION_NAME &&
+                gv.fix < tools.alamobile.mod.util.MIN_COEX_FIX
+        } catch (_: Throwable) {
+            false
+        }
     }
 }

@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Update
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,6 +28,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 //   已适配 → 绿（同激活态：暗色 0xFF1A3825，亮色 0xFFDFFAE4）
 //   未适配 → 红（同未激活态：暗色 0xFF3D1A1A，亮色 0xFFFAE4E4）
 //   未安装 → 黄（浅黄，亮暗色分别取值）
+//   旧版共存包 → 黄（同未安装族；"需更新"非"错误"）
 
 private data class CapsuleStyle(
     val bg: Color,
@@ -46,6 +48,12 @@ private fun capsuleStyle(status: GameVersionStatus, isDark: Boolean): CapsuleSty
             bg = if (isDark) Color(0xFF3D1A1A) else Color(0xFFFAE4E4),
             text = if (isDark) Color.White else MiuixTheme.colorScheme.onSurface,
             iconTint = Color(0xFFFF5252)
+        )
+        is GameVersionStatus.OutdatedBuild -> CapsuleStyle(
+            // 黄（同未安装族）：这是"该更新了"而非"出错了"，用暖色而非红色
+            bg = if (isDark) Color(0xFF3D3A1A) else Color(0xFFFAF4D6),
+            text = if (isDark) Color.White else MiuixTheme.colorScheme.onSurface,
+            iconTint = Color(0xFFFFB300)
         )
         GameVersionStatus.NotInstalled -> CapsuleStyle(
             // 浅黄，与激活卡片同族配色风格
@@ -74,6 +82,8 @@ fun VersionCapsule(
     val (iconVector, text) = when (status) {
         is GameVersionStatus.Adapted -> Icons.Rounded.Check to "$label：${status.versionName} 已适配"
         is GameVersionStatus.NotAdapted -> Icons.Rounded.Close to "$label：${status.versionName} 未适配"
+        // 旧版共存包：显示其实际 versionName（如 "8.0.6"），提示需更新。
+        is GameVersionStatus.OutdatedBuild -> Icons.Rounded.Update to "$label：${status.versionName} 需更新"
         GameVersionStatus.NotInstalled -> Icons.AutoMirrored.Rounded.HelpOutline to "$label：未安装"
     }
 
