@@ -8,9 +8,11 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import android.view.View
 import tools.alamobile.mod.util.Logger
@@ -485,8 +487,65 @@ abstract class HapticMixer internal constructor() {
             }
             val hasAmplitude = runCatching { v.hasAmplitudeControl() }.getOrDefault(false)
             Logger.i(TAG, "HapticMixer: 真振幅路 hasAmplitudeControl=$hasAmplitude")
+            // 跨品牌适配诊断（见 HapticAttributes 的论证）：把决定"振感强弱"的
+            // 系统能力全量落盘，供远端用户回传日志定位。只读、**进程内只打一次**
+            // （HapticMixer 每次 overlay 重建都会 create()，见 [deviceHapticsLogged]）。
+            logDeviceHaptics(context, v, hasAmplitude)
             return if (hasAmplitude) Envelope(v, slipPct) else Duty(v, slipPct)
         }
+
+        /**
+         * 落盘本机触感能力快照（**只读**，不改变任何行为）。
+         *
+         * 这一条日志是"跨品牌振感弱"唯一能在没有真机的情况下拿到的证据：把
+         * 分辨各条假说所需的事实一次性记全——
+         * - `hasAmplitudeControl`：false ⇒ 振幅维度整个不存在，走 [Duty]；
+         * - `areAllPrimitivesSupported(CLICK)`：HAL 有没有实现 primitive（本模块
+         *   路肩路径依赖它；未实现时 `perform` 会退化/静默）；
+         * - `resonantFrequency` / `qFactor`：LRA 谐振点与品质因数（HAL 未实现时
+         *   是 NaN）——谐振点漂移会让"同一幅度"在不同机器上振感差好几倍；
+         * - 用户设置强度（`haptic_feedback_intensity` 等）：framework 的
+         *   `VibrationScaler.scale()` 会按 usage 把**任何**波形整体乘一个系数
+         *   （0.6/0.8/1.0/1.2/1.4），用户把"触感反馈"调低就是这个系数在生效。
+         *   用户报"拉到 100% 还是很弱"时，必须能区分是**模块的**滑条还是
+         *   **系统的**滑条在起作用——两者的处置完全不同。
+         *
+         * ⚠️ **进程内只打一次**：`create()` 在每次 overlay 重建时都被调用
+         * （见 [[config-save-5x-rebuild]]：一次配置保存会触发多次全量重建），
+         * 不加守卫会把这段十行快照刷十几遍，把真正有用的日志挤出 2MB 滚动窗口。
+         * 设备能力在一次进程生命周期内不会变，重复打没有信息增量。
+         */
+        @Volatile
+        private var deviceHapticsLogged = false
+
+        private fun logDeviceHaptics(context: Context, v: Vibrator, hasAmplitude: Boolean) {
+            if (deviceHapticsLogged) return
+            deviceHapticsLogged = true
+            runCatching {
+                val primClick = Build.VERSION.SDK_INT >= 30 &&
+                    v.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_CLICK)
+                // ⚠️ 两者都是 **API 34** 才有的（VibratorInfo 的一部分），不是 31。
+                val resFreq = if (Build.VERSION.SDK_INT >= 34) v.resonantFrequency else Float.NaN
+                val q = if (Build.VERSION.SDK_INT >= 34) v.qFactor else Float.NaN
+                Logger.i(
+                    TAG,
+                    "HapticMixer: device haptics amp=$hasAmplitude primClick=$primClick " +
+                        "resonantHz=%s q=%s sdk=%d brand=%s".format(
+                            fmt(resFreq), fmt(q), Build.VERSION.SDK_INT, Build.MANUFACTURER
+                        )
+                )
+                Logger.i(TAG, "HapticMixer: sys intensity touch=${sysIntensity(context, "haptic_feedback_intensity")} " +
+                    "media=${sysIntensity(context, "media_vibration_intensity")} " +
+                    "notif=${sysIntensity(context, "notification_vibration_intensity")}")
+            }.onFailure { Logger.w(TAG, "HapticMixer: 设备触感能力探测失败", it) }
+        }
+
+        private fun fmt(f: Float): String = if (f.isNaN()) "NaN" else "%.1f".format(f)
+
+        /** 读系统强度设置（0=关 1=弱 2=中 3=强）；键不存在或不可读返回 "?"。 */
+        private fun sysIntensity(context: Context, key: String): String =
+            runCatching { Settings.System.getInt(context.contentResolver, key).toString() }
+                .getOrDefault("?")
 
         /**
          * **路肩脉冲波形**——一次"撞击"= 一段**够长**的满幅通电 + 一段静默。
@@ -557,7 +616,81 @@ abstract class HapticMixer internal constructor() {
             return VibrationEffect.createWaveform(timings, amps, 0)
         }
 
-        /** 把通道电平 × 该通道的最大强度映射成载波幅度（0..255）。0 就是真静音。 */
+        /**
+         * ## 七、为什么显式上报 `VibrationAttributes`（跨品牌振感弱的调查入口之一）
+         *
+         * 不传属性的 `vibrate(effect)` 等价于 `USAGE_UNKNOWN`。framework 对
+         * `USAGE_UNKNOWN` 有一套**猜测**逻辑（`VibratorManagerService`）：
+         * ```
+         *   fixupVibrationAttributes: 若 UNKNOWN 且 effect.isHapticFeedbackCandidate()
+         *                             ⇒ 归为 USAGE_TOUCH
+         *   VibrationEffect.isHapticFeedbackCandidate():
+         *         duration > 1000ms  ⇒ false
+         *         段数 > 3            ⇒ false
+         * ```
+         * 本模块的抓地力载波是 **96 段 × 5ms = 480ms 的无限循环波形**，段数
+         * 96 ≫ 3 ⇒ **不是** candidate ⇒ 落进"既非 TOUCH 也非 MEDIA"的桶。
+         *
+         * ## ⚠️ 但**不要**把它当成"被系统压低"来解释（这是个常见误判）
+         *
+         * framework 的 `VibrationScaler.getScaleLevel()` 算的是
+         * `当前强度 − 默认强度`，而用户设置里**没有 UNKNOWN 这个键**
+         * （`VibrationSettings` 只写 TOUCH/NOTIFICATION/RING/MEDIA 等）⇒
+         * `current == default` ⇒ `scaleLevel = 0 = SCALE_NONE` ⇒ **默认不缩放**。
+         * 所以"用户把触感反馈调低导致我们被压"**不成立**（那条滑条根本不作用
+         * 于我们）。真凶在别处（见 §五 的三条路径与 [logDeviceHaptics]）。
+         *
+         * ## 那改 usage 到底买到什么
+         *
+         * UNKNOWN 桶**没有对应的用户滑条** ⇒ 用户觉得振感弱时，系统设置里
+         * **没有任何一个滑条**能作用到我们。显式报 `USAGE_MEDIA`（"games, or
+         * any interactive media"，正是本模块语义）后，「媒体振动」滑条会生效：
+         * `VERY_HIGH` 相对默认 = `+2` ⇒ 系数 **1.4**，逐段乘到波形幅度上。
+         *
+         * ⚠️ 收益是**有限**的，别夸大：`scale()` 是逐段乘法且幅度上限 255，
+         * 所以**已经满幅的段放大不了**（用户把模块滑条拉到 100% + 电平满时
+         * 本就 255）。只有中低电平段能吃到这 1.2~1.4 倍。真正的价值是"给用户
+         * 一个可调高的旋钮"，而不是"修好了弱振感"。
+         *
+         * ⚠️ 回落链：设备若因省电/DND 拒绝 MEDIA（厂商策略），捕获异常后降到
+         * TOUCH，再失败就退回不带属性的 `vibrate(effect)`——绝不因为"上报属性"
+         * 这件事本身让振动彻底消失。
+         */
+        private const val ATTR_MEDIA = 0
+        private const val ATTR_TOUCH = 1
+        private const val ATTR_NONE = 2
+
+        @Volatile
+        private var attrMode = ATTR_MEDIA
+
+        /**
+         * 构造上报属性；API < 33 或降级到 [ATTR_NONE] 时返回 null（= 不传属性）。
+         */
+        private fun hapticsAttributesFor(mode: Int): VibrationAttributes? {
+            if (Build.VERSION.SDK_INT < 33) return null
+            return runCatching {
+                when (mode) {
+                    ATTR_MEDIA -> VibrationAttributes.createForUsage(VibrationAttributes.USAGE_MEDIA)
+                    ATTR_TOUCH -> VibrationAttributes.createForUsage(VibrationAttributes.USAGE_TOUCH)
+                    else -> null
+                }
+            }.getOrNull()
+        }
+
+        /** 上报属性被拒时降级（[ATTR_MEDIA] → [ATTR_TOUCH] → [ATTR_NONE]），只降不升。 */
+        internal fun downgradeAttributes(from: Int) {
+            if (from != attrMode) return
+            attrMode = when (attrMode) {
+                ATTR_MEDIA -> ATTR_TOUCH
+                ATTR_TOUCH -> ATTR_NONE
+                else -> ATTR_NONE
+            }
+            Logger.w(TAG, "HapticMixer: 上报属性被拒，降级 attrMode=$attrMode")
+        }
+
+        /**
+         * 把通道电平 × 该通道的最大强度映射成载波幅度（0..255）。0 就是真静音。
+         */
         private fun carrier(level: Float, maxIntensityPct: Int): Int =
             ((maxIntensityPct.coerceIn(0, 100) / 100f) * level.coerceIn(0f, 1f) * 255f)
                 .toInt().coerceIn(0, 255)
@@ -764,8 +897,23 @@ abstract class HapticMixer internal constructor() {
 
         @SuppressLint("MissingPermission")   // 见上：构造前已由 create() 校验权限
         protected fun vibrate(effect: VibrationEffect) {
-            runCatching { vibrator.vibrate(effect) }.onFailure {
-                Logger.w(TAG, "HapticMixer: vibrate 失败 path=$pathTag", it)
+            // 显式上报 usage（见类注释「七」）；属性被厂商策略拒绝时逐级降级，
+            // 绝不因为"上报"本身让振动彻底消失。
+            val attempt = { mode: Int ->
+                val a = hapticsAttributesFor(mode)
+                // ⚠️ `vibrate(effect, attributes)` 是 API 33 的；显式判 SDK 而不是
+                // 依赖 `hapticsAttributesFor` 的 null（lint 无法跨函数推断）。
+                if (a != null && Build.VERSION.SDK_INT >= 33) vibrator.vibrate(effect, a)
+                else vibrator.vibrate(effect)
+            }
+            runCatching { attempt(attrMode) }.onFailure { e ->
+                Logger.w(TAG, "HapticMixer: vibrate 失败 path=$pathTag attrMode=$attrMode", e)
+                val cur = attrMode
+                if (cur != ATTR_NONE) {
+                    downgradeAttributes(cur)
+                    runCatching { attempt(attrMode) }
+                        .onFailure { Logger.w(TAG, "HapticMixer: 降级后仍失败 path=$pathTag", it) }
+                }
             }
         }
 
