@@ -17,6 +17,7 @@ import tools.alamobile.mod.hook.BillingHook
 import tools.alamobile.mod.overlay.OverlayManager
 import tools.alamobile.mod.util.Logger
 import tools.alamobile.mod.offsets.OffsetTable
+import tools.alamobile.mod.util.isSupportedPackage
 import tools.alamobile.mod.util.isSupportedVersion
 import java.io.File
 
@@ -59,6 +60,29 @@ class AlaMobileModule : XposedModule() {
          * 用带轮询的 evaluate 兜住这个时序窗口。
          */
         const val MODULE_LOADED_FLAG = "tools.alamobile.mod.module_loaded"
+
+        /**
+         * 进程级"ConfigReceiver 已注册"标记的 property key。
+         *
+         * ⚠️ 与 [NATIVE_INSTALLED_FLAG] 分开是**刻意的**：那个标记只在 native
+         * 真装好（15s 块）后才立，而 receiver 注册在 deferred block 早期——
+         * 复用会让"游戏包自己后续的 deferred 重入"既注册不了 receiver，也
+         * 读不到 config。两者语义不同（native 装好 vs 广播接收就绪），各立各的。
+         *
+         * `doPackageReadyDeferred` 是**可重入**的：登录门控未定案时
+         * `postDelayed(200ms)` 重跑整个函数，每次跑到注册点就多注册一个
+         * receiver ⇒ 一条配置广播触发 N 次全量重建。用进程级 property
+         * （同 [NATIVE_INSTALLED_FLAG] 的理由：双 ClassLoader 也能共享）做幂等。
+         * 见 [[config-save-5x-rebuild]]。
+         */
+        private const val RECEIVER_REGISTERED_FLAG = "tools.alamobile.mod.receiver_registered"
+
+        private fun isReceiverRegistered(): Boolean =
+            System.getProperty(RECEIVER_REGISTERED_FLAG) == "true"
+
+        private fun markReceiverRegistered() {
+            System.setProperty(RECEIVER_REGISTERED_FLAG, "true")
+        }
 
         /**
          * 进程级"native hooks 已装"标记的 property key。
@@ -141,6 +165,19 @@ class AlaMobileModule : XposedModule() {
     }
 
     override fun onPackageLoaded(param: PackageLoadedParam) {
+        // ⚠️ 包名白名单（2026-10-06）：`onPackageLoaded` / `onPackageReady` 对游戏
+        // 进程内加载的**每一个包**都触发——实测 `com.google.android.gms`（×2）与
+        // `com.google.android.webview`（×1）在游戏进程内被加载时也被回调
+        // （`isFirstPackage=false`）。模块的一切（overlay / native hook /
+        // ConfigReceiver）都是游戏专属，非游戏包必须在此拦掉。
+        // 旧实现只在 onPackageReady 里打一句 "Not the first package, continuing
+        // anyway" 就继续跑完整个 deferred block ⇒ 每个非游戏包都多注册一个
+        // ConfigReceiver（一条配置广播触发 N 次全量重建），还各跑一遍
+        // ShadowHook.init + forceLoad。见 [[config-save-5x-rebuild]]。
+        if (!isSupportedPackage(param.packageName)) {
+            logX(Log.INFO, TAG, "Package loaded: ${param.packageName} — not a game package, skipping module init")
+            return
+        }
         logX(Log.INFO, TAG, "Package loaded: ${param.packageName}")
         xposedInterface = this
         logX(Log.INFO, TAG, "xposedInterface set: $this")
@@ -188,6 +225,14 @@ class AlaMobileModule : XposedModule() {
     }
 
     override fun onPackageReady(param: PackageReadyParam) {
+        // ⚠️ 包名白名单（2026-10-06，与 onPackageLoaded 同源）：见上。这里必须
+        // **同时**拦——`onPackageLoaded` 与 `onPackageReady` 是两条独立回调链，
+        // 只拦前者挡不住后者（实测 deferred block 跑了 8 次，其中 3 次来自
+        // gms/webview 的 onPackageReady）。
+        if (!isSupportedPackage(param.packageName)) {
+            logX(Log.INFO, TAG, "Package ready: ${param.packageName} — not a game package, skipping")
+            return
+        }
         logX(Log.INFO, TAG, "Package ready: ${param.packageName}, isFirstPackage=${param.isFirstPackage}")
         if (!param.isFirstPackage) {
             logX(Log.WARN, TAG, "Not the first package, continuing anyway")
@@ -361,7 +406,12 @@ class AlaMobileModule : XposedModule() {
         // 重建。setPackage 定向派发，不查 PackageManager 可见性，绕过 Android 11+ 包可见性
         // 限制。游戏没运行时广播丢失不再造成问题：下次启动 readFromTargetProcess 走
         // Remote Preferences 读 daemon 的最新权威值。
-        if (context != null) {
+        //
+        // ⚠️ **幂等**（2026-10-06）：本函数可重入（登录门控未定案时 200ms 重跑），
+        // 旧实现每次重入都注册一个新 receiver 且从不注销 ⇒ 一次配置广播被同一个
+        // 进程的 N 个 receiver 各收一次 ⇒ overlay 全量重建 N 次
+        //（见 [[config-save-5x-rebuild]]）。用进程级 property 去重。
+        if (context != null && !isReceiverRegistered()) {
             try {
                 val receiver = ConfigReceiver()
                 val filter = android.content.IntentFilter(ConfigReceiver.ACTION_CONFIG_UPDATE)
@@ -375,6 +425,7 @@ class AlaMobileModule : XposedModule() {
                     filter,
                     ContextCompat.RECEIVER_EXPORTED
                 )
+                markReceiverRegistered()
                 logX(Log.INFO, TAG, "ConfigReceiver registered")
             } catch (e: Throwable) {
                 logX(Log.ERROR, TAG, "Failed to register ConfigReceiver: ${e.message}")

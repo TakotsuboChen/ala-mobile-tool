@@ -14,6 +14,20 @@ const val COEXISTENCE_PKG = "com.Takotsubo.AlamobileFormula"
 /** 支持的游戏包名（官版 + 共存版）。 */
 private val SUPPORTED_PACKAGES = setOf(OFFICIAL_PKG, COEXISTENCE_PKG)
 
+/**
+ * 该包名是否为目标游戏包（官版/共存版）。
+ *
+ * ⚠️ 用于 `AlaMobileModule.onPackageReady` 的**包名白名单**：该回调对**游戏进程内
+ * 加载的每一个包**都会触发——实测 `com.google.android.gms`（×2）与
+ * `com.google.android.webview`（×1）在游戏进程内被加载时也各触发一次
+ * （`isFirstPackage=false`）。若放行，deferred block 会为它们各注册一个
+ * `ConfigReceiver`、各跑一遍 `ShadowHook.init` + `forceLoad` + `initUnlock`。
+ * 模块的一切（overlay / native hook / config）都是游戏专属，非游戏包必须跳过。
+ * 见 [[config-save-5x-rebuild]]（5 份 receiver ⇒ 一次配置广播重建 overlay 5 次）。
+ */
+fun isSupportedPackage(packageName: String?): Boolean =
+    packageName != null && packageName in SUPPORTED_PACKAGES
+
 const val SUPPORTED_VERSION_NAME = "8.0.6"
 const val SUPPORTED_VERSION_CODE = 200150
 
