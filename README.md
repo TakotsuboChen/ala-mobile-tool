@@ -95,7 +95,7 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 - 信号全部取自游戏自身的轮胎物理字段（滑移率、滑移角、轮面滑移速度），**不自行重算物理量**
 - 振感为 480ms 平顶波形 + 两级重发判据（稳定期零重发、真事件立即下发），视觉为电平驱动的连续透明度
 - 默认开启（全部：振感 + 视觉），可在杂项区调整为关闭 / 振感 / 视觉 / 全部，并分别调节最大振动强度（默认 50%）与最大不透明度（默认 100%）
-- ⚠️ **官版（`com.Vince`）的振感手感与共存版不同，且无法一致**：官版游戏 APK 没有 `VIBRATE` 权限（它是 install-time 权限、无法运行时授予），只能走免权限的 `View.performHapticFeedback`——该 API 只接受系统预置的语义常量、**做不出连续波形**，因此听感是「快速的哒哒哒」而非共存版的绵密连续。这是 Android 平台限制，与机型无关。官版仍可**通过振感强弱判断抓地力状态**（三档强度常量），共存版则额外支持强度滑条
+- ⚠️ **振感手感取决于游戏包是否带 `VIBRATE` 权限**：共存版由打包流程补上该权限，走振幅波形路（绵密连续 + 强度滑条）；若某次打包漏了权限，模块会降级到免权限的 `View.performHapticFeedback`——该 API 只接受系统预置的语义常量、**做不出连续波形**，听感变成「快速的哒哒哒」。这是 Android 平台限制，与机型无关。
 
 #### 内购解锁（Unlock / IAP Bypass）
 - 双重锁定路径：**Native inline Hook**（主路径）+ **Java 层 Xposed Hook**（辅助路径）
@@ -158,10 +158,10 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 - NPatch 等非 Root 框架（`frameworkName == "NPatch"`，API 101）不算 LSPOSED；检测到 NPatch 已安装才弹"作用域确认"弹窗，未安装时点击激活卡片 Toast 提示
 
 #### 游戏版本检测
-- 概览页标题上方显示官版/共存版版本检测胶囊（每次启动自动检测）
+- 概览页标题上方显示 **Ala Mobile Pro 版本检测胶囊**（每次启动自动检测）
 - 用 `<queries>` 声明两个游戏包名，`getPackageInfo` 静默查询，无需运行时权限
 - 已适配（8.0.6）显示绿色胶囊，未适配显示红色胶囊，未安装显示黄色胶囊，**共存版打包过旧显示黄色「需更新」胶囊**
-- **共存版打包修订号走 versionName 后缀**：共存版 `versionCode` 必须与官版一致（同时是 IL2CPP 偏移安全键与围场榜单分区键），无法用它区分新旧共存包，故同版本期间改动打包时改 `versionName` 为 `8.0.6 Fix N`；模块按包名分支判定（官版精确匹配，共存版要求 `Fix N ≥ 1`），旧共存包（无后缀）被拦截
+- **共存版打包修订号走 versionName 后缀**：`versionCode` 恒为游戏原值 200150（同时是 IL2CPP 偏移安全键与围场榜单分区键），无法用它区分新旧共存包，故同版本期间改动打包时改 `versionName` 为 `8.0.6 Fix N`；模块**逐项严格相等**判定（`versionCode == 200150`、base == `8.0.6`、`Fix N == SUPPORTED_COEX_FIX`），不匹配一律拦截
 - 下滑收缩时胶囊即时隐藏，上滑恢复后延迟渐显，避免与居中小标题重叠
 
 #### 现代 UI
@@ -224,14 +224,14 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 ### 前提条件
 
 - 一部已 Root 的 Android 手机，安装了 **LSPosed**（或兼容分支）框架
-- 已安装 **Ala Mobile 8.0.6**（versionCode 200150）
+- 已安装 **Ala Mobile Pro 8.0.6 Fix 2**（`com.Takotsubo.AlamobileFormula`，versionCode 200150）
 
 ### 步骤
 
 1. 从 [Releases 页面](https://github.com/TakotsuboChen/ala-mobile-tool/releases) 下载最新 APK
 2. 安装 APK 到手机
 3. 打开 **LSPosed Manager**，在模块列表中找到 **Ala Mobile Tool** 并启用
-4. 在作用域中勾选 **Ala Mobile**（原版 `com.Vince.AlamobileFormula` 或共存版 `com.Takotsubo.AlamobileFormula`）
+4. 在作用域中勾选 **Ala Mobile Pro**（`com.Takotsubo.AlamobileFormula`）
 5. 启动游戏，进入后点击左上角工具按钮显示 Overlay
 
 > 💡 **首次使用**：建议先进入模块设置界面（打开模块 App）确认配置，再进入游戏。
@@ -254,7 +254,7 @@ miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
 
 ### 概览页
 - 模块激活状态卡片（已激活 / 未激活，绿/红配色）
-- 游戏版本检测胶囊：官版与共存版适配状态（已适配绿色 / 未适配红色 / 未安装黄色）
+- 游戏版本检测胶囊：Ala Mobile Pro 适配状态（已适配绿色 / 未适配红色 / 需更新黄色 / 未安装黄色）
 - 设备信息：版本名称、版本号、Android 版本、厂商、型号
 - 链接：GitHub Releases、QQ 群（直接拉起 QQ App）、GitHub 源代码
 - 支持开发卡片：展示收款码，可保存到相册
