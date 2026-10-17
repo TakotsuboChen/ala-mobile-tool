@@ -182,8 +182,12 @@ sed -i '0,/<application/{s|<application|<uses-permission android:name="android.p
 共存版  versionName = "8.0.6 Fix 1"    ← Fix N = 本次打包修订号
 ```
 
-模块的 `VersionGate` 据此判定：共存版要求 `Fix N >= MIN_COEX_FIX`（当前 = 1），
-旧共存包（无后缀 = Fix 0）被拦截（零 hook + Toast 提示下载最新共存版）。
+模块的 `VersionGate` 据此判定：共存版要求 `Fix N >= MIN_COEX_FIX`（当前 = 2），
+旧共存包（无后缀 = Fix 0，或 Fix 1）被拦截（零 hook + Toast 提示下载最新共存版）。
+⚠️ **MIN_COEX_FIX 抬到 2 的动因（2026-10-16）**：旧共存包配 NPatch 1.0.8 及更早存在
+"模块经常不生效"（NPatch 缓存未设只读 → Android 14+ 拒绝加载可写 dex，见
+`docs/NPATCH_CACHE_CRASH_NOTES.md` §11）；模块读不到 NPatch 版本，只能靠游戏包版本
+间接逼用户换 NPatch 1.0.9(836) + 重装。**发新 Fix 时记得同步这个「当前 = N」**。
 
 ```bash
 cd v8.0.X-coex-dec

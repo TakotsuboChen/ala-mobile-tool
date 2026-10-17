@@ -51,12 +51,20 @@ const val SUPPORTED_VERSION_CODE = 200150
  * - **引擎维度** = [SUPPORTED_VERSION_NAME] + [SUPPORTED_VERSION_CODE]：管"偏移是否
  *   安全"。升到 8.0.7 时改这里，fix 后缀**重新从 0 起算**（新引擎按最新标准打包即可，
  *   无需后缀）。
- * - **打包维度** = Fix 后缀：管"是不是最新打包"。同引擎内发 Fix 2/Fix 3 自动放行
+ * - **打包维度** = Fix 后缀：管"是不是最新打包"。同引擎内发 Fix 3/Fix 4 自动放行
  *   （`fix >= MIN_COEX_FIX`），模块无需再改。
  *
  * ⚠️ 只有某个 Fix 是"必须升级"的（如修严重 bug）时才升 [MIN_COEX_FIX]。
+ *
+ * ## 修订历史
+ * - **= 1**（2026-10-06）：引入打包修订号维度，拦截无后缀旧共存包（Fix 0）。
+ * - **= 2**（2026-10-16）：**强制存量用户升到 Fix 2**。动因 = 旧共存包配 NPatch
+ *   1.0.8 及更早存在"模块经常不生效"（NPatch 缓存 APK 未设只读 → Android 14+
+ *   拒绝加载可写 dex，见 `docs/NPATCH_CACHE_CRASH_NOTES.md` §11）。NPatch 版本
+ *   模块读不到，只能靠游戏包版本间接推动 ⇒ 把 Fix 1 一并拦下（零 hook + 提示
+ *   下载最新共存版），逼用户换 NPatch 1.0.9(836) + Fix 2 重装。
  */
-const val MIN_COEX_FIX = 1
+const val MIN_COEX_FIX = 2
 
 // 8.0.4 (200146) 的 offsets 已不再匹配 8.0.6 的 libil2cpp.so。
 // 若需同时支持两个版本，需要按版本号分发不同的 OffsetTable；
