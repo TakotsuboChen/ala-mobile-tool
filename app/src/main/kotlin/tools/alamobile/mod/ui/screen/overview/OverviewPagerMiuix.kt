@@ -82,7 +82,6 @@ import tools.alamobile.mod.update.UpdateInfo
 import tools.alamobile.mod.update.UpdatePreferences
 import tools.alamobile.mod.util.COEXISTENCE_PKG
 import tools.alamobile.mod.util.GameVersionStatus
-import tools.alamobile.mod.util.OFFICIAL_PKG
 import tools.alamobile.mod.util.checkGameVersion
 import tools.alamobile.mod.util.openExternalUrl
 import tools.alamobile.mod.util.MODULE_QQ_GROUP_CODE
@@ -151,9 +150,9 @@ fun OverviewPagerMiuix(
     val scope = rememberCoroutineScope()
 
     // ── 游戏版本检测状态 ──
-    // 每次启动 ConfigActivity 都自动检测官版/共存版安装情况与版本适配。
+    // 每次启动 ConfigActivity 都自动检测共存版安装情况与版本适配。
+    // 官版已停止维护（2026-10-18），不再检测。
     // null 表示检测中（胶囊不显示，避免闪烁）。
-    var officialStatus by remember { mutableStateOf<GameVersionStatus?>(null) }
     var coexistenceStatus by remember { mutableStateOf<GameVersionStatus?>(null) }
 
     // 启动时自动检查更新 + 清理旧 APK
@@ -162,10 +161,9 @@ fun OverviewPagerMiuix(
         UpdatePreferences.cleanupOldApkIfNeeded(context, BuildConfig.VERSION_CODE)
 
         // 游戏版本检测（IO 线程，PackageManager 查询）
-        val official = withContext(Dispatchers.IO) { checkGameVersion(context, OFFICIAL_PKG) }
-        val coexistence = withContext(Dispatchers.IO) { checkGameVersion(context, COEXISTENCE_PKG) }
-        officialStatus = official
-        coexistenceStatus = coexistence
+        coexistenceStatus = withContext(Dispatchers.IO) {
+            checkGameVersion(context, COEXISTENCE_PKG)
+        }
 
         // 更新检查不在此处跑：EULA 首次未同意时本 LaunchedEffect 跑完即死，若把
         // 检查内联在这里，全新安装路径永远不会触发更新检查（实测 2026-09-13：
@@ -220,7 +218,7 @@ fun OverviewPagerMiuix(
                     //   下滑（fraction > 0）：snapTo(0) 即时隐藏，不给小标题重叠的机会。
                     //   上滑恢复（fraction == 0）：延迟 350ms 等小标题 spring 完全淡出后 animateTo(1)。
                     //     fraction 持续变化时 delay 被反复取消，直到 fraction 停在 0 后 delay 才等完。
-                    if (officialStatus != null && coexistenceStatus != null) {
+                    if (coexistenceStatus != null) {
                         val fraction = scrollBehavior.state.collapsedFraction
                         val capsuleAlpha = remember { Animatable(1f) }
                         LaunchedEffect(fraction) {
@@ -249,11 +247,7 @@ fun OverviewPagerMiuix(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             VersionCapsule(
-                                label = "官版",
-                                status = officialStatus!!
-                            )
-                            VersionCapsule(
-                                label = "共存版",
+                                label = "Ala Mobile Pro",
                                 status = coexistenceStatus!!
                             )
                         }
