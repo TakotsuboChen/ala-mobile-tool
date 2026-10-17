@@ -404,7 +404,7 @@ object PaddockClient {
      *    ⚠️ 实机两例（2026-09-11 用户日志）证伪"NPatch 下 ① 必达"：共存版
      *    游戏 APK 同样改不了 manifest（无 <queries> 声明模块包），Android 11+
      *    包可见性下游戏进程跨包 resolve 模块 provider 也会 "Unknown authority"
-     *    （Binder call 没发出去）——与 LSPosed 下官版被拦是同一机制。
+     *    （Binder call 没发出去）——与 LSPosed 下游戏包对模块包无可见性是同一机制。
      * ② remote prefs 回落：provider 被拦时读 daemon remote prefs（LSPosed 下
      *    读侧权威；NPatch 下是空壳，读回 null 继续往下）。
      * ③④ 见 [loadAuth] 的第四级回落与内存 authToken——本函数兜底语义：

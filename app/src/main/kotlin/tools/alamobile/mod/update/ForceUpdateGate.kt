@@ -56,16 +56,16 @@ object ForceUpdateGate {
     private const val TOAST_TEXT_MODULE =
         "模块已更新，该版本功能失效，请到模块 App、GitHub 或 QQ 群下载更新！"
     private const val TOAST_TEXT_GAME =
-        "游戏版本不匹配，功能失效，请到 QQ 群下载最新版本游戏！"
+        "游戏版本不匹配，功能失效，请到 QQ 群下载最新共存版！"
     /**
-     * 共存版专用文案（2026-10-06）：共存包引擎版本正确但**打包修订号过旧**
-     * （旧共存包无 Fix 后缀 = Fix 0，或 Fix < MIN_COEX_FIX）。用户需要的不是
-     * "下载最新版本游戏"，而是"下载最新的共存版安装包"。
+     * 共存版专用文案：引擎版本正确但**打包修订号不是当前适配值**
+     * （Fix N != SUPPORTED_COEX_FIX，可能过旧也可能过新）。用户需要的不是
+     * "下载最新版本游戏"，而是"下载与模块配套的共存版安装包"。
      */
     private const val TOAST_TEXT_GAME_COEX =
-        "共存版安装包版本过旧，功能失效，请到 QQ 群下载最新共存版！"
+        "共存版安装包版本不匹配，功能失效，请到 QQ 群下载最新共存版！"
     private const val TOAST_TEXT_BOTH =
-        "游戏版本不匹配且模块已更新，功能失效，请到 QQ 群更新游戏和模块！"
+        "共存版与模块版本不匹配，功能失效，请到 QQ 群更新共存版和模块！"
     private const val TOAST_TEXT_NOT_LOGIN =
         "您尚未登录围场，模块功能将不会生效，请先返回模块 App 登录！"
     /** 已登录但服务端不可达/凭据失效:放行模块,仅提示成绩上传风险。 */
@@ -73,8 +73,7 @@ object ForceUpdateGate {
         "网络连接异常,成绩上传可能会失败,未上传的成绩将会保存在本地,连接成功后自动补传"
     private const val TOAST_INTERVAL_MS = 2500L
 
-    /** scope 内的两个游戏包名（与 VersionGate.SUPPORTED_PACKAGES 一致）。 */
-    private const val GAME_PKG_OFFICIAL = "com.Vince.AlamobileFormula"
+    /** scope 内的游戏包名（与 VersionGate.SUPPORTED_PACKAGES 一致）。 */
     private const val GAME_PKG_COEX = "com.Takotsubo.AlamobileFormula"
 
     /** 游戏版本不匹配（同步本地判定，终局无 fail-open）。 */
@@ -144,12 +143,12 @@ object ForceUpdateGate {
     fun evaluate(context: Context?) {
         if (context == null) return
 
-        // ⓪ scope 里有非游戏包（GMS/WebView 等进程也被注入）。门控只对两个
+        // ⓪ scope 里有非游戏包（GMS/WebView 等进程也被注入）。门控只对共存版
         //    游戏包名生效：其他进程 isSupportedVersion 必然 false，若放行会误判
         //    "游戏版本不匹配" 并在 GMS 进程里起 Toast 循环（游戏没开也弹 Toast）。
         //    非游戏进程本来就没有游戏 hook 可装，verdict 直接放行即可。
         val pkg = context.packageName
-        if (pkg != GAME_PKG_OFFICIAL && pkg != GAME_PKG_COEX) {
+        if (pkg != GAME_PKG_COEX) {
             gameVersionVerified.set(true)
             notLoggedIn.set(true)  // 登录门控同样只在游戏进程评估
             verdictDone.set(true)
@@ -168,8 +167,8 @@ object ForceUpdateGate {
                 )
             } else {
                 gameMismatch.set(true)
-                // 判定失配原因：共存包引擎正确但修订号过旧（旧共存包无 Fix 后缀）。
-                if (pkg == GAME_PKG_COEX && isCoexBuildOutdated(context)) {
+                // 判定失配原因：引擎版本正确但打包修订号不是当前适配值。
+                if (isCoexBuildOutdated(context)) {
                     coexBuildOutdated.set(true)
                 }
                 // 更新优先于登录：版本失配命中后登录门控退出竞争。
@@ -433,8 +432,8 @@ object ForceUpdateGate {
     }
 
     /**
-     * 判定"共存包引擎版本正确、仅打包修订号过旧"：versionCode == 200150 且
-     * versionName 的 base 等于适配版本、fix < MIN_COEX_FIX。与
+     * 判定"引擎版本正确、仅打包修订号不是当前适配值"：versionCode == 200150 且
+     * versionName 的 base 等于适配版本、fix != SUPPORTED_COEX_FIX。与
      * [tools.alamobile.mod.util.checkGameVersion] 的 OutdatedBuild 判据同源。
      */
     private fun isCoexBuildOutdated(context: Context): Boolean {
@@ -453,7 +452,7 @@ object ForceUpdateGate {
             ) return false
             val gv = tools.alamobile.mod.util.parseGameVersionName(info.versionName) ?: return false
             gv.base == tools.alamobile.mod.util.SUPPORTED_VERSION_NAME &&
-                gv.fix < tools.alamobile.mod.util.MIN_COEX_FIX
+                gv.fix != tools.alamobile.mod.util.SUPPORTED_COEX_FIX
         } catch (_: Throwable) {
             false
         }

@@ -31,10 +31,9 @@ object CrossPkgMailbox {
     private const val TAG = "AlaMobileTool"
     private const val DIR = "Android/media"
 
-    /** 目标游戏包（原版 + 共存版）。写入侧对两个包各写一份。 */
+    /** 目标游戏包（仅共存版；官版已于 2026-10-18 停止维护）。 */
     val GAME_PACKAGES = listOf(
         "com.Takotsubo.AlamobileFormula",
-        "com.Vince.AlamobileFormula",
     )
 
     /** 配置信箱文件名（每个游戏包各自一份）。 */

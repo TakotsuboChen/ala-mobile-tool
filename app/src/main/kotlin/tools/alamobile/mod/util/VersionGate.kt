@@ -5,17 +5,21 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.pm.PackageInfoCompat
 
-/** 官版包名。 */
-const val OFFICIAL_PKG = "com.Vince.AlamobileFormula"
-
-/** 共存版（重打包）包名。 */
+/**
+ * 共存版（重打包）包名——**唯一支持的游戏包**。
+ *
+ * ⚠️ 官版 `com.Vince.AlamobileFormula` 已于 2026-10-18 **彻底停止维护**：官版
+ * APK 没有 VIBRATE 权限（抓地力反馈只能走 `Fallback` 叩击）、且用户实际装的是
+ * NPatch 共存版（非 root 为绝对多数）。继续留官版分支只会让每个包名判断多一条
+ * 永不验证的死路径。官版用户已被 `VersionGate` 拒绝（非本包名 ⇒ 零 hook）。
+ */
 const val COEXISTENCE_PKG = "com.Takotsubo.AlamobileFormula"
 
-/** 支持的游戏包名（官版 + 共存版）。 */
-private val SUPPORTED_PACKAGES = setOf(OFFICIAL_PKG, COEXISTENCE_PKG)
+/** 支持的游戏包名（仅共存版）。 */
+private val SUPPORTED_PACKAGES = setOf(COEXISTENCE_PKG)
 
 /**
- * 该包名是否为目标游戏包（官版/共存版）。
+ * 该包名是否为目标游戏包（仅共存版）。
  *
  * ⚠️ 用于 `AlaMobileModule.onPackageReady` 的**包名白名单**：该回调对**游戏进程内
  * 加载的每一个包**都会触发——实测 `com.google.android.gms`（×2）与
@@ -32,39 +36,31 @@ const val SUPPORTED_VERSION_NAME = "8.0.6"
 const val SUPPORTED_VERSION_CODE = 200150
 
 /**
- * 共存版最低打包修订号（2026-10-06 引入）。
+ * 适配的**打包修订号**（2026-10-18 从「最低值」改为「精确相等」）。
  *
- * ## 为什么要这个维度
- * 同版本期间对**共存版安装包**做改动时（如 NPatch 1.0.7→1.0.8、补 VIBRATE 权限），
- * `versionCode` **必须与官版保持一致**：它同时是 IL2CPP 偏移安全键（错版本装 hook
- * 即开屏闪退）和围场榜单分区键（服务端 `best_laps` 按 `version_code` 分赛季，官版/
- * 共存版必须同赛季）。⇒ 不能拿 versionCode 区分新旧共存包。
+ * ## 为什么是精确相等
+ * 旧实现是 `fix >= MIN_COEX_FIX`（最低门槛），只保证"不太旧"，**不保证不太新**：
+ * Fix 3/4/5 只要引擎版本号没动就一律放行。但 Fix 后缀同时是"安装包行为"的
+ * 标记——补权限、改 NPatch 打包参数、调 manifest 都可能落在 Fix 里。放行未知
+ * 的更高 Fix 等于对未验证过的包形态开绿灯。
  *
- * 于是把"打包修订号"放到 `versionName` 后缀承载（官版不动）：
- * ```
- *   官版    versionName = "8.0.6"          （无后缀）
- *   共存版  versionName = "8.0.6 Fix 1"    （Fix N = 打包修订号）
- * ```
- * 旧共存包（无后缀 = Fix 0）在此判据下 `< MIN_COEX_FIX` → 判为不匹配 → 拦截。
+ * 现语义：**只认这一个 Fix 号**。发 Fix 3 时必须把常量改成 3 并随模块发版——
+ * 这也正好让"游戏包与模块版本必须配套"变得显式。
  *
- * ## 两个维度正交
+ * ## 两个维度仍然正交
  * - **引擎维度** = [SUPPORTED_VERSION_NAME] + [SUPPORTED_VERSION_CODE]：管"偏移是否
- *   安全"。升到 8.0.7 时改这里，fix 后缀**重新从 0 起算**（新引擎按最新标准打包即可，
- *   无需后缀）。
- * - **打包维度** = Fix 后缀：管"是不是最新打包"。同引擎内发 Fix 3/Fix 4 自动放行
- *   （`fix >= MIN_COEX_FIX`），模块无需再改。
- *
- * ⚠️ 只有某个 Fix 是"必须升级"的（如修严重 bug）时才升 [MIN_COEX_FIX]。
+ *   安全"。升到 8.0.7 时改这里，fix 重新从 0 起算。
+ * - **打包维度** = [SUPPORTED_COEX_FIX]：管"是不是**这一个**打包"。
  *
  * ## 修订历史
- * - **= 1**（2026-10-06）：引入打包修订号维度，拦截无后缀旧共存包（Fix 0）。
- * - **= 2**（2026-10-16）：**强制存量用户升到 Fix 2**。动因 = 旧共存包配 NPatch
- *   1.0.8 及更早存在"模块经常不生效"（NPatch 缓存 APK 未设只读 → Android 14+
- *   拒绝加载可写 dex，见 `docs/NPATCH_CACHE_CRASH_NOTES.md` §11）。NPatch 版本
- *   模块读不到，只能靠游戏包版本间接推动 ⇒ 把 Fix 1 一并拦下（零 hook + 提示
- *   下载最新共存版），逼用户换 NPatch 1.0.9(836) + Fix 2 重装。
+ * - **最低值 = 1**（2026-10-06）：引入打包修订号维度，拦截无后缀旧共存包（Fix 0）。
+ * - **最低值 = 2**（2026-10-16）：强制存量用户升到 Fix 2。动因 = 旧共存包配 NPatch
+ *   1.0.8 及更早存在"模块经常不生效"（缓存 APK 未设只读 → Android 14+ 拒绝加载
+ *   可写 dex，见 `docs/NPATCH_CACHE_CRASH_NOTES.md` §11）。
+ * - **精确相等 = 2**（2026-10-18）：用户定案"版本门控要严格等于，而不是大于等于
+ *   放行"。当前适配包 = `Ala Mobile Pro 8.0.6 Fix 2`（NPatch 845）。
  */
-const val MIN_COEX_FIX = 2
+const val SUPPORTED_COEX_FIX = 2
 
 // 8.0.4 (200146) 的 offsets 已不再匹配 8.0.6 的 libil2cpp.so。
 // 若需同时支持两个版本，需要按版本号分发不同的 OffsetTable；
@@ -91,22 +87,22 @@ fun parseGameVersionName(versionName: String?): ParsedGameVersion? {
 }
 
 /**
- * 版本判据（按包名分支，2026-10-06 拆维度）：
- * - **官版**：`versionName == "8.0.6"` 且 `versionCode == 200150`（精确相等，无后缀）。
- * - **共存版**：`versionCode == 200150` 且 `base == "8.0.6"` 且 `fix >= [MIN_COEX_FIX]`。
+ * 版本判据（2026-10-18 起仅共存版，且**逐项精确相等**）：
+ * `packageName == 共存版包名` 且 `versionCode == 200150` 且
+ * `base == "8.0.6"` 且 `fix == [SUPPORTED_COEX_FIX]`。
  *
- * ⚠️ 官版判据必须保持**精确相等**：官版 versionName 恒为 `"8.0.6"`，若放宽成"前缀/
- * base 匹配"会放行未来官版 8.0.6x 的误配（官版不做 Fix 后缀，只有共存版做）。
+ * ⚠️ 三个维度全部**严格相等**，不是"至少"：
+ * - 官版已停止维护 ⇒ 包名不匹配直接 false（官版 APK 无 VIBRATE，抓地力反馈
+ *   只能走 Fallback 叩击，不是我们能承诺的体验）。
+ * - `fix > SUPPORTED_COEX_FIX` 同样拒绝：见 [SUPPORTED_COEX_FIX] 的说明。
+ * - `base` 用解析出的版本，不用 `versionName` 整体比较——`"8.0.6 Fix 2"` 与
+ *   `"8.0.6"` 的 base 都是 `"8.0.6"`，但 fix 维度会把后者挡掉。
  */
 fun isSupportedVersion(packageName: String, versionName: String?, versionCode: Long): Boolean {
-    if (packageName !in SUPPORTED_PACKAGES) return false
+    if (packageName != COEXISTENCE_PKG) return false
     if (versionCode != SUPPORTED_VERSION_CODE.toLong()) return false
-    return if (packageName == OFFICIAL_PKG) {
-        versionName == SUPPORTED_VERSION_NAME
-    } else {
-        val gv = parseGameVersionName(versionName) ?: return false
-        gv.base == SUPPORTED_VERSION_NAME && gv.fix >= MIN_COEX_FIX
-    }
+    val gv = parseGameVersionName(versionName) ?: return false
+    return gv.base == SUPPORTED_VERSION_NAME && gv.fix == SUPPORTED_COEX_FIX
 }
 
 fun isSupportedVersion(context: Context?): Boolean {
@@ -135,7 +131,7 @@ fun isSupportedVersion(context: Context?): Boolean {
 
 /**
  * 供日志：返回本进程所装游戏的 `"versionName (versionCode)"`，读不到时返回 `"?"`。
- * 排查"旧共存版被拦截"时能直接看出用户装的是 `"8.0.6"`（旧）还是 `"8.0.6 Fix 1"`（新）。
+ * 排查"旧共存版被拦截"时能直接看出用户装的是 `"8.0.6 Fix 1"`（旧）还是 `"8.0.6 Fix 2"`（当前）。
  */
 fun installedVersionDescription(context: Context?): String {
     if (context == null) return "?"

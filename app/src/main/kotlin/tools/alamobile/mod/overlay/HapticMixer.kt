@@ -126,9 +126,10 @@ import tools.alamobile.mod.util.Logger
  * | [Duty] | 有 VIBRATE 但**无**振幅控制 | 无振幅维度：路肩出纯颗粒、抓地力出占空比 |
  * | [Fallback] | **无** VIBRATE | `performHapticFeedback` + 按颗粒率叩击 |
  *
- * 游戏 APK 自身没有 VIBRATE（`aapt2 dump permissions` 实测：官方版与共存版
- * manifest 均无），所以**官版用户永远走 [Fallback]**；共存版由
- * `co-apk-builder` skill 阶段 4.7 补权限，走前两条。
+ * 原版游戏 APK 自身没有 VIBRATE（`aapt2 dump permissions` 实测），所以
+ * **未补权限的包**永远走 [Fallback]；共存版由 `coex-apk-builder` skill
+ * 阶段 4.7 补权限，走前两条。⚠️ 官版已停止维护（2026-10-18），[Fallback]
+ * 现仅作"共存包权限缺失"的防御性降级。
  *
  * ## 六、持续输出必须显式停
  *
@@ -391,16 +392,16 @@ abstract class HapticMixer internal constructor() {
         /**
          * [Fallback] **抓地力**通道的叩击间隔（由独立 ticker 驱动，见 [Fallback.gripTicker]）。
          *
-         * ## ⚠️ 这个数字决定"绵密"还是"哒哒哒"，是官版手感的唯一旋钮
+         * ## ⚠️ 这个数字决定"绵密"还是"哒哒哒"，是 [Fallback] 手感的唯一旋钮
          *
-         * 官版（`com.Vince`）没有 VIBRATE 权限 ⇒ 走 [Fallback]（`performHapticFeedback`
+         * 没有 VIBRATE 权限的包 ⇒ 走 [Fallback]（`performHapticFeedback`
          * 免权限路），**无法下发自定义波形**——能传 `VibrationEffect` 的 `vibrate()`
          * 在服务端 `VibratorManagerService.vibrateWithPermissionCheck` 里被
          * `enforceCallingOrSelfPermission("android.permission.VIBRATE", "vibrate")`
          * 拦下（设备 services.jar smali 实证），而免权限的 `performHapticFeedback`
          * 只接受 **int 语义常量**、effect 由系统预置表生成（客户端插不进字节）。
-         * ⇒ 共存版那种 `createWaveform(96×5ms, repeat = 0)` 的平顶无限循环波形
-         * 官版**物理上做不到**，只能用高频叩击逼近"LRA 持续通电"。
+         * ⇒ 有权限时的 `createWaveform(96×5ms, repeat = 0)` 平顶无限循环波形
+         * 在免权限路上**物理上做不到**，只能用高频叩击逼近"LRA 持续通电"。
          *
          * ## 判据：官方的振铃窗口
          *
@@ -456,9 +457,9 @@ abstract class HapticMixer internal constructor() {
          * 工厂：按设备权限/能力三选一。
          *
          * ⚠️ 权限判定是**必须**的，不是保险：模块运行在游戏进程，权限来自游戏
-         * APK 的 manifest。官版游戏没有 VIBRATE，此时 `vibrate()` 会抛
+         * APK 的 manifest。包若没补 VIBRATE，`vibrate()` 会抛
          * `SecurityException`（`vibrateWithPermissionCheck` 内部
-         * `enforceCallingOrSelfPermission`）。
+         * `enforceCallingOrSelfPermission`）——[Fallback] 就是这条路的降级。
          */
         fun create(
             context: Context,
@@ -1181,7 +1182,7 @@ abstract class HapticMixer internal constructor() {
      *
      * ⚠️ **绝不能共用一个常量 / 一个计时器**——2026-10-05 的 bug 就是这么来的：
      * 两者共用 22ms（≈31Hz，落在 flutter 区），抓地力被动继承了路肩的节奏 ⇒
-     * 官版抓地力听感 = 「类似路肩的哒哒哒」（用户实机反馈）。抓地力与路肩在
+     * 免权限路的抓地力听感 = 「类似路肩的哒哒哒」（用户实机反馈）。抓地力与路肩在
      * `tick()` 层已经是互斥的（路肩优先），这里也必须各自独立。
      */
     class Fallback : HapticMixer() {
@@ -1192,7 +1193,7 @@ abstract class HapticMixer internal constructor() {
              *
              * ## ⚠️ 三档只恢复"强弱"，**不解决"哒"**
              *
-             * 2026-10-06 实测两条已证伪的路线（都在官版实机跑过）：
+             * 2026-10-06 实测两条已证伪的路线（都在无权限包实机跑过）：
              * ① 把叩击间隔压到 13~17ms（独立 ticker）⇒ 用户："**更快的**哒哒哒"；
              * ② 去掉强度档、全程只用 `CLOCK_TICK`（唯一"供重复使用"的常量）⇒
              *    用户："还是快速的哒哒哒，且**判断不了强弱**"。

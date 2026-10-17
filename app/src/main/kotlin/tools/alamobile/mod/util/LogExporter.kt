@@ -57,9 +57,8 @@ object LogExporter {
     // 两种行首时间戳：Java "2026-08-28 21:54:08.291"、native "[2026-08-28T21:54:08.290"。
     private val TS_PREFIX = Regex("^(?:\\[)?(\\d{4}-\\d{2}-\\d{2})[ T](\\d{2}:\\d{2}:\\d{2}\\.\\d{3})")
 
-    // 复用 ModConfig 的游戏包名常量（官版 + 共存版）
+    // 目标游戏包（仅共存版；官版已于 2026-10-18 停止维护）
     private val GAME_PACKAGES = setOf(
-        "com.Vince.AlamobileFormula",
         "com.Takotsubo.AlamobileFormula"
     )
 
@@ -109,7 +108,7 @@ object LogExporter {
         }
 
         // 2. 游戏进程日志：/sdcard/Android/media/<游戏包>/（AFA 跨包直读）。
-        // 两个包都试（用户可能装官版或共存版），取第一个读到的。
+        // 取第一个读到的游戏包日志目录。
         var gameJavaLog: String? = null
         var gameNativeLog: String? = null
         var nativeCrashLog: String? = null

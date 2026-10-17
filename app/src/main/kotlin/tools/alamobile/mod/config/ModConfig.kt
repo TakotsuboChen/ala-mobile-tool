@@ -22,12 +22,12 @@ object ModConfig {
     private const val FILE_NAME = "ala_tool_config.json"
     private const val MODULE_PACKAGE = "tools.alamobile.mod"
 
-    // 目标游戏包名（原版 + 共存版）。ConfigActivity（模块进程）写配置时
-    // 需通过 createPackageContext 拿到游戏包的 externalFilesDir，才能让
-    // 游戏进程读到——因为 Android 11+ scoped storage 下两个进程的
-    // externalFilesDir 是不同沙箱，按 packageName 分流会让它们读写不同文件。
+    // 目标游戏包名（仅共存版；官版已于 2026-10-18 停止维护）。
+    // ConfigActivity（模块进程）写配置时需通过 createPackageContext 拿到游戏包的
+    // externalFilesDir，才能让游戏进程读到——因为 Android 11+ scoped storage 下
+    // 两个进程的 externalFilesDir 是不同沙箱，按 packageName 分流会让它们读写
+    // 不同文件。
     private val GAME_PACKAGES = setOf(
-        "com.Vince.AlamobileFormula",
         "com.Takotsubo.AlamobileFormula"
     )
 

@@ -45,7 +45,7 @@ else
 fi
 
 APK="app/build/outputs/apk/debug/app-debug.apk"
-TARGET_PACKAGE="com.Vince.AlamobileFormula"
+TARGET_PACKAGE="com.Takotsubo.AlamobileFormula"
 TAG="AlaMobileTool"
 
 echo "==> adb: checking for device"
