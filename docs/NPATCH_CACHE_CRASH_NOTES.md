@@ -1,16 +1,17 @@
 # NPatch 缓存问题导致的启动闪退 — 调查记录
 
-> ⚠️ **本文件记录两个不同的 NPatch 缓存 bug，症状极像、根因完全不同，排查前先对号入座**：
+> ⚠️ **本文件记录三个不同的 NPatch 版本问题，症状各异、根因不同，排查前先对号入座**：
 >
-> | | Bug A（#147，§1–§10） | Bug B（Android 16 W^X，§11） |
-> |---|---|---|
-> | 崩溃栈 | `Unable to instantiate application` → `Resources.getAssets()` **NPE** | `Unable to instantiate application` → `SecurityException: Writable dex file ... is not allowed` |
-> | 根因 | 缓存 **内容损坏**（无完整性校验/无 fsync/无锁） | 缓存**权限可写**（未设只读） |
-> | 触发条件 | 任意 Android 版本 | **Android 14+（本机 Android 16 实证）** |
-> | 用户侧解法 | **清「游戏」缓存**（不是 NPatch 数据） | **无效**（清缓存重建后权限仍是 600）→ 只能升级 NPatch 到 **830+**（已修） |
-> | 上游状态 | 1.0.8 已修（原子写 + 锁） | **830 测试版已修**（维护者 @nikobe918 确认：修了缓存未设只读） |
+> | | Bug A（#147，§1–§10） | Bug B（Android 16 W^X，§11） | Bug C（服务回落缺失，§12） |
+> |---|---|---|---|
+> | 症状 | **开屏白屏闪退** | **开屏白屏闪退** | **不崩溃，模块静默不加载** |
+> | 崩溃栈 | `Unable to instantiate application` → `Resources.getAssets()` **NPE** | `Unable to instantiate application` → `SecurityException: Writable dex file ... is not allowed` | **无崩溃栈**（进程正常起，只是没 hook） |
+> | 根因 | 缓存 **内容损坏**（无完整性校验/无 fsync/无锁） | 缓存**权限可写**（未设只读） | 管理器不在后台时**模块清单能加载、但服务未就绪**（`VectorServiceClient.service` = null ⇒ 模块不实例化） |
+> | 触发条件 | 任意 Android 版本 | **Android 14+（本机 Android 16 实证）** | **NPatch 1.0.8+ 本地模式 + 管理器未运行** |
+> | 用户侧解法 | **清「游戏」缓存**（不是 NPatch 数据） | **无效** → 只能升级 NPatch 到 **830+**（已修） | **先把 NPatch 管理器挂后台再开游戏**（治标）；根治等上游修服务层 |
+> | 上游状态 | 1.0.8 已修（原子写 + 锁） | **830 测试版已修** | **836 存在**；**843 测试版已修**（上游提交 `bbd8897` "keep framework service binder local"，见 §12.8） |
 >
-> **一句话区分**：崩溃栈里出现 `Writable dex file ... is not allowed` = Bug B；出现 `Resources.getAssets()` null = Bug A。
+> **一句话区分**：崩溃栈里出现 `Writable dex file ... is not allowed` = Bug B；出现 `Resources.getAssets()` null = Bug A；**不崩溃但模块零日志、logcat 里 NPatch 有 `Loaded cached module` 却无 `Module loaded in process`、且有 `VectorServiceClient service is not ready`** = Bug C。
 
 > 结论一句话（Bug A）：**这是 NPatch（本地注入框架）框架层的 bug，与 `ala-mobile-tool` 模块无关。**
 > 根因 = NPatch 保存的 origin-apk 缓存文件损坏，而 NPatch 对缓存命中**只检查文件是否存在、不校验完整性**，导致每次启动都用坏文件构建 Resources → 系统静默失败 → 实例化 Application 时 NPE。
@@ -262,3 +263,160 @@ Android 14+ 的 **W^X（Write xor Execute）** 规则：**dex 文件若位于应
 | 清游戏缓存 | **有效** | **无效** |
 | 解法 | 清游戏缓存 / 重装 | **升级 NPatch 830+** |
 | 上游状态 | 1.0.8 已修 | 830 测试版已修 |
+
+---
+
+## 12. Bug C：管理器不在后台时模块静默不加载（服务未就绪，2026-10-16 新增）
+
+> ⚠️ **本节结论经两轮修正**：初判"836 删了 NeoLocal 回落链"是**错的**（被 logcat 实证推翻）。真实根因见 §12.3 —— **缓存被读了、模块清单也加载了，但模块服务未就绪 ⇒ 模块不实例化**。
+
+### 12.1 现象与用户话术 [V]
+
+用户（一加平板 2 Pro / OPD2413 / **ColorOS 16 / Android 16 / API 36**，NPatch **1.0.9 (836)** 本地模式，**KernelSU root**）报告：
+
+> 「NPatch 不挂后台就失效，好像跟 1.0.8 区别不大？貌似以前 1.0.7 的时候不这样」
+
+**症状**：NPatch 管理器进程不在后台时启动游戏 → **游戏正常启动、不崩溃**，但**模块完全没加载**（overlay / 解锁 / native hook 全无，游戏侧 `ala_tool.log` 零行）。把 NPatch 管理器挂到后台再启动游戏 → 模块正常。
+
+### 12.2 诊断证据链 [V]
+
+**受控实验（同设备/同包/同模块，唯一变量 = 启动游戏时管理器进程是否存活）**：
+
+| 实验 | 管理器状态 | 结果 |
+|---|---|---|
+| A（复现 ×2） | **死**（缓存已写） | **失败 2/2** |
+| B（对照 ×2） | **活** | **成功 2/2** |
+| C | 死，但**刚成功启动过**（缓存必已写） | **失败** |
+
+**进程内存实证（`/proc/<pid>/maps`，root）**：成功态游戏进程 maps 有 **2 行 `tools.alamobile.mod/base.apk`**（模块被 mmap）；失败态 **0 行** ⇒ 模块代码从未进进程。
+
+**缓存文件实证（`/data/data/<游戏包>/shared_prefs/npatch.xml`，root）**：`modules` 字段**有完整内容**（模块路径），失败启动前后**未被覆写**（`last_fallback_reason = "bind_timeout"`）⇒ **排除"缓存为空/被覆写"**。
+
+**logcat 实证（root 抓全缓冲区，ColorOS 下 NPatch 的 `android.util.Log` 只进 logcat 不落文件）—— 决定性对照**：
+
+| 标记 | 失败态（管理器死） | 成功态（管理器活） |
+|---|---|---|
+| `Loading modules from local cache: [...]` | ✅ **有** | ✅ 有 |
+| `Loaded cached module tools.alamobile.mod` | ✅ **有** | ✅ 有 |
+| `Manager not ready in time; starting with local cached modules` | ✅ | — |
+| `Manager binder connected and registered successfully` | ❌ | ✅ |
+| **`VectorServiceClient service is not ready ...`** | **✅ ×2** | ❌ |
+| **`AlaMobileTool: Module loaded in process`** | **❌** | **✅** |
+
+**⇒ 缓存清单加载成功，但模块类从未实例化** —— 断点在"服务未就绪"。
+
+**另有一条 ColorOS 系统日志（解释了为何管理器连不上）**：
+```
+I OplusAppStartupManager: prevent start top.nkbe.npatch, cmp {...manager.ModuleService} by com.Takotsubo.AlamobileFormula ... Type bs
+```
+`Type bs` = bindService —— **ColorOS 关联启动管控拦截了游戏对管理器的 bindService**（这是 ColorOS 侧行为，非 NPatch 独有；Linux 下无此拦截）。
+
+### 12.3 机制（真实根因）[V/源码]
+
+**1.0.7 vs 1.0.8+ 的关键差异 = `RemoteApplicationService` 构造函数是否抛异常**（逐版本 diff 源码，`references/NPatch` 已 unshallow + fetch tag）：
+
+| 版本 | 构造函数 | 管理器不可达时 | `LSPApplication` 的 `if (service == null)` 兜底 |
+|---|---|---|---|
+| **1.0.7** | `throws RemoteException` | **抛异常** → 上层 catch → `service = null` | ✅ **成立** → 走 `NeoLocalApplicationService`（离线可用）⇒ 清单**+服务**都有 ⇒ 模块加载 |
+| **1.0.8/1.0.9/836** | **不抛**（架构重写） | 构造成功 → `service != null`（内部 binder 未连） | ❌ **永不成立** → 停在 `RemoteApplicationService` ⇒ 有清单**无服务** ⇒ 模块不实例化 |
+
+**836 的确切失败链**：
+1. `RemoteApplicationService` 构造**不抛异常**（架构重写后不再抛）⇒ `LSPApplication` 第 313 行 `if (service == null)` **不成立**
+2. 构造内部：`bind_timeout` → `loadModulesFromCache()` **成功读到清单**（日志 `Loading modules from local cache` / `Loaded cached module`）→ `applyLocalCachedModules()` 把清单存进 `cachedModuleScope`
+3. `Startup.initXposed(..., service)` 传的 `service` = `RemoteApplicationService`，其内部 binder 未连 ⇒ **`VectorServiceClient.INSTANCE.service` 为 null**
+4. `LSPLoader.initModules()` → `registerModuleRuntimeAppInfos()` 反射取 `VectorServiceClient.service`，为 null → `Log.w("service is not ready ...")` → **return，模块注册/实例化全部跳过**
+5. ⇒ 模块清单在，但模块类从未实例化 ⇒ 游戏进程无模块代码（maps 0 行）
+
+**上游已两次尝试修复但均不彻底**（公开仓库 commit）：
+- `a9dc4619`（v1.0.9 tag，10-06）："管理器被關閉時以本地快照啟動" —— 改 `RemoteApplicationService` 内部（800ms 超时 + 缓存预载），**但没改 `LSPApplication` 的 `if (service == null)` 判据** ⇒ 服务层面仍缺失
+- `c712f4e3`（10-06）："綁定管理器逾時時向 ConfigProvider 取最新模組範圍" —— 仍只处理**清单**，未处理**服务**
+
+⇒ **两次修复都在"清单"层面，未触及"服务未就绪"这个真正的断点**。
+
+**版本对应（供上游对照）**：用户设备 verCode=836；公开仓库 HEAD `31301d7c`（TG release notes 明列 #158+#160 = 这两个 commit）代码内容 ≈ 836，仅 commit 计数环境不同（私有 dev 仓库 836 vs 公开镜像 831）。
+
+### 12.4 影响面 [V]
+
+- **仅影响 NPatch 本地模式**（`useManager=true`）——即**绝大多数终端用户**（非 root 走 NPatch，见记忆 [[users-cannot-use-adb]]）。
+- **与模块、共存包、PairIP、作用域、Android 版本均无关**——纯 NPatch 框架层服务回落回归。
+- **与 Bug A/B 的区别**：A/B 是**崩溃**（白屏闪退），C 是**静默不加载**（游戏能玩，只是没模块）——用户感知完全不同，容易误判为"模块 bug"。
+- 版本相关性：**1.0.7 无**，**1.0.8 起有**（用户原话"跟 1.0.8 区别不大"），**836 确定存在**。
+
+### 12.5 用户侧处置 [V]
+
+- **治标（立刻可用）**：**每次开游戏前，先把 NPatch 管理器 App 打开一次**（挂后台即可，不必停留）。管理器进程存活 ⇒ binder 连上 ⇒ 服务就绪 ⇒ 模块加载。
+- **治本**：等上游修复（见 §12.6）。用户当前 836 无法通过设置绕过。
+- ⚠️ **不要建议用户"清缓存/清数据"**——那是 Bug A 的处方，对 C 无效且有害（会清掉模块 native 缓存）。
+
+### 12.6 上游 issue 草稿（Bug C）
+
+> **标题**：Local mode: module not instantiated when manager not running (regression since 1.0.8) — `VectorServiceClient.service` null in the `bind_timeout` fallback path
+>
+> **环境**：NPatch 1.0.9 (836) local manager mode, Android 16 (API 36), ColorOS 16, OnePlus Pad 2 Pro (OPD2413)
+>
+> **复现**：
+> 1. 杀掉管理器进程（`am force-stop top.nkbe.npatch`）
+> 2. 启动已 patch 的目标 App
+> 3. → 目标 App 正常启动、**不崩溃**，但模块不注入（无 hook、无模块日志）
+> 4. 反之先启动管理器（保持后台）再启动 → 模块正常注入
+>
+> **关键日志（logcat，失败态）**：
+> ```
+> I NPatch: Loading modules from local cache: [{"path":".../tools.alamobile.mod.../base.apk","packageName":"tools.alamobile.mod"}]   ← 缓存读到了
+> I NPatch: Loaded cached module tools.alamobile.mod                                                                                  ← 清单加载了
+> W NPatch: Manager not ready in time; starting with local cached modules
+> W NPatch-Loader: VectorServiceClient service is not ready for native LoadedModule proxy        ← 断点
+> W NPatch-Loader: VectorServiceClient service is not ready for LoadedModule path compatibility  ← 断点
+> ```
+> （**无** `AlaMobileTool: Module loaded in process`；成功态有，且**无** "service is not ready"）
+>
+> **根因**：`LSPApplication` 的 `if (service == null)` 兜底（→ `NeoLocalApplicationService`）在 1.0.8 起**永不触发** —— 因为 `RemoteApplicationService` 构造函数从 `throws RemoteException` 改成了不抛异常，`bind_timeout` 时 `service` 仍非 null，但其内部 binder 未连 ⇒ `Startup.initXposed(..., service)` 使 `VectorServiceClient.service` 为 null ⇒ `LSPLoader.initModules()` 里 `registerModuleRuntimeAppInfos()` 提前 return，**模块清单有、服务没有 ⇒ 模块不实例化**。
+>
+> **期望**：`bind_timeout` 分支下，`service` 应能在服务层提供离线实现（如 1.0.7 的 `NeoLocalApplicationService`），或让 `VectorServiceClient` 接受从缓存加载的模块清单 —— 否则清单加载无意义。
+
+### 12.7 一句话总结
+
+**Bug C = NPatch 1.0.8+ 本地模式下"缓存兜底只兜了模块清单、没兜模块服务"**：管理器不在后台时，清单能从缓存加载，但 `VectorServiceClient.service` 为 null ⇒ 模块**永不实例化**（1.0.7 因构造函数抛异常而走 `NeoLocalApplicationService`，清单+服务齐全故正常）。**用户治标 = 开游戏前先开一次管理器；治本 = 等上游修服务层兜底。**
+
+### 12.8 上游修复（843 测试版，2026-10-17）[V]
+
+作者（`HSSkyBoy` / Neko Beillc）在 #154 回复中确认根因成立，并说明修法：
+
+> 修法上我不打算照建議換成 NeoLocalApplicationService，因為那樣會丟掉 bind_timeout 之後的 Provider 對帳和背景重連升級。我會讓 RemoteApplicationService 對外提供一個穩定的本地 binder，這樣管理器晚點連上或中途被殺，都不會讓核心的 service 變成 null。
+
+**对应提交**（私有 dev 仓库，公开仓库尚未同步）：
+
+| 提交 | 内容 |
+|---|---|
+| `bbd8897` | `fix(loader): keep framework service binder local so modules load without the manager` ← **Bug C 主修** |
+| `6872a71` | `fix(manager): warn when diagnostic export cannot see patched app logs`（诊断导出加告警） |
+| `cc60416` | `build(deps): 更新 Vector 核心基座至最新版本 (core-837) 並升級 Gradle Wrapper 到 9.8.0` |
+| `d097b31` | `fix(manager): 修復 A10 可能獲取不到存儲權限的問題`（= 公开仓库 `2a3a57e2`） |
+
+**发布形态**：**843 测试版**（TG 频道分发，非 GitHub Release；公开仓库最新 Release 仍是 `v1.0.9`）。
+
+**为什么这个修法对**（我核过源码可达性）：`VectorServiceClient.init()` 只要求 `asBinder() != null` 就收下服务；一旦收下，`XposedInit` 调 `getLegacyModules()` 会进入 `RemoteApplicationService.getLegacyModules()` 的 `current == null || !managerAvailable.get()` 分支 → `return getCachedModuleScope(true)` → **返回 `applyLocalCachedModules()` 已填好的缓存清单**（`RemoteApplicationService.java:475-498`）。清单本来就在，只被 `asBinder()` 挡在门外 ⇒ 「稳定本地 binder」正好补上缺的那一环，同时保留 Provider 对帐与后台重连升级（这是 `NeoLocalApplicationService` 给不了的）。
+
+**✅ 实测验证（2026-10-17 22:25–22:27，一加平板 2 Pro / ColorOS 16 / Android 16）**：Bug C **已修复**。
+
+| 场景 | 管理器状态 | `service is not ready` | `Installed native LoadedModule service proxy` | `Module loaded in process` | 进程 maps | 功能初始化日志 |
+|---|---|---|---|---|---|---|
+| **843 失败态** | 死 | ❌ **消失** | ✅ | ✅ | **6 段** | **16 条** |
+| **843 成功态** | 活 | ❌ | ✅ | ✅ | 6 段 | 16 条 |
+| （836 失败态对照） | 死 | ✅ ×2 | ❌ | ❌ | **0 段** | 0 条 |
+
+失败态完整链路（`Manager not ready in time` 之后**直接**接上模块加载）：
+
+```log
+I NPatch  : Loading modules from local cache: [...]
+I NPatch  : Loaded cached module tools.alamobile.mod
+W NPatch  : Manager not ready in time; starting with local cached modules
+I NPatch-Loader: Installed native LoadedModule service proxy      ← 836 在此处是两条 service is not ready
+I AlaMobileTool: Module loaded in process com.Takotsubo.AlamobileFormula
+```
+
+模块功能侧同样完整（两态各 16 条，逐条一致）：`Native hooks installed (isAvailable=true)`、`lap hooks initialized`、`MusicPlayer initialized`、`PaddockUploader started`、`initUnlock: enable_unlock=1`、配置仲裁 `winner=remote prefs ... pedalMode=DUAL`。
+
+**⚠️ 一个未被修复的边界（ColorOS 特有，非回归）**：管理器**晚于游戏启动**时，游戏进程**不会自动重连**。原因 = ColorOS 的 `OplusAppStartupManager` 让 `bindService` **同步返回 false**（`bindInitiated = false`）⇒ `scheduleGiveUp()` 的重连机制**根本没注册**。这与作者在 #154 的自述一致：「如果你的機型連 Android 標準的自動重啟服務進程都跳過，還是需要某個東西（打開任一 scope app 或 manager 本身）觸發一次重連」。**但这已不影响可用性**——模块在管理器缺席时就已经完整加载，重连只关系到「热重载/作用域实时更新」这类后续能力。
+
+**另一条给上游的观察（bindService 同步返回 false）**：`OplusAppStartupManager` 在 `00:38:47.078` 拦截 bindService，而 `Manager not ready in time` 出现在 `00:38:47.098`——**仅隔 20ms**，远小于代码里的 `CONNECTION_TIMEOUT_SEC = 2`。说明 ColorOS 是**同步返回 false**（`bindServiceCompat` 返回 false ⇒ `bindInitiated = false` ⇒ `latch.await()` 根本不执行），而非"绑上了但超时"。
