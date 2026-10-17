@@ -1,17 +1,17 @@
 # NPatch 缓存问题导致的启动闪退 — 调查记录
 
-> ⚠️ **本文件记录三个不同的 NPatch 版本问题，症状各异、根因不同，排查前先对号入座**：
+> ⚠️ **本文件记录四个不同的 NPatch 问题，症状各异、根因不同，排查前先对号入座**（前三者是启动/加载类，§13 是诊断导出类）：
 >
-> | | Bug A（#147，§1–§10） | Bug B（Android 16 W^X，§11） | Bug C（服务回落缺失，§12） |
-> |---|---|---|---|
-> | 症状 | **开屏白屏闪退** | **开屏白屏闪退** | **不崩溃，模块静默不加载** |
-> | 崩溃栈 | `Unable to instantiate application` → `Resources.getAssets()` **NPE** | `Unable to instantiate application` → `SecurityException: Writable dex file ... is not allowed` | **无崩溃栈**（进程正常起，只是没 hook） |
-> | 根因 | 缓存 **内容损坏**（无完整性校验/无 fsync/无锁） | 缓存**权限可写**（未设只读） | 管理器不在后台时**模块清单能加载、但服务未就绪**（`VectorServiceClient.service` = null ⇒ 模块不实例化） |
-> | 触发条件 | 任意 Android 版本 | **Android 14+（本机 Android 16 实证）** | **NPatch 1.0.8+ 本地模式 + 管理器未运行** |
-> | 用户侧解法 | **清「游戏」缓存**（不是 NPatch 数据） | **无效** → 只能升级 NPatch 到 **830+**（已修） | **先把 NPatch 管理器挂后台再开游戏**（治标）；根治等上游修服务层 |
-> | 上游状态 | 1.0.8 已修（原子写 + 锁） | **830 测试版已修** | **836 存在**；**843 测试版已修**（上游提交 `bbd8897` "keep framework service binder local"，见 §12.8） |
+> | | Bug A（#147，§1–§10） | Bug B（Android 16 W^X，§11） | Bug C（服务回落缺失，§12） | Bug D（R8 混淆，§13） |
+> |---|---|---|---|---|
+> | 症状 | **开屏白屏闪退** | **开屏白屏闪退** | **不崩溃，模块静默不加载** | **不崩溃，诊断包缺 `logcat.log`** |
+> | 崩溃栈 | `Unable to instantiate application` → `Resources.getAssets()` **NPE** | `Unable to instantiate application` → `SecurityException: Writable dex file ... is not allowed` | **无崩溃栈**（进程正常起，只是没 hook） | **无崩溃栈**（`runCatching{}.getOrNull()` 静默降级） |
+> | 根因 | 缓存 **内容损坏**（无完整性校验/无 fsync/无锁） | 缓存**权限可写**（未设只读） | 管理器不在后台时**模块清单能加载、但服务未就绪**（`VectorServiceClient.service` = null ⇒ 模块不实例化） | `ShizukuService` 被 **R8 折叠成抽象空壳 `mm0`**（零构造器），Shizuku 反射实例化失败 |
+> | 触发条件 | 任意 Android 版本 | **Android 14+（本机 Android 16 实证）** | **NPatch 1.0.8+ 本地模式 + 管理器未运行** | 任意版本（**843 及以前**）；需 Shizuku 可用才会走到这条路径 |
+> | 用户侧解法 | **清「游戏」缓存**（不是 NPatch 数据） | **无效** → 只能升级 NPatch 到 **830+**（已修） | **先把 NPatch 管理器挂后台再开游戏**（治标）；根治等上游修服务层 | **无需处置**（不影响模块可用性）；换 Shizuku 实现**无效** |
+> | 上游状态 | 1.0.8 已修（原子写 + 锁） | **830 测试版已修** | **836 存在**；**843 测试版已修**（上游提交 `bbd8897` "keep framework service binder local"，见 §12.8） | **845 已修**（上游提交 `63f8f6be` proguard keep 规则，见 §13.5） |
 >
-> **一句话区分**：崩溃栈里出现 `Writable dex file ... is not allowed` = Bug B；出现 `Resources.getAssets()` null = Bug A；**不崩溃但模块零日志、logcat 里 NPatch 有 `Loaded cached module` 却无 `Module loaded in process`、且有 `VectorServiceClient service is not ready`** = Bug C。
+> **一句话区分**：崩溃栈里出现 `Writable dex file ... is not allowed` = Bug B；出现 `Resources.getAssets()` null = Bug A；**不崩溃但模块零日志、logcat 里 NPatch 有 `Loaded cached module` 却无 `Module loaded in process`、且有 `VectorServiceClient service is not ready`** = Bug C；**诊断包能导出但 `collection-report.txt` 写 `Included system logcat via Shizuku: No`、logcat 有 `NoSuchMethodException: mm0.<init> []`** = Bug D（不影响模块可用性）。
 
 > 结论一句话（Bug A）：**这是 NPatch（本地注入框架）框架层的 bug，与 `ala-mobile-tool` 模块无关。**
 > 根因 = NPatch 保存的 origin-apk 缓存文件损坏，而 NPatch 对缓存命中**只检查文件是否存在、不校验完整性**，导致每次启动都用坏文件构建 Resources → 系统静默失败 → 实例化 Application 时 NPE。
@@ -420,3 +420,166 @@ I AlaMobileTool: Module loaded in process com.Takotsubo.AlamobileFormula
 **⚠️ 一个未被修复的边界（ColorOS 特有，非回归）**：管理器**晚于游戏启动**时，游戏进程**不会自动重连**。原因 = ColorOS 的 `OplusAppStartupManager` 让 `bindService` **同步返回 false**（`bindInitiated = false`）⇒ `scheduleGiveUp()` 的重连机制**根本没注册**。这与作者在 #154 的自述一致：「如果你的機型連 Android 標準的自動重啟服務進程都跳過，還是需要某個東西（打開任一 scope app 或 manager 本身）觸發一次重連」。**但这已不影响可用性**——模块在管理器缺席时就已经完整加载，重连只关系到「热重载/作用域实时更新」这类后续能力。
 
 **另一条给上游的观察（bindService 同步返回 false）**：`OplusAppStartupManager` 在 `00:38:47.078` 拦截 bindService，而 `Manager not ready in time` 出现在 `00:38:47.098`——**仅隔 20ms**，远小于代码里的 `CONNECTION_TIMEOUT_SEC = 2`。说明 ColorOS 是**同步返回 false**（`bindServiceCompat` 返回 false ⇒ `bindInitiated = false` ⇒ `latch.await()` 根本不执行），而非"绑上了但超时"。
+
+---
+
+## 13. Bug D：诊断导出 Shizuku logcat 通道断裂（R8 混淆，2026-10-17 新增）
+
+> **对号入座**：诊断包能正常导出、`app/` 日志齐全，但 `collection-report.txt` 里恒定写着
+> `Included system logcat via Shizuku: No (Shizuku not ready or process capture skipped)`，
+> 且 logcat 有 `NoSuchMethodException: mm0.<init> []` ⇒ **本节**。
+> 与 Bug A/B/C 均无关（不影响模块可用性，只影响诊断包里的系统日志段）。
+
+### 13.1 现象 [V]
+
+用户在 NPatch 管理器里对共存版导出诊断日志，得到的 zip 里：
+
+```
+Collected log files: 4
+Skipped log files: 0
+Collected log bytes: 393032
+Included system logcat via Shizuku: No (Shizuku not ready or process capture skipped)
+```
+
+`app/` 目录下 4 个 `ala_tool` 日志正常，唯独缺 `logcat.log`。**用户侧无感**（`runCatching{}.getOrNull()` 静默降级），只有拿到诊断包的人才会发现少了一段。
+
+### 13.2 决定性证据 [V]
+
+`adb logcat`（2026-10-17 23:24:22，一加平板 2 Pro / ColorOS 16 / Android 16 / NPatch 843）：
+
+```log
+I UserServiceManager: New service record top.nkbe.npatch:npatch (...): version=1, daemon=false, apk=.../top.nkbe.npatch/base.apk
+V UserServiceManager: Starting process for service record top.nkbe.npatch:npatch (...)
+I ShizukuServiceStarter: starting service top.nkbe.npatch/mm0...
+W ShizukuServiceStarter: unable to start service top.nkbe.npatch/mm0...
+W ShizukuServiceStarter: java.lang.NoSuchMethodException: mm0.<init> []
+```
+
+**`mm0` = R8 折叠后的 `top.nkbe.npatch.ShizukuService`**（`dexdump`/`baksmali` 实证）：
+
+```smali
+.class public abstract Lmm0;
+.super Landroid/os/Binder;
+.implements L喵喵喵猫喵猫喵喵喵喵喵喵喵喵;   # INPatchShizukuService
+# static fields ...
+```
+
+- **零方法、零构造器**（`grep "^\.method" mm0.smali` 无输出）
+- **零子类**（全 dex 无 `.super Lmm0;`）
+
+### 13.3 机制 [V/源码+反编译]
+
+**1. NPatch 侧**（`nkbe/util/ShizukuApi.kt` `bindUserServiceIfNeeded()`）：
+
+```kotlin
+val component = ComponentName(lspApp.packageName, ShizukuService::class.java.name)
+Shizuku.bindUserService(args, connection)
+```
+
+`ShizukuService::class.java.name` 在 R8 后返回 **`"mm0"`** —— 组件名被混淆。
+
+**2. Shizuku 侧**（`moe.shizuku.starter.ServiceStarter.main` → `rikka.shizuku.n40`）：
+读取传入的组件名 → `Class.forName("top.nkbe.npatch.mm0")` → `getConstructor(空参)` → `newInstance()`。
+
+```smali
+# n40.smali:640
+invoke-virtual {p0, v1}, Ljava/lang/Class;->getConstructor([Ljava/lang/Class;)Ljava/lang/reflect/Constructor;
+invoke-virtual {p0, v1}, Ljava/lang/reflect/Constructor;->newInstance([Ljava/lang/Object;)Ljava/lang/Object;
+```
+
+**3. 断点**：`mm0` 是 `abstract` 且**无构造器** ⇒ `getConstructor()` 直接抛 `NoSuchMethodException` ⇒ user service 进程起不来 ⇒ `getUserService()` 超时 ⇒ `dumpLogcat()` 返回 null ⇒ 诊断包标注 `No`。
+
+**4. 为什么 R8 会折叠**：`manager/proguard-rules.pro` **无任何 shizuku keep 规则**（`grep -i shizuku` 零命中）。R8 看到 `ShizukuService` 只被 `ComponentName` 以字符串形式引用（`::class.java.name`），判定为"未被真实使用"，把实现类整体优化掉，只留 AIDL 基类骨架。
+
+### 13.4 为什么「换 Shizuku 实现」修不好 [V/实测]
+
+作者（`HSSkyBoy` / Neko Beillc）在 TG 建议换用其自维护的 Shizuku fork（`github.com/HSSkyBoy/Shizuku`）。**实测对照**：
+
+| 实验 | Shizuku 实现 | 诊断包结果 |
+|---|---|---|
+| 基线（22:41） | 官方 `13.6.0` | `Included system logcat via Shizuku: **No**` |
+| 换 fork 后（23:24） | HSSkyBoy `13.6.1.r1192` | `Included system logcat via Shizuku: **No**` |
+
+两次诊断包**字节数几乎相同**（25306 / 25305），`app/` 日志完全一致，唯一变量 = Shizuku 实现，**结果不变**。
+
+**根因层判断**：
+- Shizuku fork 的改动集中在 **server 侧**：`/data/local/tmp/shizuku` 路径、看门狗、无线 ADB 配对自动化、权限管理 UI、开机自启（见 fork 的 release notes 与 commit 列表）。
+- `ServiceStarter` 的反射实例化路径（`Class.forName` → `getConstructor` → `newInstance`）**与上游一致**（fork APK 反编译实证：`rikka/shizuku/n40.smali:616,640` 仍是 `Constructor.newInstance`）。
+- ⇒ **换客户端实现碰不到服务端类被混淆这件事**。这是"换工具修不了被工具调用的对象的 bug"。
+
+### 13.5 上游修复与实测验证（845，2026-10-17）[V]
+
+**上游已修**：提交 `63f8f6be`（2026-10-17 23:07，公开仓库 `origin/miuix`）：
+
+```diff
+ manager/proguard-rules.pro
++-keep class top.nkbe.npatch.ShizukuService { <init>(); }
+```
+
+提交说明与本文档 §13.3 的独立分析**完全一致**：
+
+> `ShizukuService` 只以類別名稱交給 Shizuku，由 `ServiceStarter` 在另一個程序以 `loadClass` 加上無參建構子實例化；manager 本身從不實例化它，R8 因此把它併入抽象的 AIDL Stub，導致 `InstantiationException`、使用者服務永遠起不來，診斷匯出拿不到 logcat。加入 keep 規則保留其無參建構子。
+
+同一提交还修了两处（**三个独立问题**）：
+
+| 修复 | 内容 |
+|---|---|
+| **① keep 规则** | `-keep class top.nkbe.npatch.ShizukuService { <init>(); }` —— 只保类名+无参构造器，方法体仍混淆 |
+| **② `dumpLogcat` 窗口** | `logcat -d -t 5000`（取最后 5000 行原始日志，密集 ROM 上只覆盖几秒）→ `logcat -d -T <10分钟前>` + `ArrayDeque` 只保留最新 `maxLines` 行。**时间窗口与行数上限解耦** |
+| **③ Shizuku 断线保护** | `performDexOptMode` / `isPackageInstalledWithoutPatch` 加 `runCatching{}.getOrDefault(false)` —— 修复"UI 判断可用后 Shizuku 才断线"导致的闪退 |
+
+**✅ 实测验证（2026-10-18 00:07，一加平板 2 Pro / ColorOS 16 / Android 16 / NPatch 845 + 共存版 Fix 2）**：
+
+| 项 | 843（修复前） | 845（修复后） |
+|---|---|---|
+| 诊断包 `collection-report.txt` | `Included system logcat via Shizuku: **No**` | `Included system logcat via Shizuku: **Yes**` |
+| 诊断包文件数 | 4（无 `logcat.log`） | **5**（含 `logcat.log`） |
+| 诊断包大小 | 25305 B | **26805 B** |
+| `ShizukuServiceStarter` 日志 | `starting service top.nkbe.npatch/**mm0**...` → `NoSuchMethodException: mm0.<init> []` | `starting service top.nkbe.npatch/**top.nkbe.npatch.ShizukuService**...` → `Received binder` → `send binder to moe.shizuku.privileged.api` |
+
+845 的完整成功链路（logcat）：
+
+```log
+I UserServiceManager: New service record top.nkbe.npatch:npatch (...): version=1, daemon=false, apk=.../base.apk
+V UserServiceManager: Starting process for service record top.nkbe.npatch:npatch (...)
+I ShizukuServiceStarter: starting service top.nkbe.npatch/top.nkbe.npatch.ShizukuService...
+V UserServiceManager: Received binder for service record (...)
+I ShizukuServiceStarter: send binder to moe.shizuku.privileged.api in user 0
+```
+
+`logcat.log` 内容验证（**② 窗口修复生效**）：17 行，时间跨度 `00:06:24` → `00:07:36`（10 分钟窗口内的最后部分），保留的都是含 `AndroidRuntime`/`DEBUG` 关键字的行，且**保住了关键证据** `Calling main entry moe.shizuku.starter.ServiceStarter` 与模块自己的 `AlaMobileTool: App: XposedService bound`。
+
+**③ 断线保护实测**：`kill -9` 掉 `shizuku_server` 后，在 NPatch 里触发操作 → 显示"Shizuku 未连接" Toast，**NPatch 进程存活（PID 未变）、logcat 零 `FATAL EXCEPTION`**。修复前同场景会闪退。
+
+**回归验证（843 的 Bug C 修复未被破坏）**：845 + Fix 2 冷启动游戏，模块完整加载 —— `Native hooks installed (isAvailable=true)`、`lap hooks initialized`、`MusicPlayer initialized`、`PaddockUploader started`、配置仲裁 `winner=remote prefs ... pedalMode=DUAL`；包名白名单生效（`com.google.android.gms` / `com.google.android.webview` 均 `not a game package, skipping`）。
+
+### 13.6 上游修复建议（已被采纳，保留供后续版本核对）
+
+在 `manager/proguard-rules.pro` 加 keep 规则：
+
+```proguard
+# 已采纳的最小形式（63f8f6be）
+-keep class top.nkbe.npatch.ShizukuService { <init>(); }
+```
+
+如需更保守（保全部成员）：
+
+```proguard
+-keep class top.nkbe.npatch.ShizukuService { *; }
+-keep class top.nkbe.npatch.INPatchShizukuService { *; }
+-keep interface top.nkbe.npatch.INPatchShizukuService { *; }
+```
+
+**验证方法**（无需真机也可静态确认）：
+```bash
+# 从 APK 里确认类名与构造器存在
+baksmali d classes.dex -o out
+ls out/top/nkbe/npatch/ShizukuService.smali   # 应存在
+grep -c "method public constructor <init>()V" out/top/nkbe/npatch/ShizukuService.smali   # 应 ≥1
+```
+
+或直接看诊断包：`collection-report.txt` 出现 `Included system logcat via Shizuku: Yes` 即修复。
+
+### 13.7 一句话总结
+
+**NPatch 的诊断导出 Shizuku logcat 通道 = 死的（843 及以前）**：`ShizukuService` 被 R8 折叠成抽象空壳 `mm0`（无构造器），Shizuku 的 `ServiceStarter` 反射实例化必抛 `NoSuchMethodException`。**换任何 Shizuku 实现都无效**（该 bug 在 NPatch 的 R8 规则里，不在 Shizuku 里）；用户侧无感，只是诊断包缺 `logcat.log` 一段。**845 已修**（上游 `63f8f6be`：`-keep ... { <init>(); }`），实测诊断包已含 `logcat.log` 且标注 `Yes`；同提交另修 `dumpLogcat` 时间窗口与 Shizuku 断线闪退两处。
