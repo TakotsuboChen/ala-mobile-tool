@@ -376,6 +376,28 @@ val MiscIcon: ImageVector = svgIconMulti(
     )
 )
 
+// ── 解除最大转向角度限制（方向盘）───
+// 用户提供 SVG：`viewBox="1 1 98 98"`，单条 path（外圆 + 三个镂空区）。
+// 原图未写 fill-rule，默认 nonzero 即可正确镂空 —— 已实测参考图对拍确认。
+// viewBox 原点非零 → 必须传 viewportOriginX/Y=1（由 svgIconMulti 的 group 平移）。
+// 验证法：rsvg-convert 渲染原图与"包一层 `<g transform="translate(-1,-1)>`"
+// 的参考图，compare -metric AE = 0（实测通过）。正方形 → 默认 24×24dp。
+val SteeringWheelIcon: ImageVector = svgIconMulti(
+    "SteeringWheelIcon", 98f, 98f,
+    listOf(
+        SvgPath(
+            d = "M50,99A49,49,0,1,0,1,50,49.06,49.06,0,0,0,50,99Zm0-39.5a9.06,9.06,0,1,1,9.06-9.06" +
+                "A9.06,9.06,0,0,1,50,59.5Zm35,1.35A36.86,36.86,0,0,1,61.08,85a2.21,2.21,0,0,1-2.9-2.17l0-1" +
+                "A24.72,24.72,0,0,1,82.92,58h0A2.19,2.19,0,0,1,85,60.85ZM17.16,33.65a36.68,36.68,0,0,1,65.69,0" +
+                "A2.32,2.32,0,0,1,80.78,37a2.29,2.29,0,0,1-1.22-.36c-6.8-4.27-17.51-7-29.56-7s-22.76,2.76-29.56,7" +
+                "a2.29,2.29,0,0,1-1.22.36h0A2.32,2.32,0,0,1,17.16,33.65ZM17.06,58h0a24.72,24.72,0,0,1,24.7,23.82" +
+                "l0,1A2.21,2.21,0,0,1,38.9,85,36.86,36.86,0,0,1,15,60.85,2.19,2.19,0,0,1,17.06,58Z"
+        )
+    ),
+    viewportOriginX = 1f,
+    viewportOriginY = 1f
+)
+
 // ── 围场（Paddock）底栏 icon：挥舞方格旗 ───
 // 用户提供 SVG（100×100 viewBox，单 path fill），path 数据原样搬运。
 val ChequeredFlagIcon: ImageVector = svgIconMulti(

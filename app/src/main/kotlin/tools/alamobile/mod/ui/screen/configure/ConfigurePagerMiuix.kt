@@ -396,7 +396,7 @@ fun ConfigureNativeFeaturesScreen(
                 summary = "允许的最大转向角度随车速增大而减小，开启后解除该限制",
                 startAction = {
                     Icon(
-                        tools.alamobile.mod.ui.ForbidIcon,
+                        tools.alamobile.mod.ui.SteeringWheelIcon,
                         modifier = Modifier.padding(end = 6.dp),
                         contentDescription = null,
                         tint = colorScheme.onBackground
