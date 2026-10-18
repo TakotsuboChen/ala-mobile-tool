@@ -58,6 +58,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -608,6 +609,12 @@ private fun BoardRow(
             text = name,
             fontSize = 15.sp,
             maxLines = 1,
+            // ⚠️ **`maxLines` 与 `overflow` 是两个正交参数，只写前者得不到省略号**（2026-10-18 实机修复）：
+            //    `overflow` 默认是 `TextOverflow.Clip`，超长昵称被**硬裁切**在容器右缘——
+            //    实机表现就是"…飞"的「飞」被切掉半截，看不到任何省略标记。
+            //    这里必须显式 `Ellipsis`，让末尾整字被"…"替换（与主页卡片
+            //    `PaddockPagerMiuix.kt:290`、车手主页 `DriverScreen.kt` 三处保持一致）。
+            overflow = TextOverflow.Ellipsis,
             // 金色流光作用于"用户名 + 数值"（用户定案：这一行文字整体金色）。
             // 名次与头像不参与——名次列有 emoji 与数字混排，上渐变会和奖牌色打架。
             // 非金标行传主题样式（与改动前逐字等价）。
