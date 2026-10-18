@@ -1,62 +1,67 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-10-18T21:29:00+08:00 · Git HEAD: `37418be`
+生成时间: 2026-10-18T21:46:00+08:00 · Git HEAD: `c6b7ea0`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: 模块 `main` @ `37418be`（已 push）· 服务端 `main` @ `f48e658`（本会话未动）
-- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `37418be`——HEAD 必是本次 handoff 提交，
+- 锚点: 模块 `main` @ `c6b7ea0`（已 push）· 服务端 `main` @ `f48e658`（本会话未动）
+- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `c6b7ea0`——HEAD 必是本次 handoff 提交，
   其 parent 才是文档记录的 SHA
 - 待重探的 [?]: §5 中标记的继承项
-- 先读: `LeaderboardScreen.kt:190` 附近的分页 effect（本会话修复点）
+- 先读: `LeaderboardScreen.kt:607-620`（本会话修复点）
 
 ## 1. 当前目标
-无进行中的功能切片。本会话三件事：① 删除围场主页车手卡三列统计；
-② 修复榜单/车手主页分页哨兵值 bug（此前分页**完全没生效**）；③ 验证分页是真网络请求。
+无进行中的功能切片。本会话两件事：① 修榜单用户名省略号不生效（`maxLines` 漏 `overflow`）；
+② 纠正"OPD2413 = OPPO 平板"的机型误称并落盘。
 
 用户 2026-10-18 对围场功能定案「功能基本正常，暂时这样，下个会话再改」。
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **三列统计已删除**：`PaddockPagerMiuix.kt` -34 行，含 `StatCell`/`StatValue`。
-  APK 内 `赛季积分`/`赛季胜场` 均 0 命中。
-- [V] **分页 bug 已修复**：`LeaderboardScreen.kt` + `DriverScreen.kt`，
-  `?: -1` 改为 `?: return@snapshotFlow false`，判定基准改数据条数。
-- [V] **修复前后对比（模块进程 `ala_tool.log`）**：修复前 `offset=0/30/60/90`
-  在 **182ms 内**发完（间隔 11~40ms）；修复后间隔 **0.4~2.8s** 跟随滚动，
-  首屏只 1 次请求，`size>=total` 自动停。
-- [V] **确认真从服务器拉取**：`getJson` 每次新建 `HttpURLConnection` + `finally disconnect()`，
-  无缓存层；四页 offset 数据零重叠（合计 109 条、去重后仍 109 条）。
-- [V] **lint 通过**：`LINT_EXIT=0` / `BUILD SUCCESSFUL in 1m 29s`。
-- [V] **已装机验证**：魅族 20（`192.168.50.142:5555`），`lastUpdateTime=21:19:53`。
-  用户实测积分榜、赛道榜、个人主页三处均正常。
+- [V] **榜单用户名省略号已修**：`LeaderboardScreen.kt` `BoardRow` 的 `Text` 补
+  `overflow = TextOverflow.Ellipsis`（+7 行，含 import 与注释）。根因 = 只写 `maxLines = 1`
+  时 `overflow` 默认 `TextOverflow.Clip`，硬裁切在容器右缘。
+- [V] **APK 内实证**：`mapping.txt` 反查 `LeaderboardScreenKt -> wz0`、`BoardRow -> c`；
+  `baksmali` 反汇编后 `wz0.smali` 的 `c()` 在用户名 Text 调用点有 `v20=0x2`（Ellipsis）
+  + `v22=0x1`（maxLines）。源码 21:32:51 → APK 21:36:09。
+- [V] **lint + release 通过**：`LINT_EXIT=0` / `BUILD SUCCESSFUL in 1m 31s`；
+  `assembleRelease` `BUILD SUCCESSFUL in 1m 27s`（11,359,723 B）。
+- [V] **已装机并由用户验收**：魅族 20（`192.168.50.142:5555`），
+  `lastUpdateTime=2026-10-18 21:42:11`，`versionCode=104140` / `1.0.4 Alpha 4`。用户回「ok 了」。
+- [V] **全仓 `maxLines` 配对检查**：6 处全部有 `overflow`。
 - [V] **版本号未动**：模块 `1.0.4 Alpha 4` / `104140`，服务端 `1.0.1`。未打 tag、未发 Release。
 - 工作区: 仅 HANDOFF.md 与 `.handoffs/` 归档（本 handoff 提交内容）。
 
 ### 测试/build 输出（本次交接 run 的真实输出）
 ```
 $ ./gradlew :app:lint
-  → LINT_EXIT=0, BUILD SUCCESSFUL in 1m 29s
-     （66 warnings / 4 hints；2 errors 与 14 warnings 为 lint-baseline 既有项，
-      本会话改动文件零 lint 条目）
-$ ./gradlew :app:assembleRelease -x lintVitalAnalyzeRelease -x lintVitalRelease
-  → BUILD SUCCESSFUL in 1m 13s，APK 21:19:38（11,359,723 B）
-$ unzip -p <apk> classes.dex | grep -ac "load more: offset="   → 1（新代码已进包）
-$ adb -s 192.168.50.142:5555 install -r <apk>                   → Success
+  → BUILD SUCCESSFUL in 1m 31s（66 warnings / 4 hints；2 errors 与 14 warnings 为 baseline 既有项）
+$ ./gradlew :app:assembleRelease -x :app:lintVitalAnalyzeRelease -x :app:lintVitalRelease
+  → BUILD SUCCESSFUL in 1m 27s，APK 21:36:09（11,359,723 B）
+$ javap -p -c LeaderboardScreenKt.class | grep TextOverflow
+  → TextOverflow$Companion.getEllipsis-gIe3tQ8()，位于 BoardRow 方法体内
+$ adb -s 192.168.50.142:5555 install -r <apk>   → Success
+$ adb ... shell dumpsys package tools.alamobile.mod | grep lastUpdateTime
+  → 2026-10-18 21:42:11
 ```
 
 ## 3. 决策与理由
-- **删 `StatCell`/`StatValue` 而非留着** [V]——只服务这三列，留下会变未使用私有函数触发告警。
-- **判定基准用数据条数而非 `totalItemsCount`** [V]——后者含 `footer-space`、
-  `loadingMore` 的"加载中…"等装饰 item，其值随 UI 状态抖动。
-- **验证"是否真从服务器拉"用数据内容比对** [V]——服务端容器无请求级日志，
-  但不同 offset 返回不同用户（零重叠）比日志更硬。
-- **只给榜单加诊断日志** [V]——`Logger.i(TAG_BOARD, "load more: ...")` 加在
-  `LeaderboardScreen`；`DriverScreen` 未加（靠请求间隔推断）。
+- **补 `overflow` 而非调布局宽度** [V]——文字被切在容器边缘且无省略标记，
+  是 `overflow` 缺失的典型症状，不是 `weight`/`width` 不够。
+- **顺手做全仓 `maxLines` 配对扫描** [V]——同一模式复制了 4 处、3 对 1 错，
+  说明这是可复发的复制粘贴漂移，扫一遍成本低于下次再报。
+- **机型对照单独落盘为记忆文件** [V]——此前只在别的记忆里"顺带提一句"，
+  检索不命中，导致同一个错误反复犯（见 §4 第一条）。
 
 ## 4. 失败的尝试 — 不要再试
-- [X] **Edit 报 `String to replace not found` 后直接重试同一字符串** [V]——本会话实际发生：
-  上一次 Edit 工具返回 "internal error"，但内容**已经落盘**，盲目重试必然失配。
-  **正确做法：先 Read 目标区间确认当前内容，再决定是否重试。**
+- [X] **把 `OPD2413` 说成 "OPPO 平板"** [V]——2026-10-18 用户当场纠正：
+  「什么 OPPO 平板，我说了多少次一加平板 2 Pro」。**它是 OnePlus（一加）平板 2 Pro**，
+  与 OPPO 同属欧加集团、系统都叫 ColorOS，但机型名是用户的身份指称，写错即事实错误。
+  已落盘 memory `opd2413-is-oneplus-pad-2-pro`（含两台设备对照表）。
+- [X] **用 `unzip -p <apk> classes.dex | strings | grep TextOverflow` 验证** [V]——
+  R8 把 Compose value class 压成 int 常量，符号被抹掉 ⇒ **恒零命中**，会把已修报成没修。
+  正确链路见 CLAUDE.md「R8 会把 Compose value class 参数内联」条。
+- [X] **Edit 报错后直接重试同一字符串** [V]——上一次 Edit 返回 "internal error" 时内容
+  **已经落盘**，盲目重试必然失配。**先 Read 目标区间确认当前内容再决定是否重试。**
 - [X] **zsh 里 `unzip -p "$APK" classes*.dex` 的 glob 不展开** [V]——报 `no matches found`，
   且失败时 `grep -c` 仍返回 0（假阴性）。先 `unzip -l` 取实际 dex 名。
 - [X] 继承死路（详 `.handoffs/20261018212807-handoff.md` §4 及更早）：VPS 上 `apt-get update`
@@ -70,23 +75,21 @@ $ adb -s 192.168.50.142:5555 install -r <apk>                   → Success
   给旧 APK 留 `(NPatch 845)` 回滚副本 / 用 `+6` 偏移硬推 NPatch 版本号。
 
 ## 5. 已知坑
-- ⚠️ **LazyList 分页哨兵值 `?: -1` 参与 `>= total - N` 比较恒真** [V]——布局未完成时
-  `totalItemsCount` 为 0，`-1 >= -3` 成立 ⇒ effect 每次重启都翻页，一次性拉完全部。
+- ⚠️ **Compose `maxLines` 与 `overflow` 正交** [V]——只写 `maxLines = 1` 默认 `Clip` 硬裁切。
+  见 memory `compose-maxlines-overflow-orthogonal`。
+- ⚠️ **R8 内联 value class 使 `strings` 搜符号假阴性** [V]——见 CLAUDE.md 构建验证段。
+- ⚠️ **LazyList 分页哨兵值 `?: -1` 参与 `>= total - N` 比较恒真** [V]（继承）——
   空状态必须短路返回 `false`。见 memory `lazylist-pagination-sentinel-trap`。
-- ⚠️ **分页是否生效的判据是「请求间隔」不是「请求次数」** [V]——坏：182ms 内 4 连发；
-  好：0.4~2.8s 跟随滚动。用户体感"很顺畅"反而是 bug 信号。
-- ⚠️ **围场 UI 日志在模块进程 `filesDir`，需 root** [V]——`/data/data/tools.alamobile.mod/files/ala_tool.log`，
-  不在游戏侧 media 目录、也不在 logcat 常驻。见 memory `module-log-two-process-split`。
-- ⚠️ **`strings` 查不到中文 ≠ 改动没进包** [V]——`strings` 只提 ASCII，用 `grep -a` 字节搜。
-- ⚠️ **NPatch `VERSION_CODE` = `git commitCount`** [V]——私有仓与公开镜像差 5，
-  **版本号不能当代码内容用**。见 memory `npatch-versioncode-is-commitcount`、`docs/NPATCH_CACHE_CRASH_NOTES.md` §14。
-- ⚠️ **zsh 里 `UID` 是只读内置变量** [V]——赋值静默失败，换 `DID`/`USER_ID`。
-- ⚠️ **设备上有两台** [V]——`e98a35cb` = 平板 OPD2413，`192.168.50.142:5555` = 魅族 20。
-  多设备时 adb 必须 `-s` 指定。
-- ⚠️ **VPS docker 需 sudo** [V]——`docker ps` 直连报 permission denied。
-- ⚠️ **服务端容器无请求级日志** [V]——`sudo docker logs paddock-app-1` 为空，
-  验证服务端行为只能靠数据内容比对，或临时加 `tracing::info!`（需重新部署，须用户许可）。
-- ⚠️ **`loadingMore` 绝不能放进 `LaunchedEffect` 的 key** [V]——会永久卡"加载中…"。
+- ⚠️ **分页是否生效的判据是「请求间隔」不是「请求次数」** [V]（继承）——见同上 memory。
+- ⚠️ **围场 UI 日志在模块进程 `filesDir`，需 root** [V]（继承）——见 memory `module-log-two-process-split`。
+- ⚠️ **`strings` 查不到中文 ≠ 改动没进包** [V]（继承）——用 `grep -a` 字节搜。
+- ⚠️ **NPatch `VERSION_CODE` = `git commitCount`** [V]（继承）——见 memory `npatch-versioncode-is-commitcount`。
+- ⚠️ **zsh 里 `UID` 是只读内置变量** [V]（继承）——换 `DID`/`USER_ID`。
+- ⚠️ **设备上有两台** [V]——`e98a35cb` = **一加平板 2 Pro**（OPD2413），
+  `192.168.50.142:5555` = 魅族 20。多设备时 adb 必须 `-s` 指定。
+- ⚠️ **VPS docker 需 sudo** [V]（继承）。
+- ⚠️ **服务端容器无请求级日志** [V]（继承）——验证行为靠数据内容比对。
+- ⚠️ **`loadingMore` 绝不能放进 `LaunchedEffect` 的 key** [V]（继承）——会永久卡"加载中…"。
 - ⚠️ **UI 的图标/文案/命名是用户的决策域** [V]（继承）——新增设置项前先问。
 - ⚠️ **物理上限解除 ≠ 视觉/UI 跟着变** [V]（继承）——见 memory `physics-limit-vs-visual-readout`。
 - ⚠️ **`carModifier.isTiltSteer`(0x1C4) 的判定是反的** [?]（继承）。
@@ -110,8 +113,9 @@ $ adb -s 192.168.50.142:5555 install -r <apk>                   → Success
   13 用户要的 APK 先看 `/sdcard/Download/` 14 未经许可不得操作设备（最高优先级）。
 
 ## 6. 下一步（有序）
-1. **等用户对围场其余功能的反馈**：① 长昵称是否省略成 `1234567…`；② 信息卡右侧箭头点击；
-   ③ 车手主页四维筛选；④ 榜单点行进主页。异常先拉模块进程日志。
+1. **等用户对围场其余功能的反馈**：① 信息卡右侧箭头点击；② 车手主页四维筛选；
+   ③ 榜单点行进主页；④ 长昵称在**车手主页**与**主页卡片**的省略表现。
+   异常先拉模块进程日志（`/data/data/tools.alamobile.mod/files/ala_tool.log`，需 root）。
 2. **（可选）`DriverScreen` 补分页诊断日志**：目前只有 `LeaderboardScreen` 有
    `load more: offset=...`，车手主页靠请求间隔推断。
 3. **（可选）846 包分发**：`安装包/Ala Mobile Pro 8.0.6 Fix 2.apk` 已入库待发。
