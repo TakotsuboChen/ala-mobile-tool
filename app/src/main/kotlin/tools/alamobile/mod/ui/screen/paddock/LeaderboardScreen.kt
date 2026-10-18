@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -42,6 +43,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,9 +62,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.withContext
 import tools.alamobile.mod.PaddockClient
 import tools.alamobile.mod.ui.navigation3.LocalNavigator
+import tools.alamobile.mod.ui.navigation3.Route
 import tools.alamobile.mod.ui.theme.LocalEnableBlur
 import tools.alamobile.mod.ui.util.BlurredBar
 import tools.alamobile.mod.ui.util.rememberBlurBackdrop
@@ -112,9 +117,12 @@ fun LeaderboardScreen() {
     val VERSION_CODES = arrayOf(tools.alamobile.mod.offsets.OffsetTable.PADDOCK_VERSION_CODE, 200146)
 
     var points by remember { mutableStateOf<List<PaddockClient.PointsEntry>>(emptyList()) }
+    var pointsTotal by remember { mutableIntStateOf(0) }
     var trackBoard by remember { mutableStateOf<PaddockClient.TrackBoard?>(null) }
     // 首次进入（无旧内容可保留）才显示加载中；之后切条件保留旧内容
     var everLoaded by remember { mutableStateOf(false) }
+    // 翻页中（底部指示器用）；与首屏 loading 分开，避免翻页时整页闪"加载中…"
+    var loadingMore by remember { mutableStateOf(false) }
     // 页面进入转场（miuix NavDriver 程序化转场 500ms tween）结束后才渲染榜单行：
     // 转场中途插行淡入会打断转场动画观感；数据请求与转场并行，转场一结束即显示。
     var enterSettled by remember { mutableStateOf(false) }
@@ -133,6 +141,10 @@ fun LeaderboardScreen() {
     var refreshSeq by remember { mutableIntStateOf(0) }
     // 下拉刷新指示器（miuix PullToRefresh hoisted 状态）
     var isRefreshing by remember { mutableStateOf(false) }
+    // 筛选代次：每次切条件 +1。在途翻页回来时代次不符即丢弃，
+    // 否则旧条件的第 2 页会追加到新条件的第 1 页后面（列表混入不匹配行）。
+    var filterEpoch by remember { mutableIntStateOf(0) }
+    val listState = rememberLazyListState()
 
     LaunchedEffect(switchSeq) {
         if (switchSeq == 0) return@LaunchedEffect
@@ -142,11 +154,18 @@ fun LeaderboardScreen() {
     }
 
     LaunchedEffect(tabIndex, selectedTrack, selectedVersion, refreshSeq) {
+        filterEpoch++
+        val epoch = filterEpoch
         val v = if (selectedVersion == 0) null else VERSION_CODES.getOrNull(selectedVersion - 1)
         if (tabIndex == 0) {
-            points = withContext(Dispatchers.IO) { PaddockClient.fetchPointsBoard(v) }
+            val page = withContext(Dispatchers.IO) { PaddockClient.fetchPointsBoard(v, offset = 0) }
+            if (epoch == filterEpoch && page.ok) {
+                points = page.entries
+                pointsTotal = page.total
+            }
         } else {
-            trackBoard = withContext(Dispatchers.IO) { PaddockClient.fetchTrackBoard(selectedTrack, v) }
+            val page = withContext(Dispatchers.IO) { PaddockClient.fetchTrackBoard(selectedTrack, v, offset = 0) }
+            if (epoch == filterEpoch && page != null) trackBoard = page
         }
         everLoaded = true
         isRefreshing = false  // 数据到位 → 收起下拉指示器
@@ -155,6 +174,65 @@ fun LeaderboardScreen() {
             visibleBoard = tabIndex to selectedTrack
             boardAlpha.snapTo(1f)
         }
+        // 筛选变更后把列表滚回顶部（否则新条件的第 1 页会从上次的滚动位置开始）
+        if (listState.firstVisibleItemIndex > 0) listState.scrollToItem(0)
+    }
+
+    // 滚到底部自动翻页（用户定案：一次最多 30 条）。
+    // key 含数据条数：每加载一页重新评估一次；distinctUntilChanged 防滚动中重复触发。
+    //
+    // ⚠️ **`loadingMore` 绝不能放进 key**：在 effect 内把它置 true 会触发重组 →
+    //    key 变化 → Compose 取消**当前正在跑的这个协程** → `loadingMore = false`
+    //    永不执行 → 底部永远卡在"加载中…"且不再翻页。改用协程内局部变量守卫
+    //    （同一次 collect 期间重复触发被 `if (busy) return@collect` 挡掉）。
+    val currentSize = if (tabIndex == 0) points.size else trackBoard?.entries?.size ?: 0
+    val currentTotal = if (tabIndex == 0) pointsTotal else trackBoard?.total ?: 0
+    LaunchedEffect(filterEpoch, currentSize, currentTotal) {
+        if (!everLoaded) return@LaunchedEffect
+        if (currentSize >= currentTotal) return@LaunchedEffect   // 已到底
+        var busy = false
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+            last >= info.totalItemsCount - LOAD_MORE_THRESHOLD
+        }
+            .distinctUntilChanged()
+            .filter { it }
+            .collect {
+                if (busy) return@collect
+                busy = true
+                loadingMore = true
+                val epoch = filterEpoch
+                val v = if (selectedVersion == 0) null else VERSION_CODES.getOrNull(selectedVersion - 1)
+                val offset = currentSize
+                if (tabIndex == 0) {
+                    val page = withContext(Dispatchers.IO) {
+                        PaddockClient.fetchPointsBoard(v, offset = offset)
+                    }
+                    if (epoch == filterEpoch && page.ok) {
+                        // 空页 = 服务端已无更多（total 与实际行数不一致时的兜底），
+                        // 用"把 total 压到当前条数"表达"到底"，避免无限请求。
+                        if (page.entries.isEmpty()) pointsTotal = points.size else {
+                            points = points + page.entries
+                            pointsTotal = page.total
+                        }
+                    }
+                } else {
+                    val page = withContext(Dispatchers.IO) {
+                        PaddockClient.fetchTrackBoard(selectedTrack, v, offset = offset)
+                    }
+                    if (epoch == filterEpoch && page != null) {
+                        val prev = trackBoard?.entries.orEmpty()
+                        trackBoard = if (page.entries.isEmpty()) {
+                            trackBoard?.copy(total = prev.size)
+                        } else {
+                            page.copy(entries = prev + page.entries)
+                        }
+                    }
+                }
+                loadingMore = false
+                busy = false
+            }
     }
 
     Scaffold(
@@ -235,6 +313,7 @@ fun LeaderboardScreen() {
             // 不会像"Card + 全量 forEach"那样一次性组合几百行导致掉帧。
             // 连体卡视觉 = 每行自带 surfaceContainer 背景 + 首末行圆角拼接。
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .fillMaxHeight()
                     .scrollEndHaptic()
@@ -266,7 +345,11 @@ fun LeaderboardScreen() {
                     }
                 } else if (visTab == 0) {
                     val entries = points
-                    itemsIndexed(entries, key = { i, e -> "p#$i${e.username}" }) { i, e ->
+                    // key 用 user_id：分页追加时 key 必须全局唯一且稳定。
+                    // 旧 key 是 "p#下标+用户名"，翻页后下标连续故仍唯一，但用户名
+                    // 可能重复（服务端允许同名？实际 UNIQUE，不过用 id 更稳），
+                    // 且用户改名会让整列 key 变化 → 全量重组。
+                    itemsIndexed(entries, key = { _, e -> "p#${e.userId}" }) { i, e ->
                         BoardRow(
                             rank = i + 1,
                             avatarUrl = e.avatarUrl,
@@ -277,6 +360,10 @@ fun LeaderboardScreen() {
                             // 服务端判定的金标（版本榜：2×零辅助最快圈 ≥ 总数；
                             // 总榜另需至少 1 条零辅助）。客户端不重算。
                             gold = e.gold,
+                            // 点行 → 该车手主页（用户定案 2026-10-18）
+                            onClick = e.userId.takeIf { it.isNotEmpty() }?.let { uid ->
+                                { navigator.push(Route.Driver(uid)) }
+                            },
                             modifier = Modifier.animateItem(
                                 fadeInSpec = tween(250),
                                 fadeOutSpec = tween(150),
@@ -286,10 +373,25 @@ fun LeaderboardScreen() {
                     if (entries.isEmpty()) {
                         item(key = "empty") { BoardEmptyRow(boardAlpha.value) }
                     }
+                    // 翻页指示器（底部）：与"加载中…"分开展示，不打断已有行
+                    if (loadingMore) {
+                        item(key = "more") {
+                            Text(
+                                "加载中…",
+                                fontSize = 13.sp,
+                                color = colorScheme.onBackground.copy(alpha = 0.5f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(colorScheme.surfaceContainer)
+                                    .padding(vertical = 12.dp),
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                    }
                     item(key = "footer-space") { Spacer(Modifier.height(12.dp)) }
                 } else {
                     val entries = trackBoard?.entries.orEmpty()
-                    itemsIndexed(entries, key = { i, e -> "t#$i${e.username}" }) { i, e ->
+                    itemsIndexed(entries, key = { _, e -> "t#${e.userId}" }) { i, e ->
                         BoardRow(
                             rank = e.rank,
                             avatarUrl = e.avatarUrl,
@@ -301,6 +403,9 @@ fun LeaderboardScreen() {
                             // 逐行判定：不要求是全服第一（用户定案：鼓励提升技术，
                             // 即使不在榜首也有含金量）。
                             gold = e.gold,
+                            onClick = e.userId.takeIf { it.isNotEmpty() }?.let { uid ->
+                                { navigator.push(Route.Driver(uid)) }
+                            },
                             modifier = Modifier.animateItem(
                                 fadeInSpec = tween(250),
                                 fadeOutSpec = tween(150),
@@ -310,6 +415,20 @@ fun LeaderboardScreen() {
                     if (entries.isEmpty()) {
                         item(key = "empty") { BoardEmptyRow(boardAlpha.value) }
                     }
+                    if (loadingMore) {
+                        item(key = "more") {
+                            Text(
+                                "加载中…",
+                                fontSize = 13.sp,
+                                color = colorScheme.onBackground.copy(alpha = 0.5f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(colorScheme.surfaceContainer)
+                                    .padding(vertical = 12.dp),
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                    }
                     item(key = "footer-space") { Spacer(Modifier.height(12.dp)) }
                 }
             }
@@ -318,8 +437,9 @@ fun LeaderboardScreen() {
     }
 }
 
-/** 榜单行圆角：首行上圆角、末行下圆角、中间直角，拼接成连体卡（miuix Card = 16dp 圆角）。 */
-private fun boardRowShape(index: Int, size: Int): Shape = when {
+/** 榜单行圆角：首行上圆角、末行下圆角、中间直角，拼接成连体卡（miuix Card = 16dp 圆角）。
+ *  `internal` 供 DriverScreen 复用同一套连体卡拼接规则（两页观感必须一致）。 */
+internal fun boardRowShape(index: Int, size: Int): Shape = when {
     size == 1 -> RoundedCornerShape(16.dp)
     index == 0 -> RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
     index == size - 1 -> RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
@@ -334,6 +454,9 @@ internal val REFRESH_TEXTS = listOf("下拉刷新", "松手刷新", "刷新中�
 
 /** 榜单切换旧行淡出时长：与 animateItem fadeOutSpec 一致，保证淡出播完才换源。 */
 private const val BOARD_FADE_OUT_MILLIS = 150L
+
+/** 距列表末尾还有 N 项时开始预加载下一页（提前量，避免用户看到空白等待）。 */
+private const val LOAD_MORE_THRESHOLD = 3
 
 /** 榜单行头像：有 URL 异步取（PaddockClient 三级缓存：内存 Lru→磁盘→网络），无 URL/失败显示 Person 占位。 */
 @Composable
@@ -436,6 +559,8 @@ private fun BoardRow(
     alpha: Float = 1f,
     /** 该行是否"零辅助最快圈"→ username 与数值走金色流光（服务端判定，客户端不重算）。 */
     gold: Boolean = false,
+    /** 点击整行（跳转车手主页）；null = 不可点（旧服务端无 user_id 时）。 */
+    onClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     // 金色流光样式：只对金标行求值（普通行以 null 传入 → 完全走原样式，零开销）。
@@ -446,6 +571,7 @@ private fun BoardRow(
             .fillMaxWidth()
             .graphicsLayer { this.alpha = alpha }
             .squircleRowBackground(rowShape)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 16.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -582,8 +708,10 @@ private fun TabRowLite(tab: Int, onTab: (Int) -> Unit) {
     )
 }
 
-/** 16 赛道中文名（契约：PADDOCK_PLAN §5 全称，与服务端 track_display_name 一致）。 */
-private val TRACK_NAMES = listOf(
+/** 16 赛道中文名（契约：PADDOCK_PLAN §5 全称，与服务端 track_display_name 一致）。
+ *  ⚠️ `internal` 供 DriverScreen 的筛选下拉复用——**不要复制第二份**，
+ *  服务端改名时两处会静默漂移。 */
+internal val TRACK_NAMES = listOf(
     "🇦🇺 阿尔伯特公园赛道", "🇨🇳 上海国际赛车场", "🇧🇭 巴林国际赛车场", "🇮🇹 伊莫拉赛道",
     "🇪🇸 加泰罗尼亚赛道", "🇲🇨 摩纳哥赛道", "🇨🇦 吉尔·维伦纽夫赛道", "🇦🇹 红牛环赛道",
     "🇬🇧 银石赛道", "🇩🇪 霍根海姆赛道", "🇭🇺 亨格罗宁赛道", "🇧🇪 斯帕-弗朗科尔尚赛道",

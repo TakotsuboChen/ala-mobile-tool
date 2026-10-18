@@ -929,8 +929,23 @@ object PaddockClient {
 
     // ── HTTP ────────────────────────────────────────────────
 
+    /**
+     * 榜单/圈速记录**每页条数**（2026-10-18 定案）。
+     *
+     * 为什么必须分页：榜单随车手数线性增长，一次性下发全表会让服务端
+     * `fetch_all` 把整表搬进内存、移动网络下响应体也随人数膨胀。
+     * 客户端滚到底部再拉下一页，服务端单页上限 100（`MAX_PAGE_LIMIT`）。
+     *
+     * ⚠️ 与服务端 `leaderboard::DEFAULT_PAGE_LIMIT` 同值——改必须两边同改。
+     */
+    const val PAGE_SIZE = 30
+
     /** 榜单条目（积分榜/赛道榜共用解析子集） */
     data class PointsEntry(
+        /** 服务端 user_id（车手主页跳转键） */
+        val userId: String = "",
+        /** 车手号（"N 号车手"展示用） */
+        val regSeq: Long = 0,
         val username: String,
         val points: Int,
         val avatarUrl: String?,
@@ -946,7 +961,19 @@ object PaddockClient {
         val gold: Boolean = false,
     )
 
+    /** 积分榜一页：`total` = 该榜总条数（判断是否还有下一页）。 */
+    data class PointsPage(
+        val entries: List<PointsEntry> = emptyList(),
+        val total: Int = 0,
+        /** 请求是否成功（失败时 entries 为空但 total=0，调用方据此不覆盖已有数据） */
+        val ok: Boolean = false,
+    )
+
     data class TrackEntry(
+        /** 服务端 user_id（车手主页跳转键） */
+        val userId: String = "",
+        /** 车手号（"N 号车手"展示用） */
+        val regSeq: Long = 0,
         val rank: Int,
         val username: String,
         val lapDisplay: String,
@@ -958,20 +985,33 @@ object PaddockClient {
     data class TrackBoard(
         val trackName: String,
         val entries: List<TrackEntry>,
+        /** 该赛道榜总人数（判断是否还有下一页） */
+        val total: Int = 0,
     )
 
-    /** GET /v1/leaderboard/points（version=null → 总榜）。阻塞 IO。 */
-    fun fetchPointsBoard(version: Int?): List<PointsEntry> {
+    /**
+     * GET /v1/leaderboard/points（version=null → 总榜）。阻塞 IO。
+     *
+     * @param limit 本页条数（默认 [PAGE_SIZE]；服务端上限 100）
+     * @param offset 跳过条数
+     */
+    fun fetchPointsBoard(version: Int?, limit: Int = PAGE_SIZE, offset: Int = 0): PointsPage {
         return try {
-            val q = if (version != null) "?version=$version" else ""
+            val q = buildString {
+                append("?limit=").append(limit).append("&offset=").append(offset)
+                if (version != null) append("&version=").append(version)
+            }
             Logger.log(Log.INFO, TAG, "fetchPointsBoard: GET $serverBase/v1/leaderboard/points$q")
             val (code, resp) = getJson("$serverBase/v1/leaderboard/points$q")
             Logger.log(Log.INFO, TAG, "fetchPointsBoard: HTTP $code, ${resp.length} bytes")
-            if (code != 200) return emptyList()
-            val arr = org.json.JSONArray(JSONObject(resp).optJSONArray("entries")?.toString() ?: "[]")
-            (0 until arr.length()).mapNotNull { i ->
+            if (code != 200) return PointsPage()
+            val j = JSONObject(resp)
+            val arr = org.json.JSONArray(j.optJSONArray("entries")?.toString() ?: "[]")
+            val entries = (0 until arr.length()).mapNotNull { i ->
                 val e = arr.optJSONObject(i) ?: return@mapNotNull null
                 PointsEntry(
+                    userId = e.optString("user_id"),
+                    regSeq = e.optLong("reg_seq"),
                     username = e.optString("username"),
                     points = e.optInt("points"),
                     avatarUrl = e.optString("avatar_url").takeIf { it.isNotEmpty() },
@@ -981,16 +1021,25 @@ object PaddockClient {
                     gold = e.optBoolean("gold"),
                 )
             }
+            PointsPage(entries = entries, total = j.optInt("total", entries.size), ok = true)
         } catch (e: Throwable) {
             Logger.log(Log.WARN, TAG, "fetchPointsBoard: ${e.message}")
-            emptyList()
+            PointsPage()
         }
     }
 
-    /** GET /v1/leaderboard/track/{gp}（version=null → 该赛道总榜）。阻塞 IO。 */
-    fun fetchTrackBoard(gpIndex: Int, version: Int?): TrackBoard? {
+    /**
+     * GET /v1/leaderboard/track/{gp}（version=null → 该赛道总榜）。阻塞 IO。
+     *
+     * @param limit 本页条数（默认 [PAGE_SIZE]；服务端上限 100）
+     * @param offset 跳过条数
+     */
+    fun fetchTrackBoard(gpIndex: Int, version: Int?, limit: Int = PAGE_SIZE, offset: Int = 0): TrackBoard? {
         return try {
-            val q = if (version != null) "?version=$version" else ""
+            val q = buildString {
+                append("?limit=").append(limit).append("&offset=").append(offset)
+                if (version != null) append("&version=").append(version)
+            }
             Logger.log(Log.INFO, TAG, "fetchTrackBoard: GET track/$gpIndex$q")
             val (code, resp) = getJson("$serverBase/v1/leaderboard/track/$gpIndex$q")
             Logger.log(Log.INFO, TAG, "fetchTrackBoard: HTTP $code, ${resp.length} bytes")
@@ -1000,6 +1049,8 @@ object PaddockClient {
             val entries = (0 until arr.length()).mapNotNull { i ->
                 val e = arr.optJSONObject(i) ?: return@mapNotNull null
                 TrackEntry(
+                    userId = e.optString("user_id"),
+                    regSeq = e.optLong("reg_seq"),
                     rank = e.optInt("rank"),
                     username = e.optString("username"),
                     lapDisplay = e.optString("lap_display"),
@@ -1007,10 +1058,133 @@ object PaddockClient {
                     gold = e.optBoolean("gold"),
                 )
             }
-            TrackBoard(j.optString("track_name", "赛道"), entries)
+            TrackBoard(
+                trackName = j.optString("track_name", "赛道"),
+                entries = entries,
+                total = j.optInt("total", entries.size),
+            )
         } catch (e: Throwable) {
             Logger.log(Log.WARN, TAG, "fetchTrackBoard: ${e.message}")
             null
+        }
+    }
+
+    // ── 车手主页（2026-10-18）────────────────────────────────
+
+    /** 车手主页的圈速记录条目（= `laps` 全量留档的一行）。 */
+    data class DriverLap(
+        val lapId: String,
+        val gpIndex: Int,
+        val trackName: String,
+        val versionCode: Int,
+        val versionName: String,
+        val lapDisplay: String,
+        /** 该圈是否是该车手在该赛道该版本的个人最佳 */
+        val personalBest: Boolean,
+        /** 辅助配置三维展示（踏板 / TC / ABS），缺失维 = "缺失" */
+        val pedal: String,
+        val tc: String,
+        val abs: String,
+        /** 零辅助（TC 与 ABS 均关） */
+        val zeroAssist: Boolean,
+        /** 上传时间（服务端格式化为北京时间 `YYYY-MM-DD HH:MM`） */
+        val created: String,
+    )
+
+    /** 车手资料卡（与围场主页信息卡同口径）。 */
+    data class DriverProfile(
+        val userId: String,
+        val username: String,
+        val regSeq: Long,
+        val avatarUrl: String?,
+        val totalPoints: Long,
+        val bestCount: Int,
+        val zeroCount: Int,
+        val gold: Boolean,
+    )
+
+    data class DriverPage(
+        val profile: DriverProfile? = null,
+        val entries: List<DriverLap> = emptyList(),
+        /** 满足筛选条件的总条数（判断是否还有下一页） */
+        val total: Int = 0,
+        val ok: Boolean = false,
+        /** 失败文案（404 = 车手不存在）；ok=true 时为空 */
+        val error: String = "",
+    )
+
+    /**
+     * GET /v1/driver/{user_id} —— 车手主页（公开端点，无需 token）。阻塞 IO。
+     *
+     * @param gpIndex 0..15；null = 全部赛道
+     * @param version 游戏 versionCode；null = 全部版本
+     * @param zeroAssistOnly 只显示零辅助圈
+     * @param bestOnly 只显示个人最佳圈
+     */
+    fun fetchDriverPage(
+        userId: String,
+        gpIndex: Int? = null,
+        version: Int? = null,
+        zeroAssistOnly: Boolean = false,
+        bestOnly: Boolean = false,
+        limit: Int = PAGE_SIZE,
+        offset: Int = 0,
+    ): DriverPage {
+        return try {
+            val q = buildString {
+                append("?limit=").append(limit).append("&offset=").append(offset)
+                if (gpIndex != null) append("&gp_index=").append(gpIndex)
+                if (version != null) append("&version=").append(version)
+                if (zeroAssistOnly) append("&assist=zero")
+                if (bestOnly) append("&best=1")
+            }
+            val url = "$serverBase/v1/driver/$userId$q"
+            Logger.log(Log.INFO, TAG, "fetchDriverPage: GET $url")
+            val (code, resp) = getJson(url)
+            Logger.log(Log.INFO, TAG, "fetchDriverPage: HTTP $code, ${resp.length} bytes")
+            if (code == 404) return DriverPage(error = "车手不存在")
+            if (code != 200) return DriverPage(error = errText(code, resp))
+            val j = JSONObject(resp)
+            val p = j.optJSONObject("profile")
+            val profile = p?.let {
+                DriverProfile(
+                    userId = it.optString("user_id"),
+                    username = it.optString("username"),
+                    regSeq = it.optLong("reg_seq"),
+                    avatarUrl = it.optString("avatar_url").takeIf { s -> s.isNotEmpty() },
+                    totalPoints = it.optLong("total_points"),
+                    bestCount = it.optInt("best_count"),
+                    zeroCount = it.optInt("zero_count"),
+                    gold = it.optBoolean("gold"),
+                )
+            }
+            val arr = j.optJSONArray("entries") ?: org.json.JSONArray()
+            val entries = (0 until arr.length()).mapNotNull { i ->
+                val e = arr.optJSONObject(i) ?: return@mapNotNull null
+                DriverLap(
+                    lapId = e.optString("lap_id"),
+                    gpIndex = e.optInt("gp_index"),
+                    trackName = e.optString("track_name"),
+                    versionCode = e.optInt("version_code"),
+                    versionName = e.optString("version_name"),
+                    lapDisplay = e.optString("lap_display"),
+                    personalBest = e.optBoolean("personal_best"),
+                    pedal = e.optString("pedal"),
+                    tc = e.optString("tc"),
+                    abs = e.optString("abs"),
+                    zeroAssist = e.optBoolean("zero_assist"),
+                    created = e.optString("created"),
+                )
+            }
+            DriverPage(
+                profile = profile,
+                entries = entries,
+                total = j.optInt("total", entries.size),
+                ok = true,
+            )
+        } catch (e: Throwable) {
+            Logger.log(Log.WARN, TAG, "fetchDriverPage: ${e.message}")
+            DriverPage(error = "网络错误: ${e.message}")
         }
     }
 

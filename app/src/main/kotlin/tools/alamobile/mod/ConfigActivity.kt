@@ -194,6 +194,9 @@ class ConfigActivity : ComponentActivity() {
                                 entry<Route.About> { AboutScreen() }
                                 entry<Route.Paddock> { tools.alamobile.mod.ui.screen.paddock.LeaderboardScreen() }
                                 entry<Route.Avatar> { tools.alamobile.mod.ui.screen.paddock.AvatarScreen() }
+                                entry<Route.Driver> { key ->
+                                    tools.alamobile.mod.ui.screen.paddock.DriverScreen(key.userId)
+                                }
                                 // 配置 Hub 的四个二级页（2026-10-06）。push 进来后
                                 // NavDisplay 只渲染栈顶，MainScreen（含底栏）整页让位，
                                 // 故不需要底栏内边距 → bottomInnerPadding = 0.dp。

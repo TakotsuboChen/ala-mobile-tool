@@ -36,6 +36,14 @@ sealed interface Route : NavKey, Parcelable {
     @Serializable
     data object Avatar : Route
 
+    /**
+     * 车手主页（2026-10-18）：`userId` = 服务端 users.id。
+     * 从围场主页信息卡 / 排行榜任意一行点进来，展示该车手的全量圈速记录。
+     */
+    @Parcelize
+    @Serializable
+    data class Driver(val userId: String) : Route
+
     @Parcelize
     @Serializable
     data object About : Route

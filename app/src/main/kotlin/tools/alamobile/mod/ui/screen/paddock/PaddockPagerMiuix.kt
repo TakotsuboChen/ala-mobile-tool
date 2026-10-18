@@ -1,5 +1,7 @@
 package tools.alamobile.mod.ui.screen.paddock
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -49,6 +52,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -80,6 +84,8 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.ArrowRight
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -230,66 +236,89 @@ private fun PaddockContent(
             }
         }
 
-        // 用户信息连体卡：首行（头像+粗体用户名）较高，下两行仿设备信息行高
+        // 用户信息连体卡：整卡可点 → 进入「我的车手主页」（与二级页卡片一致的指引箭头）
         Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 12.dp, horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                    .clickable(enabled = uiState.userId.isNotEmpty()) {
+                        navigator.push(Route.Driver(uiState.userId))
+                    }
+                    .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    if (avatar != null) {
-                        androidx.compose.foundation.Image(
-                            bitmap = avatar!!.asImageBitmap(),
-                            contentDescription = null,
-                            modifier = Modifier
-                                .size(56.dp)
-                                .clip(androidx.compose.foundation.shape.CircleShape),
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(56.dp)
-                                .clip(androidx.compose.foundation.shape.CircleShape),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                Icons.Rounded.Person,
-                                modifier = Modifier.size(32.dp),
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        if (avatar != null) {
+                            androidx.compose.foundation.Image(
+                                bitmap = avatar!!.asImageBitmap(),
                                 contentDescription = null,
-                                tint = colorScheme.onBackground,
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(androidx.compose.foundation.shape.CircleShape),
                             )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(androidx.compose.foundation.shape.CircleShape),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Person,
+                                    modifier = Modifier.size(32.dp),
+                                    contentDescription = null,
+                                    tint = colorScheme.onBackground,
+                                )
+                            }
                         }
-                    }
-                    Column {
-                        Text(
-                            text = uiState.username.ifBlank { "车手" },
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        if (uiState.regSeq > 0) {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "车手 #${uiState.regSeq}",
-                                fontSize = 13.sp,
-                                color = colorScheme.onBackground.copy(alpha = 0.6f),
+                                text = uiState.username.ifBlank { "车手" },
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold,
+                                // 超长昵称从尾部省略（"1234568" → "1234567…"），
+                                // 而不是被容器硬裁切到最后一个字。
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
+                            if (uiState.regSeq > 0) {
+                                Text(
+                                    text = "${uiState.regSeq} 号车手",
+                                    fontSize = 13.sp,
+                                    color = colorScheme.onBackground.copy(alpha = 0.6f),
+                                )
+                            }
                         }
                     }
+                    // 三列统计：标题行 + 值行（行高仿概览页设备信息 15sp）
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        StatCell("赛季积分", Modifier.weight(1f))
+                        StatCell("赛季胜场", Modifier.weight(1f))
+                        StatCell("计时赛积分", Modifier.weight(1f))
+                    }
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        StatValue("暂无", Modifier.weight(1f))
+                        StatValue("暂无", Modifier.weight(1f))
+                        StatValue(if (uiState.totalPoints > 0) "${uiState.totalPoints}" else "暂无", Modifier.weight(1f))
+                    }
                 }
-                // 三列统计：标题行 + 值行（行高仿概览页设备信息 15sp）
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    StatCell("赛季积分", Modifier.weight(1f))
-                    StatCell("赛季胜场", Modifier.weight(1f))
-                    StatCell("计时赛积分", Modifier.weight(1f))
-                }
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    StatValue("暂无", Modifier.weight(1f))
-                    StatValue("暂无", Modifier.weight(1f))
-                    StatValue(if (uiState.totalPoints > 0) "${uiState.totalPoints}" else "暂无", Modifier.weight(1f))
+                // 指引箭头：垂直居中，与「计时赛排行榜」等二级页卡片同款
+                // （ArrowPreference 的 endAction 图标 + onSurfaceVariantActions 着色）。
+                if (uiState.userId.isNotEmpty()) {
+                    Image(
+                        modifier = Modifier.size(width = 10.dp, height = 16.dp),
+                        imageVector = MiuixIcons.Basic.ArrowRight,
+                        contentDescription = null,
+                        colorFilter = ColorFilter.tint(colorScheme.onSurfaceVariantActions),
+                    )
                 }
             }
         }
