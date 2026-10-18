@@ -15,6 +15,7 @@ import android.os.VibratorManager
 import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import android.view.View
+import kotlin.math.pow
 import tools.alamobile.mod.util.Logger
 
 /**
@@ -379,6 +380,56 @@ abstract class HapticMixer internal constructor() {
         private const val MIN_TRIGGER_LEVEL = 0.05f
 
         /**
+         * **抓地力幅度映射的 gamma**（`< 1` = 抬高低电平区）。见 [gripStrength]。
+         *
+         * ## 为什么需要它（实测数据，不是推测）
+         *
+         * 远端用户日志里抓地力**实际下发的幅度 p50 = 4 / 255、p90 = 23 / 255**
+         * （小米 15 Pro）。原因不是映射写错，而是**两个因子都小**：
+         *
+         * - 电平本身低：`slip_feedback.c` 刻意让「用尽抓地力」只到 0.25
+         *   （z=4 锚点），普通过弯 p50 ≈ 0.16 —— 这是**设计意图**
+         *   （用户要的是"最佳抓地力提示器"，不是"一打滑就满振"）；
+         * - 强度滑条默认 50%。
+         *
+         * 线性相乘 ⇒ `0.5 × 0.16 × 255 ≈ 20`，再低电平就落到个位数。
+         * 而多数 LRA 在 <30/255 时几乎不转（静摩擦 + 起振阈值），
+         * ⇒ 用户报「拉到 100% 依然十分微弱」。
+         *
+         * ## 为什么是 gamma，不是地板
+         *
+         * 地板（`max(amp, FLOOR)`）会让**低端整段变平坦**——"轻微打滑"与
+         * "用尽抓地力"下发同一个值，正好破坏本功能的核心语义（用振感强弱
+         * 判断过弯质量）。而且地板取多大**没有任何硬件依据**：AOSP 不暴露
+         * 「最小可驱动振幅」，只能拍脑袋。
+         *
+         * gamma 保持**严格单调**（电平越高振得越强），只在低端做上弯：
+         *
+         * | 电平 | 线性(pct=50) | gamma=0.5(pct=50) | gamma=0.5(pct=100) |
+         * |---|---|---|---|
+         * | 0.05（刚过静默门槛） | 6 | 28 | 57 |
+         * | 0.16（普通过弯 p50） | 20 | 51 | 102 |
+         * | 0.25（用尽抓地力锚点） | 32 | 63 | 127 |
+         * | 1.00（满电平） | 127 | 127 | 255 |
+         *
+         * ## 三条硬约束（改这个值前先确认它们仍成立）
+         *
+         * 1. **0 必须仍是 0**：`tick` 在 `peak < MIN_TRIGGER_LEVEL` 时
+         *    `stopOutput()`，gamma 在 0 点若不为 0 会让"没打滑也在振"。
+         *    实现里 `level <= 0` 直接返回 0，不走幂运算。
+         * 2. **滑条语义必须完整**：gamma 只作用于电平维度，强度百分比仍是
+         *    线性乘子 ⇒ 拉到 20% 就是 100% 的 1/5，用户可调维度不被吃掉。
+         * 3. **满电平不得溢出**：`pct=100` + `level=1` 仍必须精确等于 255。
+         *
+         * ## ⚠️ 与「波形段数」那条改动的关系
+         *
+         * 本曲线只在**幅度维度**生效。若远端 HAL 把任何非零段按满幅处理
+         * （"强度调节无效、一直最大"的症状），gamma 改什么都没用——那条路
+         * 的解是 `buildFlatMinimal` 的 1 段波形。两者互不替代。
+         */
+        private const val AMP_GAMMA = 0.5f
+
+        /**
          * 路肩通道**固定满幅**（2026-10-05 删除独立强度滑条后）。
          *
          * `KERB_FULL_PCT` 用于 [carrier]（waveform 兜底路的幅度）；
@@ -558,11 +609,13 @@ abstract class HapticMixer internal constructor() {
                 Logger.i(TAG, "HapticMixer: sys intensity touch=${sysIntensity(context, "haptic_feedback_intensity")} " +
                     "media=${sysIntensity(context, "media_vibration_intensity")} " +
                     "notif=${sysIntensity(context, "notification_vibration_intensity")}")
-                // 平顶载波的波形形态（2026-10-18 96 段 → 1 段）。落盘一条便于
-                // 远端用户回传日志时**确认装的是哪一版**：`flatSegs=1` 即新形态。
+                // 平顶载波的波形形态（2026-10-18 96 段 → 1 段）与抓地力幅度曲线
+                // （同日 gamma 上弯）。落盘一条便于远端用户回传日志时**确认装的是
+                // 哪一版**：`flatSegs=1` + `gamma=0.5` 即新形态。
                 // 只在 create() 走一次（已由 deviceHapticsLogged 去重）。
                 Logger.i(TAG, "HapticMixer: flatSegs=${FLAT_TIMINGS.size} " +
-                    "flatDurMs=${FLAT_DURATION_MS} kerbSegs=$SEGMENTS segMs=$SEGMENT_MS")
+                    "flatDurMs=${FLAT_DURATION_MS} kerbSegs=$SEGMENTS segMs=$SEGMENT_MS " +
+                    "gamma=$AMP_GAMMA")
             }.onFailure { Logger.w(TAG, "HapticMixer: 设备触感能力探测失败", it) }
         }
 
@@ -716,10 +769,30 @@ abstract class HapticMixer internal constructor() {
 
         /**
          * 把通道电平 × 该通道的最大强度映射成载波幅度（0..255）。0 就是真静音。
+         *
+         * ⚠️ **线性映射，且只给路肩用**（`KERB_FULL_PCT = 100` ⇒ 恒满幅）。
+         * 抓地力走 [gripStrength]——它需要 gamma 上弯，见那里的论证。
+         * 两者**不要合并**：路肩要的是"每次都推到滑条设定值"（撞击的硬度），
+         * 抓地力要的是"低电平也可感"（连续提示的灵敏度），诉求相反。
          */
         private fun carrier(level: Float, maxIntensityPct: Int): Int =
             ((maxIntensityPct.coerceIn(0, 100) / 100f) * level.coerceIn(0f, 1f) * 255f)
                 .toInt().coerceIn(0, 255)
+
+        /**
+         * **抓地力通道的幅度映射**（0..255）：电平先过 [AMP_GAMMA] 上弯，
+         * 再乘强度百分比。完整论证见 [AMP_GAMMA]。
+         *
+         * 与 [carrier] 的唯一差别就是那个幂运算；路肩通道仍走 [carrier]。
+         */
+        private fun gripStrength(level: Float, maxIntensityPct: Int): Int {
+            val lv = level.coerceIn(0f, 1f)
+            // ⚠️ 0 必须精确回 0（不走幂运算）：静默语义不能依赖浮点。
+            if (lv <= 0f) return 0
+            val shaped = lv.pow(AMP_GAMMA)
+            return ((maxIntensityPct.coerceIn(0, 100) / 100f) * shaped * 255f)
+                .toInt().coerceIn(0, 255)
+        }
 
         /**
          * 平顶幅度数组（[SEGMENTS] 段）：所有段同一个值。
@@ -866,7 +939,8 @@ abstract class HapticMixer internal constructor() {
             slip: Float, kerb: Float, rateHz: Float, grainOn: Boolean,
             slipPct: Int,
         ): IntArray {
-            val slipCarrier = carrier(slip, slipPct)
+            // 抓地力走 gamma 上弯（见 [gripStrength] / [AMP_GAMMA]）；路肩保持线性满幅。
+            val slipCarrier = gripStrength(slip, slipPct)
             if (!grainOn) return buildFlatMinimal(slipCarrier)
 
             // ⚠️ **不做占空比补偿**：用户要的是"撞击的力度"，不是"平均能量"。
@@ -1171,7 +1245,7 @@ abstract class HapticMixer internal constructor() {
                 if (kerbBridgePending && lastKerbLevel > 0f) {
                     kerbBridgePending = false
                     val bridgeAmp = carrier(lastKerbLevel, KERB_FULL_PCT)
-                    val slipCarrier = carrier(slip, slipPct)
+                    val slipCarrier = gripStrength(slip, slipPct)
                     val amps = buildFlat(slipCarrier).copyOf()
                     val n = KERB_BRIDGE_SEGS.coerceIn(1, SEGMENTS - 1)
                     for (i in 0 until n) amps[i] = bridgeAmp
@@ -1188,7 +1262,7 @@ abstract class HapticMixer internal constructor() {
                 // ⚠️ 走**单段**（[buildFlatMinimal] + [FLAT_TIMINGS]），不是 96 段：
                 // 平顶每段同值，96 段纯属把 95 条冗余跳变指令塞给 HAL。论证见
                 // [buildFlatMinimal]。timings 必须同步换成等长的那份。
-                val slipCarrier = carrier(slip, slipPct)
+                val slipCarrier = gripStrength(slip, slipPct)
                 vibrate(VibrationEffect.createWaveform(FLAT_TIMINGS, buildFlatMinimal(slipCarrier), 0))
                 gripWavePlaying = true
                 logShape(1, slipCarrier)
@@ -1244,6 +1318,10 @@ abstract class HapticMixer internal constructor() {
                 val total = period * ((SEGMENTS + period / 2) / period)
                 return IntArray(total) { i -> if (pattern[i % period] != 0) 255 else 0 }
             }
+            // ⚠️ **不套 [AMP_GAMMA]**：本路径没有振幅维度，强度表达为占空比，
+            // 且下限已经钉在 50%（见上），低电平本就"响"——在这里再上弯只会
+            // 把 0.5~1 这段压得更窄，等于取消用户滑条的区分度。gamma 只修
+            // 真振幅路那个"低电平落到个位数"的问题。
             val strength = (slipPct.coerceIn(0, 100) / 100f) * slip.coerceIn(0f, 1f)
             val duty = 0.5f + 0.5f * strength          // ∈ [0.5, 1]
             val onCount = (duty * SEGMENTS).toInt().coerceIn(SEGMENTS / 2, SEGMENTS)
