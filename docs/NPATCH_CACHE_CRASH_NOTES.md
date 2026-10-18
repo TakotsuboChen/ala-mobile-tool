@@ -12,6 +12,8 @@
 > | 上游状态 | 1.0.8 已修（原子写 + 锁） | **830 测试版已修** | **836 存在**；**843 测试版已修**（上游提交 `bbd8897` "keep framework service binder local"，见 §12.8） | **845 已修**（上游提交 `63f8f6be` proguard keep 规则，见 §13.5） |
 >
 > **一句话区分**：崩溃栈里出现 `Writable dex file ... is not allowed` = Bug B；出现 `Resources.getAssets()` null = Bug A；**不崩溃但模块零日志、logcat 里 NPatch 有 `Loaded cached module` 却无 `Module loaded in process`、且有 `VectorServiceClient service is not ready`** = Bug C；**诊断包能导出但 `collection-report.txt` 写 `Included system logcat via Shizuku: No`、logcat 有 `NoSuchMethodException: mm0.<init> []`** = Bug D（不影响模块可用性）。
+>
+> 📌 **版本号速查见 §14**：NPatch 的 `VERSION_CODE` = `git commitCount`，私有仓与公开镜像差 5，**版本号不能直接当代码内容用**。当前主线：844 = `63f8f6be`、845 = `f962cd83`、**846 = `e6a1fd21`（最新，2026-10-18）**。
 
 > 结论一句话（Bug A）：**这是 NPatch（本地注入框架）框架层的 bug，与 `ala-mobile-tool` 模块无关。**
 > 根因 = NPatch 保存的 origin-apk 缓存文件损坏，而 NPatch 对缓存命中**只检查文件是否存在、不校验完整性**，导致每次启动都用坏文件构建 Resources → 系统静默失败 → 实例化 Application 时 NPE。
@@ -583,3 +585,56 @@ grep -c "method public constructor <init>()V" out/top/nkbe/npatch/ShizukuService
 ### 13.7 一句话总结
 
 **NPatch 的诊断导出 Shizuku logcat 通道 = 死的（843 及以前）**：`ShizukuService` 被 R8 折叠成抽象空壳 `mm0`（无构造器），Shizuku 的 `ServiceStarter` 反射实例化必抛 `NoSuchMethodException`。**换任何 Shizuku 实现都无效**（该 bug 在 NPatch 的 R8 规则里，不在 Shizuku 里）；用户侧无感，只是诊断包缺 `logcat.log` 一段。**845 已修**（上游 `63f8f6be`：`-keep ... { <init>(); }`），实测诊断包已含 `logcat.log` 且标注 `Yes`；同提交另修 `dumpLogcat` 时间窗口与 Shizuku 断线闪退两处。
+
+---
+
+## 14. NPatch 版本号 ↔ 上游提交换算表（2026-10-18 新增）
+
+**为什么需要这张表**：NPatch 的 `VERSION_CODE` 是 **`git commitCount`**（`build.gradle.kts:43`：`val verCode by extra(commitCount)`），不是手工维护的版本号。作者的**私有 dev 仓**与公开镜像 `7723mod/NPatch` 提交数不同 ⇒ 同一个 `VERSION_CODE` 在两边指向不同提交，**版本号不能直接当代码内容用**。
+
+**换算规则（公开镜像 → 私有版本号 = `commitCount + 5`）**：
+
+| 上游提交 | 公开 `commitCount` | 私有 `VERSION_CODE` | 内容 |
+|---|---|---|---|
+| `31301d7c` | 831 | 836 | Android 17 Shizuku 套件查询 + 反射缓存 (#160) |
+| `5f132482` | 838 | 843 | .apkm 支持 + 重复下载 `.apk.N` |
+| `63f8f6be` | 839 | **844** | Shizuku 用户服务无法启动（§13.5）+ `dumpLogcat` 窗口 + 断线保护 |
+| `f962cd83` | 840 | **845** | MagicOS execute-only 页扫描崩溃（§14.1） |
+| `e6a1fd21` | 841 | **846** | 首页卡片并排 + 关于页构建信息/官网 + issue 模板 |
+
+⚠️ **偏移锚点会随私有仓发展而变化**：上表以 `31301d7c ↔ 836`（本文档 §12.9 记录的一手对照）为锚点算得 **+5**。**新增记录时必须重新锚定，不要沿用旧偏移硬推**——2026-10-18 本次就曾误用 +6 得出"846 只含到 845"的错误结论，被作者的 TG 发布说明（三条改动全列）当场证伪。
+
+**核对手法（推荐，不依赖偏移）**：拿 `git log --oneline <旧版本对应提交>..origin/dev` 数提交，再与作者发布说明的条目数对齐；**有发布说明截图时以截图为准**，偏移只用于交叉验证。
+
+### 14.1 846 的三条改动（`63f8f6be` / `f962cd83` / `e6a1fd21`）
+
+**① `63f8f6be` — Shizuku 用户服务（详见 §13.5）**
+
+同 §13.5 记录的三处：keep 规则、`dumpLogcat` 时间窗口、Shizuku 断线保护。846 的发布说明把这一条列在最前，说明它被作者视为本轮首要修复。
+
+**② `f962cd83` — MagicOS 等 ROM 的 execute-only (.text) 页扫描崩溃 [V]**
+
+`patch-loader/src/main/jni/src/jni/svc_bypass.cpp`，+22 行。
+
+- **现象**：修补后的 app 冷启动约 1 秒崩溃（上游 issue #156），仅出现在把 `.text` 映射成 **execute-only（XOM，`--x` 无读权限）** 的 ROM（如 Honor MagicOS 9）。
+- **根因**：sigbypass **等级 3** 的 svc 重导扫描用 `uint32_t*` 直接读每个可执行 `PT_LOAD` 段找 `svc #0`。XOM 页读操作触发 `SEGV_ACCERR`，因为是普通 load 而非信号处理器捕获，**直接杀进程**。
+- **修法**：新增 `ensure_range_readable()`，扫描前对覆盖页 `mprotect(PROT_READ | PROT_EXEC)`（保留可执行；常见 `r-x` 情况为 no-op），失败则 `LOGW` 并跳过该段。`instrument_range` 入口另加 `len < sizeof(uint32_t)` 守卫。
+- **为何安全**：注释明确这些是**本进程自己的 app-library 映射**，mprotect 必被允许。
+- **包内指纹（升版核对用）**：`assets/npatch/so/arm64-v8a/libnpatch.so` 内含
+  `SvcBypass: cannot make [{:#x},{:#x}) readable, skipping scan`，且 `nm -D` 有 `U mprotect@LIBC`。845 及更早无此串。
+
+**③ `e6a1fd21` — 纯 UI + 仓库模板**
+
+`HomeScreen.kt`（265 行，首页计数卡片改并排）、`AboutScreen.kt`（+53，`InfoChip` 显示 `VERSION_NAME`/`VERSION_CODE` + 官网按钮 `https://npatch.nkbe.top`）、`.github/ISSUE_TEMPLATE/*` 重构（新增 `contribution.yml`）、三套 `strings.xml` 各 +3 行（`about_build_number` 等）。
+
+⚠️ **manager 的 UI 改动不进游戏包**：共存版 APK 的 `assets/npatch/` 只有 5 个条目（`config.json` / `loader.bin` / `origin.apk` / `so/{arm64-v8a,x86_64}/libnpatch.so`）。验证"关于页新增版本号显示"这类改动，对象是 **NPatch 管理器 APK**（`dumpsys package top.nkbe.npatch` 看 `versionCode`），不是游戏 APK。
+
+### 14.2 实测状态（2026-10-18）[V]
+
+| 项 | 值 | 验证方式 |
+|---|---|---|
+| 管理器版本 | `versionCode=846` / `versionName=1.0.9` / `lastUpdateTime=2026-10-18 20:37:59` | `dumpsys package top.nkbe.npatch`（MEIZU 20） |
+| 游戏包内 loader 含 MagicOS 修复 | 是 | `libnpatch.so` 命中 §14.1② 指纹串 |
+| 共存版 APK | `安装包/Ala Mobile Pro 8.0.6 Fix 2.apk`（631,356,783 B，sha256 `9a626be3…bee59`） | 包内 `lspConfig.VERSION_CODE=846` |
+| 签名 | 证书 SHA-256 `b3720382…3a57`，与 845 代**逐位相同** | `apksigner verify --print-certs`；老用户可覆盖安装 |
+| 用户实机验收 | 用户报"测试没问题" | 用户口述（2026-10-18） |
