@@ -108,15 +108,37 @@ POST /v1/laps                   {gp_index, lap_ms, version_code,
      tc/abs_strength=off|weak|medium|strong|stock。未知值被服务端归一化为缺失——
      宁可记缺失也不丢圈。⚠️ 客户端只报原始值，派生规则（关/低/线性）在服务端
      `score.rs`，改规则不必发模块版本。）
-GET  /v1/leaderboard/points?version=      → 积分总榜/版本榜
+GET  /v1/leaderboard/points?version=&limit=&offset=   → 积分总榜/版本榜（分页）
      条目含 points / best_count / zero_count / gold（金标由服务端判定）
-GET  /v1/leaderboard/track/{gp_index}?version= → 赛道榜（总榜不分版本）
-     条目含 gold（该车手个人最快圈是否零辅助 → 整行金色流光）
+     响应含 total（该榜总条数，客户端据此判断是否还有下一页）
+GET  /v1/leaderboard/track/{gp_index}?version=&limit=&offset= → 赛道榜（分页）
+     条目含 gold（该车手个人最快圈是否零辅助 → 整行金色流光）+ rank（**全局名次**，非页内序号）
+     响应含 total
 GET  /v1/me                      (Bearer) → {user_id, username, reg_seq, has_avatar, avatar_url, total_points}
     （2026-09-01 实现：模块重进后恢复登录态展示；total_points=计时赛总积分，与积分总榜同口径
      （v39 起=各版本独立计分累加，无成绩=0）；401=token 失效→模块自动登出；
      2026-09-06 加 avatar_url=版本化头像 URL（无头像=缺省））
+GET  /v1/driver/{user_id}?gp_index=&version=&assist=zero&best=1&limit=&offset=
+                                 → {profile, entries, total}（车手主页，公开端点）
+    （2026-10-18 新增。profile = {user_id, username, reg_seq, avatar_url, total_points,
+     best_count, zero_count, gold}；entries = laps 全量表的分页（不是 best_laps），
+     每条含 lap_id / gp_index / track_name / version_code / version_name / lap_ms /
+     lap_display / personal_best / pedal / tc / abs / zero_assist / created（北京时间）。
+     筛选：gp_index 0..15、version=游戏 versionCode、assist=zero（TC 与 ABS 均关）、
+     best=1（仅个人最佳，与榜单 best_laps 同源）。404 = 车手不存在。）
 ```
+
+### 分页契约（2026-10-18 定案）
+
+- **单页默认 30 条**（`DEFAULT_PAGE_LIMIT`），服务端硬上限 100（`MAX_PAGE_LIMIT`）。
+  模块端 `PaddockClient.PAGE_SIZE = 30` 必须与服务端同值。
+- 三个榜单端点都返回 `total`（**不受本页 limit/offset 影响**的总条数），客户端
+  `entries.size >= total` 即判定到底，不再发请求。
+- **排序必须在 SQL 里做完再 LIMIT/OFFSET**：Rust 侧 `sort_by` 后切片会让分页
+  语义失效（切的是未排序结果的前 N 条，跨页重复/漏项）。赛道榜的 `rank` 用
+  `row_number() OVER (ORDER BY lap_ms)` 全局算，不能在 Rust 里 `enumerate()`。
+- **稳定排序键**：赛道榜 `lap_ms ASC`（同秒并列按 DISTINCT ON 后的顺序），
+  车手主页 `created_at DESC, lap_id DESC`。无稳定键时 LIMIT/OFFSET 可能跨页漏项。
 
 错误码明确返回（401 掉登录态→模块进缓存补传路径）。
 
