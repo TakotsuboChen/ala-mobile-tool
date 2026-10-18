@@ -155,6 +155,7 @@ Important output files:
 - `python3 .tools/disasm_rva.py 0x{VA}...` — 窗口反汇编（按节表把 VA 换算成文件偏移）
 - `python3 .tools/find_callers.py 0x{目标VA}` — 流式扫全节找 `bl`/`b` 调用点。**选 hook 点的第一道关**：只有先确认"这个方法的调用方集合"，才能判断它是"某入口专属"还是"游戏内多处共享"（自锁式超车按键即栽过一次：`HybridComponent.EnableOTK/DisableOTK` 看似是触摸入口，实为游戏自己的 toggle 也被 ERS 模式键调用）
 - `python3 .tools/find_field_access.py 0x{字段偏移} [ldr|str|...]` — 找某结构体偏移的全部读写点（ARM64 无符号立即数编码按高 22 位比对）
+- `python3 .tools/find_field_access_f.py 0x{字段偏移}` — **浮点字段**的读写点。⚠️ **IL2CPP 字段绝大多数是 float，走 `str s0,[x0,#off]`（V=1）**，上面那个脚本只编码 V=0（通用寄存器），用它扫浮点字段会得到「零命中」⇒ 极易误判成「字段没人写」（2026-10-18 找 `maxSteerLock` 时踩到）。V=1 的固定位是 `111 1 01`（V=0 是 `111 0 01`），`s` 按 4 缩放、`d` 按 8。自检用已知被读的 `0x170`(slipAngle) / `0x104`(slipRatio) 应各得近百条
 - `python3 .tools/find_method.py 0x{VA}...` — VA → `类::方法` 查表（建自 `dump.cs`）
 - 环境变量 `SO=` 换目标 `.so`，`SECTIONS=` 给它对应节表（默认 8.0.6 共存版）
 - ⚠️ **严禁整段 `md.disasm(detail=True)`**（31MB 代码段全量会 OOM 整机，已致 WSL2 宿主重启）；一律 `disasm_lite` 流式 + 外层 `ulimit -v 4194304`。方法代码在 `il2cpp` 节（~31MB）不在 `.text`（0x2c3160），动手前 `readelf -SW` 反查所属节。
