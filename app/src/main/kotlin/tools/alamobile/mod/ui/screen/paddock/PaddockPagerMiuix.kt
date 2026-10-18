@@ -298,17 +298,6 @@ private fun PaddockContent(
                             }
                         }
                     }
-                    // 三列统计：标题行 + 值行（行高仿概览页设备信息 15sp）
-                    Row(modifier = Modifier.fillMaxWidth()) {
-                        StatCell("赛季积分", Modifier.weight(1f))
-                        StatCell("赛季胜场", Modifier.weight(1f))
-                        StatCell("计时赛积分", Modifier.weight(1f))
-                    }
-                    Row(modifier = Modifier.fillMaxWidth()) {
-                        StatValue("暂无", Modifier.weight(1f))
-                        StatValue("暂无", Modifier.weight(1f))
-                        StatValue(if (uiState.totalPoints > 0) "${uiState.totalPoints}" else "暂无", Modifier.weight(1f))
-                    }
                 }
                 // 指引箭头：垂直居中，与「计时赛排行榜」等二级页卡片同款
                 // （ArrowPreference 的 endAction 图标 + onSurfaceVariantActions 着色）。
@@ -441,29 +430,6 @@ private fun LogoutConfirmDialog(
                 }
             }
         },
-    )
-}
-
-/** 统计列标题（第二行）。 */
-@Composable
-private fun StatCell(title: String, modifier: Modifier = Modifier) {
-    Text(
-        text = title,
-        fontSize = 15.sp,
-        color = colorScheme.onBackground.copy(alpha = 0.6f),
-        modifier = modifier,
-        textAlign = TextAlign.Center,
-    )
-}
-
-/** 统计列值（第三行）。 */
-@Composable
-private fun StatValue(value: String, modifier: Modifier = Modifier) {
-    Text(
-        text = value,
-        fontSize = 15.sp,
-        modifier = modifier,
-        textAlign = TextAlign.Center,
     )
 }
 
