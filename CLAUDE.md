@@ -88,6 +88,9 @@ Run lint:
 
 > ⚠️ **构建产物必须实证验证，不能相信 Gradle 的 `UP-TO-DATE`**（2026-10-18）：本机实测文件明明改过，`compileReleaseKotlin` 仍报 `UP-TO-DATE`，`packageRelease` 同理 ⇒ APK 停留在旧时间戳、装到设备上的是旧代码。另 `--rerun-tasks` 全量重编会让 Gradle daemon 的 G1 GC 段错误（`hs_err_pid*.log`，SIGSEGV in `G1RootRegionScanClosure`）。可靠做法：① `ls -l --time-style=full-iso <apk>` 确认时间戳晚于最后一次源码修改；② 从 APK 里 grep 本次改动引入的特征字符串（如新增日志文案）：`unzip -p <apk> classes*.dex | strings | grep <特征串>`，或对 native 改动 `unzip -p <apk> lib/arm64-v8a/libala-core.so | strings | grep <特征串>`；③ daemon 崩了先 `./gradlew --stop` 再走普通增量构建，别再用 `--rerun-tasks`。
 
+> ⚠️ **R8 会把 Compose value class 参数内联，`strings` 搜不到符号 ≠ 改动没进包**（2026-10-18 补）：`TextOverflow` 这类 value class 在 dex 里被压成 `int` 常量，`grep TextOverflow` 恒零命中。正确验证链是**三层对拍**：① `app/build/outputs/mapping/release/mapping.txt` 反查混淆名（`grep "^<全限定类名> ->"`，方法名在类块内 `-> x`）；② `baksmali d classes.dex -o out` 反汇编，在对应 `<混淆名>.smali` 里找目标方法的调用点；③ **核对调用点实参常量**（如 `TextOverflow.Clip`=0x1 / `Ellipsis`=0x2，`maxLines` 直接是 int）。对纯 Kotlin 逻辑也可先用 `javap -p -c <class>` 看编译产物，比 dex 早一层。
+
+
 Clean build outputs:
 ```bash
 ./gradlew clean
