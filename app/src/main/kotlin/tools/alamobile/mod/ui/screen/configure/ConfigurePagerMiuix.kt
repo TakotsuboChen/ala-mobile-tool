@@ -938,7 +938,7 @@ fun ConfigureMiscScreen(
             // 上下项之间不再画线。同理抓地力反馈的上沿分隔线也**不再
             // 因路肩而抑制**（去掉 `&& !kerbHapticEnabled`）。
             SwitchPreference(
-                title = "路肩振感反馈",
+                title = "路肩振感反馈（实验性）",
                 summary = "压过路肩时的粗粒度振动",
                 startAction = {
                     Icon(
@@ -983,7 +983,7 @@ fun ConfigureMiscScreen(
                 )
             }
             OverlayDropdownPreference(
-                title = "抓地力反馈",
+                title = "抓地力反馈（实验性）",
                 summary = "1/4 强度为最佳抓地力，打滑、空转和锁死达到最大强度",
                 items = ModConfig.SlipFeedbackMode.entries.map {
                     slipFeedbackModeName(it)
