@@ -443,11 +443,31 @@ abstract class HapticMixer internal constructor() {
 
         /**
          * 段数。96 × 5ms = 480ms。颗粒周期的上限受它约束（见 [buildGrain]）。
+         *
+         * ⚠️ **这是"波形最大长度"，不是"平顶波形的长度"**——平顶走
+         * [buildFlatMinimal]（1 段 × [FLAT_DURATION_MS]）。三个用途对段数的
+         * 需求完全不同，改这里会同时影响三者，见 [buildFlatMinimal] 的论证。
          */
         private const val SEGMENTS = 96
 
+        /**
+         * **平顶波形**的总时长（毫秒）——与 [SEGMENTS] × [SEGMENT_MS] 相同。
+         *
+         * 完整论证见 [buildFlatMinimal]。
+         */
+        private const val FLAT_DURATION_MS = SEGMENTS * SEGMENT_MS
+
         /** 段时长数组（复用，避免每次 [fire] 分配）。 */
         private val SEGMENT_TIMINGS = LongArray(SEGMENTS) { SEGMENT_MS }
+
+        /**
+         * **单段** timings，与 [buildFlatMinimal] 配套。
+         *
+         * ⚠️ `createWaveform` 要求 timings 与 amplitudes **等长**，不等会抛
+         * `IllegalArgumentException`。所以用单段幅度时**必须**同时换用本数组，
+         * 不能继续传 [SEGMENT_TIMINGS]。
+         */
+        private val FLAT_TIMINGS = longArrayOf(FLAT_DURATION_MS)
 
         /** 把电平量化到 [BANDS] 档（0 .. BANDS-1），仅用于日志。 */
         internal fun bandOf(level: Float): Int =
@@ -538,6 +558,11 @@ abstract class HapticMixer internal constructor() {
                 Logger.i(TAG, "HapticMixer: sys intensity touch=${sysIntensity(context, "haptic_feedback_intensity")} " +
                     "media=${sysIntensity(context, "media_vibration_intensity")} " +
                     "notif=${sysIntensity(context, "notification_vibration_intensity")}")
+                // 平顶载波的波形形态（2026-10-18 96 段 → 1 段）。落盘一条便于
+                // 远端用户回传日志时**确认装的是哪一版**：`flatSegs=1` 即新形态。
+                // 只在 create() 走一次（已由 deviceHapticsLogged 去重）。
+                Logger.i(TAG, "HapticMixer: flatSegs=${FLAT_TIMINGS.size} " +
+                    "flatDurMs=${FLAT_DURATION_MS} kerbSegs=$SEGMENTS segMs=$SEGMENT_MS")
             }.onFailure { Logger.w(TAG, "HapticMixer: 设备触感能力探测失败", it) }
         }
 
@@ -696,8 +721,61 @@ abstract class HapticMixer internal constructor() {
             ((maxIntensityPct.coerceIn(0, 100) / 100f) * level.coerceIn(0f, 1f) * 255f)
                 .toInt().coerceIn(0, 255)
 
-        /** 平顶幅度数组（无路肩时用）：所有段同一个值。 */
+        /**
+         * 平顶幅度数组（[SEGMENTS] 段）：所有段同一个值。
+         *
+         * ⚠️ **唯一调用方是 [Envelope.fire] 的桥接波形**——那里需要「开头 n 段
+         * 颗粒 + 其余段无限循环载波」，所以必须是多段，不能压成 1 段
+         * （`repeat = n` 要回绕到第 n 段）。纯平顶走 [buildFlatMinimal]。
+         */
         private fun buildFlat(carrier: Int): IntArray = IntArray(SEGMENTS) { carrier }
+
+        /**
+         * **单段平顶幅度数组**（1 段）——持续抓地力载波的**唯一**构造方式。
+         *
+         * ## 为什么是 1 段，而不是 96 段（2026-10-18）
+         *
+         * 平顶波形的每一段幅度**完全相同**，96 段不表达任何信息：
+         * `IntArray(96) { c }` 与 `IntArray(1) { c }` 在 `repeat = 0` 下
+         * **播放行为等价**（都是恒定幅度无限循环）。
+         *
+         * 但下发成本差 96 倍：HAL 把每个段转成一条幅度跳变指令，96 段 =
+         * 96 条指令，其中 95 条是从 c 到 c 的**冗余**跳变。而 Android 的
+         * 时序精度约 50ms ⇒ 5ms 段对多数 HAL 落在量化噪声里。用户实测
+         * （HONOR Win）「强度调节无效、一直最大」正是这种"段序列被 HAL
+         * 按 on/off 处理"的典型症状。
+         *
+         * ## ⚠️ 总时长保持 480ms，不是 5ms
+         *
+         * 段数压到 1，但**段时长同步拉到 [FLAT_DURATION_MS]**（96×5=480ms），
+         * 于是总时长与原来**完全相同**、`repeat = 0` 的回绕节奏也完全相同。
+         * 若沿用 5ms 单段，波形会变成 200Hz 回绕——虽然幅度恒定理论上听不出，
+         * 但那是把一个没验证过的变量（回绕频率）一起改了，与本次目标无关。
+         * **只改段数，不改总时长**是这次改动的最小面。
+         *
+         * ## ⚠️ 与另外两条路径的区别（不要顺手把它们也压成 1 段）
+         *
+         * - [buildDuty]：96 段表达的是**通电比例**（`onCount/96`），段数是
+         *   分辨率本身，压成 1 段后占空比只剩 0% 或 100% 两个值。
+         * - [buildMixedAmps] / 路肩颗粒：段数表达**周期长度**（颗粒串的
+         *   疏密），压成 1 段就没有"哒哒哒"了。
+         * - [Envelope.fire] 的**桥接波形**：开头要放 n 段颗粒再无限循环载波，
+         *   段数必须 ≥ n+1，同样不能压。
+         *
+         * 只有"所有段同值"的平顶可以压。判断标准是**段与段之间有没有差异**，
+         * 不是"段数看起来多不多"。
+         *
+         * ## ⚠️ 一个被翻转的副作用（如实记录）
+         *
+         * `VibrationEffect.isHapticFeedbackCandidate()` 的判据含
+         * **「段数 > 3 ⇒ false」**。96 段时本波形不是 candidate；改成 1 段后
+         * **变成 candidate**。这只在 [attrMode] 降级到 [ATTR_NONE]（不带属性
+         * 的 `vibrate`）时才生效——framework 会把 UNKNOWN 且是 candidate 的
+         * 振动归为 `USAGE_TOUCH`。默认路径报 `USAGE_MEDIA`（见类注释「七」），
+         * 不受影响；且 TOUCH 桶**有**用户滑条（MEDIA 桶也有），两者都
+         * 不会被"UNKNOWN 桶无滑条"那条误判坑到。见 [logDeviceHaptics]。
+         */
+        private fun buildFlatMinimal(carrier: Int): IntArray = intArrayOf(carrier)
 
         /** 占空比数组（[Duty] 用）：`onCount` 个段通电，其余 0。 */
         private fun buildDuty(onCount: Int): IntArray = IntArray(SEGMENTS) { i ->
@@ -781,14 +859,15 @@ abstract class HapticMixer internal constructor() {
          * 段（≈96，8~100 段之间）——保证波形里恰好含整数个周期。理由：
          * 波形以 `repeat = 0` **无限循环**，若长度不是周期的整数倍，每圈回绕
          * 处会多出（或吃掉）一段，相当于在规律的"哒哒哒"里插入一个杂拍。
-         * 无路肩时退回 96 段平顶（与历史行为逐位一致）。
+         * 无路肩时退回**单段**平顶（见 [buildFlatMinimal]）——段数与段间差异
+         * 无关，纯平顶压成 1 段不改变任何播放行为。
          */
         private fun buildMixedAmps(
             slip: Float, kerb: Float, rateHz: Float, grainOn: Boolean,
             slipPct: Int,
         ): IntArray {
             val slipCarrier = carrier(slip, slipPct)
-            if (!grainOn) return buildFlat(slipCarrier)
+            if (!grainOn) return buildFlatMinimal(slipCarrier)
 
             // ⚠️ **不做占空比补偿**：用户要的是"撞击的力度"，不是"平均能量"。
             // 每次脉冲都应当把马达推到滑条设定的幅度（这是"硬"的来源）。
@@ -887,7 +966,14 @@ abstract class HapticMixer internal constructor() {
             if (!kerbThrottleAllows(rateHz, grainOn)) return
             val amps = buildAmps(slip, kerb, rateHz, grainOn)
             // timings 必须与 amps 等长（否则 createWaveform 抛 IllegalArgumentException）。
-            val timings = if (amps.size == SEGMENTS) SEGMENT_TIMINGS else LongArray(amps.size) { SEGMENT_MS }
+            // ⚠️ 单段平顶必须配 [FLAT_TIMINGS]（一段 480ms），不能落进下面的
+            // 「按 5ms 造等长数组」兜底——那会变成 200Hz 回绕，与 [buildFlatMinimal]
+            // 「只改段数、不改总时长」的约定冲突。
+            val timings = when (amps.size) {
+                SEGMENTS -> SEGMENT_TIMINGS
+                1 -> FLAT_TIMINGS
+                else -> LongArray(amps.size) { SEGMENT_MS }
+            }
             vibrate(VibrationEffect.createWaveform(timings, amps, REPEAT_FOREVER))
         }
 
@@ -1099,8 +1185,11 @@ abstract class HapticMixer internal constructor() {
                     return
                 }
                 // 无路肩：抓地力连续平顶。
+                // ⚠️ 走**单段**（[buildFlatMinimal] + [FLAT_TIMINGS]），不是 96 段：
+                // 平顶每段同值，96 段纯属把 95 条冗余跳变指令塞给 HAL。论证见
+                // [buildFlatMinimal]。timings 必须同步换成等长的那份。
                 val slipCarrier = carrier(slip, slipPct)
-                vibrate(VibrationEffect.createWaveform(SEGMENT_TIMINGS, buildFlat(slipCarrier), 0))
+                vibrate(VibrationEffect.createWaveform(FLAT_TIMINGS, buildFlatMinimal(slipCarrier), 0))
                 gripWavePlaying = true
                 logShape(1, slipCarrier)
                 return
