@@ -443,56 +443,28 @@ class AlaMobileModule : XposedModule() {
             }
         } else null
 
-        val pedalMode = settings?.pedalMode ?: ModConfig.PedalMode.SINGLE
-        val enableControlReplacement = pedalMode != ModConfig.PedalMode.OFF
-        val enableAutoDrs = settings?.enableAutoDrs ?: false
-        // 自锁式超车按键：把 OTK 按钮从「按住才生效」改成「点一下切换」。
-        // 只改按键抬落语义，是否允许开超车（ERS 解锁 / 电量）仍由游戏判定。
-        val enableOvertakeLatch = settings?.enableOvertakeLatch ?: false
-        // 禁止删除下一圈成绩：赛道限制作废圈速时只删本圈（改写 InvalidateLap 的
-        // trackPercentage 参数，让游戏自己走 <=0.8 分支）。
-        val enableProtectNextLap = settings?.enableProtectNextLap ?: false
-        // 手动换挡开 ⇒ 关闭游戏自动换挡（disableAutoGear 由 enableManualShift 派生）。
-        // 当前 enableManualShift 默认 false，所以 disableAutoGear=false，游戏自动换挡保持原样。
-        val enableManualShift = settings?.enableManualShift ?: false
-        val disableAutoGear = enableManualShift
-        // 原生 TC/ABS 开关，默认 true。native 层据此打开玩家车的
-        // tclEnable/absEnable，让游戏自带 TC/ABS 在非手柄模式下也生效。
-        val enableTc = settings?.enableTc ?: true
-        val enableAbs = settings?.enableAbs ?: true
-        // TC 档位（强度插值 + 时机 ε/minSPD 配对覆写）。**经 tcEffectiveParams 按 mode 派生**：
-        // mode=default 恒为原厂透传（mix=1/eps=minspd=0），无视缓存的 strength/timing。
-        // settings==null（NPatch 早期）时同语义（游戏默认）。
-        val (tcMix, tcEps, tcMinspd) = if (settings != null) {
-            ModConfig.tcEffectiveParams(settings.tcMode, settings.tcStrength, settings.tcTiming)
-        } else Triple(1.0f, 0f, 0f)
-        // ABS 档位（干预强度 b 覆写 + 制动压力输入端缩放 brakeScale，v5）。
-        // **经 absEffectiveParams 按 mode 派生**：mode=default 恒为原厂透传
-        //（bOverride=-1 不覆写）；brakeScale 与模式无关、全局生效。
-        // settings==null（NPatch 早期）时同语义（游戏默认 + 不缩放）。
-        val (absMix, absBOverride, brakeScale) = if (settings != null) {
-            ModConfig.absEffectiveParams(settings.absMode, settings.absStrength, settings.absPressure)
-        } else Triple(1.0f, -1f, 1.0f)
-
-        // Logger 已在本函数入口（所有门控 return 之前）经 [initGameLogger] 初始化，
-        // 此处不再重复——见上方注释。
-        // ⚠️ enableUnlock 兜底：settings==null（context 还没可用，NPatch 下 onPackageReady
-        // 早期常 context=null）时默认 true，不默认 false。
-        // 根因：NPatch 启动慢，context 要 15s 才可用，但 BillingManager.Awake() 在 ~2s
-        // 触发。如果默认 false，早期 unlock hooks 被跳过，hook_awake 赶不上 Awake，
-        // native 主动注入 OnAlreadyOwned 的窗口被错过。vivo 等设备上游戏不主动调
-        // Java checkOwned，只有 native 主动注入能解锁——错过 Awake = 解锁失败。
+        // ⚠️ 早期路径（15s 之前）只用到 enableUnlock 与 enableV10Sound，故只在
+        // 此派生这两个。**其余开关一律在 15s 延迟块内重读配置后派生**（见
+        // postDelayed 里的 `liveSettings`）——那里若沿用此处捕获的 `settings`
+        // 快照，用户在启动后 15 秒内改的任何配置都会被旧值覆盖回去。
+        // 2026-10-18 实机实证：启动后 12 秒关掉「隐藏原生按键」，广播已正确
+        // 生效（`setHidePedalsEnabled=false`），随后 15s 块用旧快照调
+        // `initHidePedals(true)` 把它盖回 true，用户看到的就是"关了还是隐藏"。
+        //
+        // ⚠️ enableUnlock 兜底：settings==null（context 还没可用，NPatch 下
+        // onPackageReady 早期常 context=null）时默认 true，不默认 false。
+        // 根因：NPatch 启动慢，context 要 15s 才可用，但 BillingManager.Awake()
+        // 在 ~2s 触发。如果默认 false，早期 unlock hooks 被跳过，hook_awake
+        // 赶不上 Awake，native 主动注入 OnAlreadyOwned 的窗口被错过。vivo 等
+        // 设备上游戏不主动调 Java checkOwned，只有 native 主动注入能解锁——
+        // 错过 Awake = 解锁失败。
         // 配套 ModConfig.readFromTargetProcess 的 remoteJson==null fallback（强制
         // enableUnlock=true），两条路径一致：配置读不到时默认开 unlock。
         // 用户若真不想解锁，关掉开关 + 游戏在跑时改配置让广播写 local 即可覆盖
         // （广播路径 settings 非空，enableUnlock 按用户值走）。
         val enableUnlock = settings?.enableUnlock ?: true
-        // 主菜单音乐替换开关，默认 false
-        val enableMusicReplace = settings?.enableMusicReplace ?: false
-        // V10 引擎声浪开关，默认 false
+        // V10 引擎声浪开关：早期路径 ~2s 的开场动画就要用，必须在此派生。
         val enableV10Sound = settings?.enableV10Sound ?: false
-        // 隐藏游戏原生油门/刹车按钮开关，默认 false
-        val hideGamePedals = settings?.hideGamePedals ?: false
 
         // forceLoad + initUnlock（deferred 后同步执行，ShadowHook 已 init）
         // 启动门控：激活时跳过早期 unlock/intro hooks。登录门控（evaluateLoginGate
@@ -603,6 +575,57 @@ class AlaMobileModule : XposedModule() {
             val ctx = getAppContext()
             logX(Log.INFO, TAG, "Delayed context: $ctx")
 
+            // ★ 15s 延迟块**重读配置**，不用外层 `settings` 快照（2026-10-18 修复）。
+            //
+            // 外层 `settings` 在 onPackageReady（游戏启动后 ~0s）读一次就固化，
+            // 而本块在 15 秒后才执行。用户在这 15 秒内改的任何配置都会走
+            // ConfigReceiver 广播路径正确生效，然后被本块的旧快照**覆盖回去**。
+            // 实机实证：启动后 12 秒关掉「隐藏原生按键」→ 广播 `setHidePedalsEnabled=false`
+            // 生效 → 15s 块调 `initHidePedals(旧快照 true)` → 按键继续隐藏。
+            //
+            // 重读失败（ctx 为 null / 读取异常）时回落到外层快照：本块的目的是
+            // "用尽可能新的配置初始化 native"，读不到就退回启动时的值，行为与修复前一致。
+            val liveSettings: ModConfig.Settings? = if (ctx != null) {
+                try {
+                    ModConfig.readFromTargetProcess(ctx).also {
+                        logX(Log.INFO, TAG, "15s block re-read config (fresh, not startup snapshot)")
+                    }
+                } catch (e: Throwable) {
+                    logX(Log.WARN, TAG, "15s block re-read failed, falling back to startup snapshot: ${e.message}")
+                    settings
+                }
+            } else {
+                settings
+            }
+
+            // 以下全部从 liveSettings 派生（原先是外层快照）。
+            val pedalMode = liveSettings?.pedalMode ?: ModConfig.PedalMode.SINGLE
+            val enableControlReplacement = pedalMode != ModConfig.PedalMode.OFF
+            val enableAutoDrs = liveSettings?.enableAutoDrs ?: false
+            // 自锁式超车按键：把 OTK 按钮从「按住才生效」改成「点一下切换」。
+            // 只改按键抬落语义，是否允许开超车（ERS 解锁 / 电量）仍由游戏判定。
+            val enableOvertakeLatch = liveSettings?.enableOvertakeLatch ?: false
+            // 禁止删除下一圈成绩：赛道限制作废圈速时只删本圈（改写 InvalidateLap 的
+            // trackPercentage 参数，让游戏自己走 <=0.8 分支）。
+            val enableProtectNextLap = liveSettings?.enableProtectNextLap ?: false
+            // 手动换挡开 ⇒ 关闭游戏自动换挡（disableAutoGear 由 enableManualShift 派生）。
+            val enableManualShift = liveSettings?.enableManualShift ?: false
+            val disableAutoGear = enableManualShift
+            // 原生 TC/ABS 开关，默认 true。
+            val enableTc = liveSettings?.enableTc ?: true
+            val enableAbs = liveSettings?.enableAbs ?: true
+            // TC 档位：mode=default 恒为原厂透传（mix=1/eps=minspd=0）。
+            val (tcMix, tcEps, tcMinspd) = if (liveSettings != null) {
+                ModConfig.tcEffectiveParams(liveSettings.tcMode, liveSettings.tcStrength, liveSettings.tcTiming)
+            } else Triple(1.0f, 0f, 0f)
+            // ABS 档位：mode=default 恒为原厂透传（bOverride=-1 不覆写）。
+            val (absMix, absBOverride, brakeScale) = if (liveSettings != null) {
+                ModConfig.absEffectiveParams(liveSettings.absMode, liveSettings.absStrength, liveSettings.absPressure)
+            } else Triple(1.0f, -1f, 1.0f)
+            // 主菜单音乐替换 / 隐藏游戏原生踏板按钮开关。
+            val enableMusicReplace = liveSettings?.enableMusicReplace ?: false
+            val hideGamePedals = liveSettings?.hideGamePedals ?: false
+
             if (ctx != null) {
                 try {
                     val overlayManager = OverlayManager(ctx)
@@ -681,7 +704,7 @@ class AlaMobileModule : XposedModule() {
                     // 最大振动强度作用于 Java 侧振幅，由 OverlayManager 构造
                     // HapticMixer 时读取，同样不下发 native。
                     try {
-                        val slipOn = settings?.slipFeedbackMode?.let {
+                        val slipOn = liveSettings?.slipFeedbackMode?.let {
                             it != ModConfig.SlipFeedbackMode.OFF
                         } ?: false
                         NativeBridge.setSlipFeedbackParams(
@@ -696,7 +719,7 @@ class AlaMobileModule : XposedModule() {
                         // `IRDSWheel.materialIndex(0x2E8) == -5`（反汇编实证就是
                         // 游戏判定"在路肩上"的那一条，与路肩音逐帧同步），强度/
                         // 颗粒率常量在 native/src/kerb_haptic.c，不下发。
-                        val kerbOn = settings?.kerbHapticEnabled ?: false
+                        val kerbOn = liveSettings?.kerbHapticEnabled ?: false
                         NativeBridge.setKerbHapticEnabled(kerbOn)
                         logX(Log.INFO, TAG, "setKerbHapticEnabled on=$kerbOn")
                         // 标定探针：**独立于功能开关**（native 侧自限时 4 小时，
@@ -727,16 +750,16 @@ class AlaMobileModule : XposedModule() {
                     // ⚠️ 必须走 **原始配置四维**（LapAssistConfig.from），不能用上面
                     // 派生出的 enableTc/enableAbs——DEFAULT 模式下它们恒 true，
                     // 会丢失"是否自定义"这层信息，服务端就无法区分"关 TC"与"没调过"。
-                    // settings==null（NPatch 早期配置读不到）时**不推送**：保持 native
-                    // 的初始"缺失"态（宁可记缺失不加分，也不虚报用户配置）。
-                    if (settings != null) {
+                    // liveSettings==null（NPatch 早期配置读不到）时**不推送**：保持
+                    // native 的初始"缺失"态（宁可记缺失不加分，也不虚报用户配置）。
+                    if (liveSettings != null) {
                         try {
                             // 防呆：TC/AbsStrength 两枚举顺序若分叉，档位码解码会静默
                             // 给错档位名（见 LapAssistCodes 注释）。只记日志不阻断。
                             if (!ModConfig.LapAssistCodes.assertStrengthOrdersAligned()) {
                                 logX(Log.ERROR, TAG, "TC/AbsStrength enum order diverged — assist strength codes will be wrong!")
                             }
-                            NativeBridge.setLapAssistConfigSafe(ModConfig.LapAssistConfig.from(settings))
+                            NativeBridge.setLapAssistConfigSafe(ModConfig.LapAssistConfig.from(liveSettings))
                             logX(Log.INFO, TAG, "setLapAssistConfig from settings")
                         } catch (e: Throwable) {
                             logX(Log.ERROR, TAG, "setLapAssistConfig failed: ${e.message}")
