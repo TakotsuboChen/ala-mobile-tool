@@ -71,6 +71,7 @@ import tools.alamobile.mod.ui.navigation3.Route
 import tools.alamobile.mod.ui.theme.LocalEnableBlur
 import tools.alamobile.mod.ui.util.BlurredBar
 import tools.alamobile.mod.ui.util.rememberBlurBackdrop
+import tools.alamobile.mod.util.Logger
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.Icon
@@ -193,8 +194,18 @@ fun LeaderboardScreen() {
         var busy = false
         snapshotFlow {
             val info = listState.layoutInfo
-            val last = info.visibleItemsInfo.lastOrNull()?.index ?: -1
-            last >= info.totalItemsCount - LOAD_MORE_THRESHOLD
+            // ⚠️ **布局尚未完成时不能当成"已到底"**（2026-10-18 实机修复）：
+            //    旧写法 `lastOrNull()?.index ?: -1` 在列表还没量出任何 item 时得到 -1，
+            //    而 `totalItemsCount` 此时为 0（或仅 footer 的 1）⇒ `-1 >= 0 - 3` 恒真
+            //    ⇒ 每次 effect 重启（数据更新会让 key 里的 currentSize 变化）都立即
+            //    判定"滚到底了"，把后续所有页一口气拉完。实机日志：进入页面后
+            //    182ms 内连发 4 次请求（offset 0/30/60/90）拉完全部 109 条，
+            //    用户感知为"下滑一直很顺畅、没有分页停顿"——因为根本没有分页。
+            //    现在改为：未见任何可见 item 直接判否。
+            val last = info.visibleItemsInfo.lastOrNull()?.index ?: return@snapshotFlow false
+            // 基准用**数据条数**而非 `totalItemsCount`：后者含 footer-space 等
+            // 装饰 item，且其值本身随 loadingMore 出现/消失而抖动。
+            last >= currentSize - LOAD_MORE_THRESHOLD
         }
             .distinctUntilChanged()
             .filter { it }
@@ -205,6 +216,7 @@ fun LeaderboardScreen() {
                 val epoch = filterEpoch
                 val v = if (selectedVersion == 0) null else VERSION_CODES.getOrNull(selectedVersion - 1)
                 val offset = currentSize
+                Logger.i(TAG_BOARD, "load more: offset=$offset size=$currentSize total=$currentTotal")
                 if (tabIndex == 0) {
                     val page = withContext(Dispatchers.IO) {
                         PaddockClient.fetchPointsBoard(v, offset = offset)
@@ -457,6 +469,9 @@ private const val BOARD_FADE_OUT_MILLIS = 150L
 
 /** 距列表末尾还有 N 项时开始预加载下一页（提前量，避免用户看到空白等待）。 */
 private const val LOAD_MORE_THRESHOLD = 3
+
+/** 分页日志 tag：区分「滚动触发的正常翻页」与「effect 重启导致的连发」。 */
+private const val TAG_BOARD = "Leaderboard"
 
 /** 榜单行头像：有 URL 异步取（PaddockClient 三级缓存：内存 Lru→磁盘→网络），无 URL/失败显示 Person 占位。 */
 @Composable

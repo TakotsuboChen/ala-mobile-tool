@@ -170,8 +170,13 @@ fun DriverScreen(userId: String) {
         var busy = false
         snapshotFlow {
             val info = listState.layoutInfo
-            val last = info.visibleItemsInfo.lastOrNull()?.index ?: -1
-            last >= info.totalItemsCount - LOAD_MORE_THRESHOLD
+            // ⚠️ 布局未完成时必须判否，不能把 `lastOrNull() == null` 当成"已到底"
+            //    （2026-10-18 与 LeaderboardScreen 同批修复）：旧写法回落到 -1，
+            //    而 `totalItemsCount` 布局前为 0 ⇒ `-1 >= 0 - 3` 恒真 ⇒ effect 每次
+            //    重启（entries.size 变化即在 key 里）都立即翻页，一次性拉完全部数据。
+            val last = info.visibleItemsInfo.lastOrNull()?.index ?: return@snapshotFlow false
+            // 基准用**数据条数**而非 totalItemsCount：后者含 footer 等装饰 item。
+            last >= entries.size - LOAD_MORE_THRESHOLD
         }
             .distinctUntilChanged()
             .filter { it }
