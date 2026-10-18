@@ -1038,9 +1038,39 @@ bool pedal_install_hooks(const pedal_hook_config_t *config) {
     g_config.abs_b_override = -1.0f;
     g_config.brake_scale = 1.0f;
 
+    // ⚠️ **不要在这里按 `enable_control_replacement` 早退**（2026-10-18 修复）。
+    //
+    // 历史：本函数原先在踏板模式 = OFF 时直接 `return true`，一个 hook 都不装。
+    // 但下面这三条功能**不是独立 hook**，全都搭在踏板那套 hook 的顺风车上：
+    //   • 抓地力反馈 `slip_feedback_tick`  —— 挂在 `proxy_car_controller` 末尾；
+    //   • 路肩振感   `kerb_haptic_tick`    —— 同一采样点、同一份白名单；
+    //   • 隐藏游戏原生踏板按钮 `hide_pedals_tick` —— 挂在 `proxy_fixed_update` 上。
+    // 更隐蔽的是玩家车白名单本身：`is_target_player_car` 依赖的
+    // `g_player_controller` 只在 `proxy_player_controls_update` 里写入——也在
+    // 被跳过的这段里。所以哪怕只把 carController 单独装上也没用：白名单恒为
+    // false，tick 一次都不会执行。
+    // 实机表现 = 「踏板模式选关闭后，抓地力反馈与路肩振感双双失效，且没有任何
+    // 日志」（信号源根本不跑，用户侧看到的就是"开关打开了但什么都不振"）。
+    //
+    // 为什么删掉它是安全的：每个 hook 都有**各自的运行时闸门**，静态配置从来
+    // 不是唯一防线——
+    //   • 踏板输入写入：`g_throttle_active`/`g_brake_active` 只由 overlay 的
+    //     JNI setter 置位（OFF 模式压根不创建踏板 view），writer 线程在两者
+    //     皆 false 时整体早返回，绝不写游戏字段；setter 吞输入的
+    //     `proxy_set_throttle` 同样要 `g_throttle_active` 为真才吞。
+    //   • TC/ABS 字段覆写：由 `enable_tc`/`enable_abs` + 档位参数逐帧判定，
+    //     默认档（mix=1 / b_override=-1）是逐位透传。
+    //   • 隐藏踏板：`hide_pedals_tick` 内部按 `g_enabled` 判定。
+    // 换句话说 `enable_control_replacement` 从来只是一道冗余的第二道锁。
+    //
+    // 副作用（有意为之）：TC/ABS 档位、隐藏游戏踏板从此在踏板模式 = OFF 时
+    // 也生效——它们本来就是独立功能（配置页在「原生功能」而非「Overlay 控件」）。
+    //
+    // `enable_control_replacement` 字段保留但**不再用于门控**：Java 侧仍按踏板
+    // 模式下发，只作诊断日志用。
     if (!g_config.enable_control_replacement) {
-        LOGI("Pedal control replacement disabled");
-        return true;
+        LOGI("Pedal control replacement disabled (hooks still installed: "
+             "slip/kerb haptics + hide-pedals depend on them)");
     }
 
     if (g_hooks_installed) {
