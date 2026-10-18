@@ -9,6 +9,7 @@
 #include "drs_hook.h"
 #include "overtake_hook.h"
 #include "next_lap_hook.h"
+#include "steer_limit_hook.h"
 #include "unlock_hook.h"
 #include "music_hook.h"
 #include "intro_hook.h"
@@ -421,6 +422,44 @@ Java_tools_alamobile_mod_NativeBridge_setProtectNextLap(JNIEnv *env, jclass claz
     (void) env;
     (void) clazz;
     next_lap_set_active((int) active);
+}
+
+// ─ 解除最大转向角度限制（不动 init() 44 参数签名，与 initNextLap 同模式）──
+// 与 DRS/overtake/next-lap 一并走主路径尽早安装：玩家一进赛道就要能打方向，
+// 不能等到某次配置广播才装 hook。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_initSteerLimit(JNIEnv *env, jclass clazz,
+                                                      jboolean enable_unlock_steer_angle,
+                                                      jlong set_max_steering_angle,
+                                                      jint wheel_max_steering_angle_field,
+                                                      jint wheel_max_steering_angle_old_field) {
+    (void) env;
+    (void) clazz;
+
+    steer_limit_hook_config_t sl_cfg = {
+        .enable_unlock_steer_angle = (bool) enable_unlock_steer_angle,
+        .set_max_steering_angle_offset = (uintptr_t) set_max_steering_angle,
+        .wheel_max_steering_angle_field = (uint32_t) wheel_max_steering_angle_field,
+        .wheel_max_steering_angle_old_field = (uint32_t) wheel_max_steering_angle_old_field,
+    };
+
+    LOGI("initSteerLimit: unlock=%d setMaxAngle=0x%lx base=0x%x old=0x%x",
+         (int) enable_unlock_steer_angle, (unsigned long) set_max_steering_angle,
+         (unsigned) wheel_max_steering_angle_field,
+         (unsigned) wheel_max_steering_angle_old_field);
+
+    if (!steer_limit_install_hooks(&sl_cfg)) {
+        LOGE("Failed to install steer-limit hooks");
+    }
+}
+
+// 运行时开关解除最大转向角度限制（配置广播到达后调用，不重装 hook）。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_setUnlockSteerAngle(JNIEnv *env, jclass clazz,
+                                                          jboolean active) {
+    (void) env;
+    (void) clazz;
+    steer_limit_set_active((int) active);
 }
 
 JNIEXPORT void JNICALL

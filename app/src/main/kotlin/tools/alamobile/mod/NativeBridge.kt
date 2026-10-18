@@ -303,6 +303,33 @@ object NativeBridge {
     external fun setProtectNextLap(active: Boolean)
 
     /**
+     * 解除最大转向角度限制 hooks 安装（不动 init() 参数签名，与 initNextLap 同模式）。
+     *
+     * hook `IRDSWheel.SetMaxSteeringAngle(float)` —— 游戏运行期改写"最大转向角"
+     * 的唯一入口。游戏按车速把这个角度往下压（车速越高能打的角度越小），模块
+     * 在开关开启时丢弃入参、把静态基础值 `maxSteeringAngle`(0x90) 写进运行期
+     * 生效值 `maxSteeringAngleOld`(0x94)，让每只轮子始终保有原始转角。
+     *
+     * ⚠️ 字段偏移由 Java 侧下发（OffsetTable 是 IL2CPP 偏移的单一事实源，
+     * native 侧不得硬编码）。见 native/src/steer_limit_hook.c。
+     *
+     * @param setMaxSteeringAngle `IRDSWheel.SetMaxSteeringAngle` 的 RVA
+     * @param wheelMaxSteeringAngleField `IRDSWheel.maxSteeringAngle` 字段偏移（静态基础值）
+     * @param wheelMaxSteeringAngleOldField `IRDSWheel.maxSteeringAngleOld` 字段偏移（运行期生效值）
+     */
+    @JvmStatic
+    external fun initSteerLimit(
+        enableUnlockSteerAngle: Boolean,
+        setMaxSteeringAngle: Long,
+        wheelMaxSteeringAngleField: Int,
+        wheelMaxSteeringAngleOldField: Int
+    )
+
+    /** 运行时开关解除最大转向角度限制（配置广播到达后调用，不重装 hook）。 */
+    @JvmStatic
+    external fun setUnlockSteerAngle(active: Boolean)
+
+    /**
      * 计时赛有效圈速监听 hooks 安装（log-only，无 UI）。
      * - IRDSLevelLoadVariables.Awake：捕获 LLV 单例 → 读 trackToRace 赛道名
      *   （16 条 GP 赛道自动识别）。
@@ -660,6 +687,34 @@ object NativeBridge {
     fun setProtectNextLapSafe(active: Boolean) {
         if (!isAvailable) return
         try { setProtectNextLap(active) } catch (e: Throwable) { Logger.w(TAG, "setProtectNextLap failed", e) }
+    }
+
+    /**
+     * 解除最大转向角度限制 hooks 安装安全包装。native 不可用 / 加载失败时静默降级 ——
+     * 等价于功能不生效（游戏照常按车速限角），不影响游戏。
+     */
+    @JvmStatic
+    fun initSteerLimitSafe(enableUnlockSteerAngle: Boolean) {
+        if (!isAvailable) return
+        try {
+            initSteerLimit(
+                enableUnlockSteerAngle = enableUnlockSteerAngle,
+                setMaxSteeringAngle = OffsetTable.IRDS_WHEEL_SET_MAX_STEERING_ANGLE,
+                wheelMaxSteeringAngleField = OffsetTable.IRDS_WHEEL_MAX_STEERING_ANGLE.toInt(),
+                wheelMaxSteeringAngleOldField = OffsetTable.IRDS_WHEEL_MAX_STEERING_ANGLE_OLD.toInt()
+            )
+        } catch (e: Throwable) {
+            Logger.w(TAG, "initSteerLimit failed", e)
+        }
+    }
+
+    /**
+     * 运行时同步「解除最大转向角度限制」开关（不重装 hook，同 [setProtectNextLapSafe] 模式）。
+     */
+    @JvmStatic
+    fun setUnlockSteerAngleSafe(active: Boolean) {
+        if (!isAvailable) return
+        try { setUnlockSteerAngle(active) } catch (e: Throwable) { Logger.w(TAG, "setUnlockSteerAngle failed", e) }
     }
 
     /**

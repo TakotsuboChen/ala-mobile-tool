@@ -78,6 +78,32 @@ object OffsetTable {
     // 且 0.8f 阈值与两处 fcmp 仍在方法内。
     const val ODOMETER_HANDLER_INVALIDATE_LAP: Long = 0x1A0DA2CL
 
+    // ── 解除最大转向角度限制（IRDSWheel）──
+    // IRDSWheel.SetMaxSteeringAngle(float) —— 运行期改写"最大转向角"的唯一入口。
+    // 方法内按 Application.isPlaying 二选一：运行时写 maxSteeringAngleOld(0x94)，
+    // 非运行时写 maxSteeringAngle(0x90)。游戏按车速压低的就是 0x94，而 RoadForce
+    // (0x1A7DB3C) 在 0x1A7E020 处用它做 fdiv 分母 ⇒ 它就是限角生效点。
+    // 模块 hook 它并在开关开启时丢弃入参、把 0x90（静态基础值，只在 Awake 与
+    // IRDSWishboneSuspension.Init 从 prefab 读取）写进 0x94。见
+    // native/src/steer_limit_hook.c。
+    // ⚠️ 升版必核：全 .so 三个调用者仍是 IRDSMotorCycle.Update / carModifier.Start /
+    // carModifier.TiltSteerDynamicAssist，且 isPlaying 二选一写法与两个字段偏移未变。
+    // ⚠️ **不要**改去 hook carModifier.TiltSteerDynamicAssist(0x1769274)：它被
+    // isTiltSteer(0x1C4) 门控，而该标志来自 PlayerPrefs 的 "isTilt" 键——**判定
+    // 是反的**（无该键或键值为 0 才置 true ⇒ 实际表示「未启用倾斜转向」，跑在
+    // 多数触摸/方向键玩家身上）。hook SetMaxSteeringAngle 单点即可覆盖它。
+    // 指令序列见 native/src/steer_limit_hook.h。
+    const val IRDS_WHEEL_SET_MAX_STEERING_ANGLE: Long = 0x1A7B49CL
+
+    // IRDSWheel 的两个成对字段（8.0.0→8.0.6 布局未变）。
+    //   maxSteeringAngle(0x90)    = 静态基础值，只在 Awake / WishboneSuspension.Init
+    //                               从 prefab 读取，运行期不再改写。
+    //   maxSteeringAngleOld(0x94) = 运行期生效值，RoadForce(0x1A7DB3C) 在 0x1A7E020
+    //                               处用它做 fdiv 分母 ⇒ 限角真正生效的地方。
+    // ⚠️ 这两个偏移经 JNI 下发给 native（native 侧不硬编码），升版必核。
+    const val IRDS_WHEEL_MAX_STEERING_ANGLE: Long = 0x90L
+    const val IRDS_WHEEL_MAX_STEERING_ANGLE_OLD: Long = 0x94L
+
     // carModifier 实例字段偏移（0xD8 icinp / 0x9C playercar / 0xF8 _currentDRSState）
     // 按仓库惯例以 native 侧 `#define OFF_*` 维护——字段偏移的升版核对清单
     // 就是 native 里全部 OFF_* 常量（见 CLAUDE.md），不在本表登记。

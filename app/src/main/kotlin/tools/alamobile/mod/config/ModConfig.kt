@@ -61,6 +61,10 @@ object ModConfig {
     // 游戏会连带作废下一圈成绩。开启后只作废本圈（改写 InvalidateLap 的
     // trackPercentage 参数，让游戏自己走 <=0.8 分支）。
     const val KEY_ENABLE_PROTECT_NEXT_LAP = "enable_protect_next_lap"
+    // 解除最大转向角度限制：游戏按车速把每只轮子的最大转向角往下压（车速越高
+    // 能打的角度越小）。开启后丢弃 SetMaxSteeringAngle 的入参、改用静态基础
+    // 转角，让轮子始终保有 prefab 里的原始最大转向角。默认关。
+    const val KEY_ENABLE_UNLOCK_STEER_ANGLE = "enable_unlock_steer_angle"
     const val KEY_DISABLE_AUTO_GEAR = "disable_auto_gear"
     const val KEY_ENABLE_MANUAL_SHIFT = "enable_manual_shift"
     const val KEY_ENABLE_UNLOCK = "enable_unlock"
@@ -733,6 +737,8 @@ object ModConfig {
         // 禁止删除下一圈成绩：默认开启（用户定案 2026-10-06）——游戏原生"连带
         // 删除下一圈"对刷圈体验损害大，作为默认改善直接生效；用户仍可在配置页关闭。
         const val ENABLE_PROTECT_NEXT_LAP = true
+        // 解除最大转向角度限制：默认关（改变游戏原生转向手感，由用户主动选择）。
+        const val ENABLE_UNLOCK_STEER_ANGLE = false
         const val DISABLE_AUTO_GEAR = false
         const val ENABLE_MANUAL_SHIFT = false
         const val ENABLE_UNLOCK = false
@@ -863,6 +869,10 @@ object ModConfig {
                     KEY_ENABLE_PROTECT_NEXT_LAP,
                     Defaults.ENABLE_PROTECT_NEXT_LAP
                 ),
+                enableUnlockSteerAngle = json.optBoolean(
+                    KEY_ENABLE_UNLOCK_STEER_ANGLE,
+                    Defaults.ENABLE_UNLOCK_STEER_ANGLE
+                ),
                 disableAutoGear = json.optBoolean(
                     KEY_DISABLE_AUTO_GEAR,
                     Defaults.DISABLE_AUTO_GEAR
@@ -974,6 +984,7 @@ object ModConfig {
         put(KEY_ENABLE_AUTO_DRS, settings.enableAutoDrs)
         put(KEY_ENABLE_LATCH_OVERTAKE, settings.enableOvertakeLatch)
         put(KEY_ENABLE_PROTECT_NEXT_LAP, settings.enableProtectNextLap)
+        put(KEY_ENABLE_UNLOCK_STEER_ANGLE, settings.enableUnlockSteerAngle)
         put(KEY_DISABLE_AUTO_GEAR, settings.disableAutoGear)
         put(KEY_ENABLE_MANUAL_SHIFT, settings.enableManualShift)
         put(KEY_ENABLE_UNLOCK, settings.enableUnlock)
@@ -1313,6 +1324,7 @@ object ModConfig {
                 enableAutoDrs = j.optBoolean(KEY_ENABLE_AUTO_DRS, Defaults.ENABLE_AUTO_DRS),
                 enableOvertakeLatch = j.optBoolean(KEY_ENABLE_LATCH_OVERTAKE, Defaults.ENABLE_LATCH_OVERTAKE),
                 enableProtectNextLap = j.optBoolean(KEY_ENABLE_PROTECT_NEXT_LAP, Defaults.ENABLE_PROTECT_NEXT_LAP),
+                enableUnlockSteerAngle = j.optBoolean(KEY_ENABLE_UNLOCK_STEER_ANGLE, Defaults.ENABLE_UNLOCK_STEER_ANGLE),
                 disableAutoGear = j.optBoolean(KEY_DISABLE_AUTO_GEAR, Defaults.DISABLE_AUTO_GEAR),
                 enableManualShift = j.optBoolean(KEY_ENABLE_MANUAL_SHIFT, Defaults.ENABLE_MANUAL_SHIFT),
                 enableUnlock = j.optBoolean(KEY_ENABLE_UNLOCK, Defaults.ENABLE_UNLOCK),
@@ -1544,6 +1556,7 @@ object ModConfig {
             enableAutoDrs = Defaults.ENABLE_AUTO_DRS,
             enableOvertakeLatch = Defaults.ENABLE_LATCH_OVERTAKE,
             enableProtectNextLap = Defaults.ENABLE_PROTECT_NEXT_LAP,
+            enableUnlockSteerAngle = Defaults.ENABLE_UNLOCK_STEER_ANGLE,
             disableAutoGear = Defaults.DISABLE_AUTO_GEAR,
             enableManualShift = Defaults.ENABLE_MANUAL_SHIFT,
             enableUnlock = Defaults.ENABLE_UNLOCK,
@@ -1595,6 +1608,9 @@ object ModConfig {
         // 禁止删除下一圈成绩（赛道限制作废圈速时只删本圈）。带默认值 ——
         // PedalOverlayView 的命名参数部分构造无需改动即可编译。
         val enableProtectNextLap: Boolean = Defaults.ENABLE_PROTECT_NEXT_LAP,
+        // 解除最大转向角度限制（SetMaxSteeringAngle 恒用静态基础转角）。默认关。
+        // 带默认值 —— 命名参数部分构造的调用点无需改动即可编译。
+        val enableUnlockSteerAngle: Boolean = Defaults.ENABLE_UNLOCK_STEER_ANGLE,
         val disableAutoGear: Boolean,
         val enableManualShift: Boolean,
         val enableUnlock: Boolean,

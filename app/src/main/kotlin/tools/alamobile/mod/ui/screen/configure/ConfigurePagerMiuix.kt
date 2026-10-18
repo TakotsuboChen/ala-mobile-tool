@@ -387,6 +387,24 @@ fun ConfigureNativeFeaturesScreen(
                 checked = uiState.enableProtectNextLap,
                 onCheckedChange = actions::setEnableProtectNextLap
             )
+            // 解除最大转向角度限制：游戏按车速把每只轮子的最大转向角往下压
+            //（车速越高能打的角度越小）。开启后丢弃 SetMaxSteeringAngle 的入参、
+            // 改用静态基础转角，轮子始终保有 prefab 里的原始最大转向角。
+            // 默认关 —— 改变游戏原生转向手感，由用户主动选择。
+            SwitchPreference(
+                title = "解除最大转向角度限制",
+                summary = "允许的最大转向角度随车速增大而减小，开启后解除该限制",
+                startAction = {
+                    Icon(
+                        tools.alamobile.mod.ui.ForbidIcon,
+                        modifier = Modifier.padding(end = 6.dp),
+                        contentDescription = null,
+                        tint = colorScheme.onBackground
+                    )
+                },
+                checked = uiState.enableUnlockSteerAngle,
+                onCheckedChange = actions::setEnableUnlockSteerAngle
+            )
             // TC 调节：游戏设置没有任何 TC 参数可调（仅手柄生效的
             // 开关且被游戏每帧覆写），模块档位是移动端唯一调节途径。
             // 游戏默认 = 纯透传；自定义展开强度/时机两个滑条。

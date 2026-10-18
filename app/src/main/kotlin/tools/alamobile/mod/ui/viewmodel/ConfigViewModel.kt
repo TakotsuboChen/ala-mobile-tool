@@ -65,6 +65,7 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
                 enableAutoDrs = s.enableAutoDrs,
                 enableOvertakeLatch = s.enableOvertakeLatch,
                 enableProtectNextLap = s.enableProtectNextLap,
+                enableUnlockSteerAngle = s.enableUnlockSteerAngle,
                 disableAutoGear = s.disableAutoGear,
                 enableManualShift = s.enableManualShift,
                 enableUnlock = s.enableUnlock,
@@ -108,6 +109,7 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
             enableAutoDrs = s.enableAutoDrs,
             enableOvertakeLatch = s.enableOvertakeLatch,
             enableProtectNextLap = s.enableProtectNextLap,
+                enableUnlockSteerAngle = s.enableUnlockSteerAngle,
             disableAutoGear = s.disableAutoGear,
             enableManualShift = s.enableManualShift,
             enableUnlock = s.enableUnlock,
@@ -161,6 +163,7 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
     fun setEnableAutoDrs(v: Boolean) { _uiState.value = _uiState.value.copy(enableAutoDrs = v); scheduleSave() }
     fun setEnableOvertakeLatch(v: Boolean) { _uiState.value = _uiState.value.copy(enableOvertakeLatch = v); scheduleSave() }
     fun setEnableProtectNextLap(v: Boolean) { _uiState.value = _uiState.value.copy(enableProtectNextLap = v); scheduleSave() }
+    fun setEnableUnlockSteerAngle(v: Boolean) { _uiState.value = _uiState.value.copy(enableUnlockSteerAngle = v); scheduleSave() }
     fun setDisableAutoGear(v: Boolean) { _uiState.value = _uiState.value.copy(disableAutoGear = v); scheduleSave() }
     fun setEnableManualShift(v: Boolean) { _uiState.value = _uiState.value.copy(enableManualShift = v); scheduleSave() }
     fun setEnableUnlock(v: Boolean) { _uiState.value = _uiState.value.copy(enableUnlock = v); scheduleSave() }
@@ -225,6 +228,7 @@ data class ConfigUiState(    val pedalMode: ModConfig.PedalMode,
     val enableOvertakeLatch: Boolean,
     /** 禁止删除下一圈成绩：赛道限制作废圈速时只删本圈。 */
     val enableProtectNextLap: Boolean,
+    val enableUnlockSteerAngle: Boolean,
     val disableAutoGear: Boolean,
     val enableManualShift: Boolean,
     val enableUnlock: Boolean,
@@ -268,6 +272,7 @@ data class ConfigUiState(    val pedalMode: ModConfig.PedalMode,
         enableAutoDrs = enableAutoDrs,
         enableOvertakeLatch = enableOvertakeLatch,
         enableProtectNextLap = enableProtectNextLap,
+        enableUnlockSteerAngle = enableUnlockSteerAngle,
         disableAutoGear = disableAutoGear,
         enableManualShift = enableManualShift,
         enableUnlock = enableUnlock,

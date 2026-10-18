@@ -628,6 +628,9 @@ class AlaMobileModule : XposedModule() {
             // 禁止删除下一圈成绩：赛道限制作废圈速时只删本圈（改写 InvalidateLap 的
             // trackPercentage 参数，让游戏自己走 <=0.8 分支）。
             val enableProtectNextLap = liveSettings?.enableProtectNextLap ?: false
+            // 解除最大转向角度限制：SetMaxSteeringAngle 恒用静态基础转角（不再随
+            // 车速收紧）。默认关。
+            val enableUnlockSteerAngle = liveSettings?.enableUnlockSteerAngle ?: false
             // 手动换挡开 ⇒ 关闭游戏自动换挡（disableAutoGear 由 enableManualShift 派生）。
             val enableManualShift = liveSettings?.enableManualShift ?: false
             val disableAutoGear = enableManualShift
@@ -709,6 +712,14 @@ class AlaMobileModule : XposedModule() {
                         logX(Log.INFO, TAG, "initNextLap protect=$enableProtectNextLap")
                     } catch (e: Throwable) {
                         logX(Log.ERROR, TAG, "initNextLap failed: ${e.message}")
+                    }
+                    // 解除最大转向角度限制：hook IRDSWheel.SetMaxSteeringAngle（游戏
+                    // 运行期改写最大转向角的唯一入口）。hook 恒装上，开关在回调内判。
+                    try {
+                        NativeBridge.initSteerLimitSafe(enableUnlockSteerAngle)
+                        logX(Log.INFO, TAG, "initSteerLimit unlock=$enableUnlockSteerAngle")
+                    } catch (e: Throwable) {
+                        logX(Log.ERROR, TAG, "initSteerLimit failed: ${e.message}")
                     }
                     // ABS 档位下发：同 TC 模式（init 兜底为不覆写/不缩放，这里补用户档位）。
                     try {

@@ -31,6 +31,7 @@ add_library(
     src/hide_pedals_hook.c
     src/lap_hook.c
     src/next_lap_hook.c
+    src/steer_limit_hook.c
     src/crash_hook.c
 )
 
