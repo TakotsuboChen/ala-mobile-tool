@@ -9,6 +9,45 @@ plugins {
     id("kotlin-parcelize")
 }
 
+/**
+ * 构建指纹：注入到 BuildConfig，供日志环境块打印。
+ *
+ * ## 为什么需要（2026-10-18 实证教训）
+ *
+ * 用户报障时说"这是 9/18 的 Alpha 1"，但日志里出现了 `Pushed game logs via
+ * chunked broadcast`——那句代码在 9/14 的 bee9554 就删了。**versionName /
+ * versionCode 完全锁不住构建时间**：`1.0.4 Alpha 1` / `104100` 从 9/5 一直
+ * 沿用到 10/6，横跨一个多月几十个提交。排查时只能靠"日志里有没有某个已删除
+ * 的字符串"倒推，极其被动。
+ *
+ * ⇒ 直接注入构建时间 + git SHA，让每个包自带可读的出生证明。
+ *
+ * ## 为什么在配置阶段求值
+ *
+ * 这两个值必须对**每次构建**重新求值。若放进 `doLast`/`providers.provider`
+ * 延迟求值，configuration cache 会缓存上一次结果。配置阶段直接求值 =
+ * 每次 `gradlew` 调用都刷新（Gradle 9 对配置阶段读外部命令会警告
+ * configuration cache 不兼容，但本项目未启用该特性，`gradle.properties`
+ * 里没有 `org.gradle.configuration-cache`）。
+ *
+ * ## git SHA 的边界
+ *
+ * CI 的 `actions/checkout@v7` 默认 `fetch-depth: 1`，但 `git rev-parse --short
+ * HEAD` 只需要 HEAD 提交本身，不依赖历史深度，因此浅克隆也能取到。
+ * 非 git 环境（如源码 tarball）取不到时回落 `"unknown"`，不能让构建失败。
+ */
+val buildTimeMillis: Long = System.currentTimeMillis()
+val gitSha: String = try {
+    val proc = providers.exec {
+        commandLine("git", "rev-parse", "--short", "HEAD")
+        // 非 git 环境不能让构建失败：忽略退出码，下面按空串处理
+        isIgnoreExitValue = true
+    }
+    proc.standardOutput.asText.get().trim().ifEmpty { "unknown" }
+} catch (_: Throwable) {
+    "unknown"
+}
+
 android {
     namespace = "tools.alamobile.mod"
     compileSdk = 37
@@ -19,6 +58,11 @@ android {
         targetSdk = 35
         versionCode = 104140
         versionName = "1.0.4 Alpha 4"
+
+        // 构建指纹（见文件头注释）。日志环境块据此打出"这个包是什么时候、
+        // 从哪个提交构建的"——版本号复用期间这是唯一的构建时间判据。
+        buildConfigField("long", "BUILD_TIME_MILLIS", "${buildTimeMillis}L")
+        buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
     }
 
     signingConfigs {

@@ -15,6 +15,7 @@ import tools.alamobile.mod.config.ConfigReceiver
 import tools.alamobile.mod.config.ModConfig
 import tools.alamobile.mod.hook.BillingHook
 import tools.alamobile.mod.overlay.OverlayManager
+import tools.alamobile.mod.util.EnvInfo
 import tools.alamobile.mod.util.Logger
 import tools.alamobile.mod.offsets.OffsetTable
 import tools.alamobile.mod.util.isSupportedPackage
@@ -33,6 +34,16 @@ class AlaMobileModule : XposedModule() {
          */
         var xposedInterface: io.github.libxposed.api.XposedInterface? = null
             private set
+
+        /**
+         * 环境信息块是否已打印（进程级，见 [initGameLogger]）。
+         *
+         * ⚠️ 必须与 [NATIVE_INSTALLED_FLAG]、`RECEIVER_REGISTERED_FLAG` 等标记
+         * **分开**：那些标记控制的是"某项工作是否做过"，本标记只控制"环境块
+         * 是否打过一次"。复用会让其中一个语义被另一个的时机绑死。
+         */
+        @Volatile
+        private var ENV_LOGGED = false
 
         /**
          * 统一日志入口：logcat 输出 + Logger 文件写入（无条件开启）。
@@ -141,11 +152,20 @@ class AlaMobileModule : XposedModule() {
      *
      * context 为 null（NPatch 早期）时静默跳过，由 [doPackageReadyDeferred] 在
      * 主线程 next loop（context 通常已可用）补一次。
+     *
+     * ⚠️ 本函数有 3 个调用点（onModuleLoaded / 200ms 重试 / doPackageReadyDeferred），
+     * 而 [EnvInfo.log] 必须**每进程只打一次**——否则同一份日志里会出现 2~3 个
+     * 环境块，用户导出时更难读。用进程级标记守卫，且标记在**真正打印成功后**
+     * 才置位（Logger 未 init 时先不置位，等下一次带 context 的调用补打）。
      */
     private fun initGameLogger() {
         try {
             val ctx = getAppContext() ?: return
             Logger.init(ctx, isModuleProcess = false)
+            if (!ENV_LOGGED) {
+                ENV_LOGGED = true
+                EnvInfo.log(ctx, isModuleProcess = false)
+            }
         } catch (_: Throwable) {
             // 日志初始化失败不影响功能
         }

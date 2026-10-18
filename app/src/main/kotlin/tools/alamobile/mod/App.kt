@@ -216,6 +216,10 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
         } else {
             // 模块进程：初始化 Logger（用 filesDir 写日志文件）
             tools.alamobile.mod.util.Logger.init(this, isModuleProcess = true)
+            // 环境信息块：模块版本 + 构建指纹 + 设备/系统。模块进程的日志与游戏
+            // 进程分开落盘，两边各打一份，导出后两段日志都自带完整上下文。
+            // ⚠️ 必须在 Logger.init 之后——否则日志没有落盘目录，只剩 logcat。
+            tools.alamobile.mod.util.EnvInfo.log(this, isModuleProcess = true)
             // 崩溃自捕：未捕获异常堆栈落盘 filesDir/ala_tool_crash.log，用户
             // 下次导出日志即含崩溃段（用户日志实证 2026-09-05：闪退时自导
             // 日志无任何堆栈，小白用户无法抓 logcat crash buffer）。
