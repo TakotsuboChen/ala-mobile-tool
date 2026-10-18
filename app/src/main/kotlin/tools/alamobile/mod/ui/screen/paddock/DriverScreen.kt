@@ -59,6 +59,7 @@ import tools.alamobile.mod.ui.navigation3.LocalNavigator
 import tools.alamobile.mod.ui.theme.LocalEnableBlur
 import tools.alamobile.mod.ui.util.BlurredBar
 import tools.alamobile.mod.ui.util.rememberBlurBackdrop
+import tools.alamobile.mod.util.Logger
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.Icon
@@ -186,6 +187,17 @@ fun DriverScreen(userId: String) {
                 loadingMore = true
                 val epoch = filterEpoch
                 val offset = entries.size
+                // 分页诊断日志（与 LeaderboardScreen 同款，2026-10-18 补齐）：
+                // ⚠️ **判据是相邻两条的时间间隔，不是条数**——正常翻页的间隔 ≈ 用户
+                //    滚动耗时（秒级）；间隔 <200ms 的连发说明哨兵值 bug 复发
+                //    （`?: -1` 参与 `>= size - N` 恒真 ⇒ effect 每次重启都立即翻页）。
+                // ⚠️ 必须带筛选指纹：本页有四维筛选，同一个 offset 在不同筛选下是不同查询，
+                //    只打 offset 拿到日志也分不清是哪一条。
+                Logger.i(
+                    TAG_DRIVER,
+                    "load more: offset=$offset total=$total " +
+                        "track=$selectedTrack ver=$selectedVersion zero=$zeroOnly best=$bestOnly",
+                )
                 val page = withContext(Dispatchers.IO) {
                     PaddockClient.fetchDriverPage(
                         userId = userId,
@@ -538,3 +550,6 @@ private const val NAV_ENTER_SETTLE_MILLIS = 500L
 
 /** 距列表末尾还有 N 项时开始预加载下一页（提前量，避免用户看到空白等待）。 */
 private const val LOAD_MORE_THRESHOLD = 3
+
+/** 分页日志 tag：与 `LeaderboardScreen` 的 `TAG_BOARD` 分开，便于按页面过滤。 */
+private const val TAG_DRIVER = "Driver"
