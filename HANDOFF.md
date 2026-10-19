@@ -4,8 +4,8 @@
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: 模块 `main` @ `7b2a71b`（待 push）· 服务端 `main` @ `e878790`（已 push）
-- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `7b2a71b`——HEAD 必是本次 handoff 提交，
+- 锚点: 模块 `main` @ `7076b7e`（已 push）· 服务端 `main` @ `e878790`（已 push）
+- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `7076b7e`——HEAD 必是本次 handoff 提交，
   其 parent 才是文档记录的 SHA
 - 待重探的 [?]: §5 中标记的继承项
 - 先读: `app/src/main/kotlin/tools/alamobile/mod/ui/screen/paddock/AvatarScreen.kt`
@@ -23,7 +23,7 @@
 - [V] **已装机验收**：魅族 20（`192.168.50.142:5555`），APK 00:35:59，装机 00:35:59，
   用户确认「好了，完美」。
 - [V] **版本号未动**：模块 `1.0.4 Alpha 4` / `104140`。
-- [V] **工作已提交未 push**：`e580abd`（fix）+ `7b2a71b`（docs）。
+- [V] **工作已提交并 push**：`e580abd`（fix）+ `7b2a71b`（docs）→ `b37f28f..7076b7e main -> main`。
 
 ### 测试/build 输出（本次交接 run 的真实输出）
 ```
@@ -71,6 +71,10 @@ $ ./gradlew :app:assembleRelease -x lintVital*  → BUILD SUCCESSFUL in 2m 48s�
   用 `+6` 偏移硬推 NPatch 版本号。
 
 ## 5. 已知坑
+- ⚠️ **`/handoff` 的 push 无需额外授权，且必须做完** [V]——2026-10-20 上一轮 handoff
+  把三个提交全留在本地，用户当场质问。skill 步骤 3/5/7 各写了 `git push`，
+  全局 Git 策略也把 `/handoff` 列为例外。**自检判据**：报告里出现「待 push」= 违规。
+  已在 skill 顶部加显式断言 + 更新全局记忆 `git-commit-policy`。
 - ⚠️ **选图/选文件必须自绘选择器** [V]——见 memory `android-file-picker-no-gms`。
 - ⚠️ **label 层级** [V]——`ApplicationInfo` = 应用名；`ResolveInfo.loadLabel()` = 活动名。
 - ⚠️ **Kotlin 块注释可嵌套** [V]——注释里避免 `/*` 字面量。
@@ -113,15 +117,13 @@ $ ./gradlew :app:assembleRelease -x lintVital*  → BUILD SUCCESSFUL in 2m 48s�
   13 用户要的 APK 先看 `/sdcard/Download/` 14 未经许可不得操作设备（最高优先级）。
 
 ## 6. 下一步（有序）
-1. **（条件式，用户发话才做）push 两个待推提交**：`e580abd`（fix）+ `7b2a71b`（docs）。
-   全局 Git 策略禁止擅自 push。
-2. **等用户对头像选图的其他反馈**：若某些 ROM 上候选列表为空，说明 `<queries>` 未生效——
+1. **等用户对头像选图的其他反馈**：若某些 ROM 上候选列表为空，说明 `<queries>` 未生效——
    先看模块日志的 `图片选择候选 N 个` 那行（`/data/data/tools.alamobile.mod/files/ala_tool.log`，需 root）。
-3. **（待用户决定）大奖赛页的产品形态**：当前是占位文案。
-4. **（可选）VPS 清理**：`~/paddock` 已积累多个历史镜像（`1.0.1-paging`、
+2. **（待用户决定）大奖赛页的产品形态**：当前是占位文案。
+3. **（可选）VPS 清理**：`~/paddock` 已积累多个历史镜像（`1.0.1-paging`、
    `1.0.1-driverstats`、`1.0.1-recfix`、`1.0.1-sort`）+ 备份 `.tar.gz` +
    多个 `docker-compose.vps.yml.bak-*`。清理前先确认当前实跑是 `1.0.1-sort`。
-5. **（条件式，用户发话才做）发版**：先问版本号 → tag → CI。当前模块
+4. **（条件式，用户发话才做）发版**：先问版本号 → tag → CI。当前模块
    `1.0.4 Alpha 4`、服务端 `1.0.1` 均未动。
 
 ## 7. 留给用户的开放问题
