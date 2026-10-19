@@ -79,6 +79,12 @@ best_laps    (user_id, gp_index, version_code, lap_ms, updated_at,
               UNIQUE(user_id, gp_index, version_code)) -- 榜单数据源
 records      (gp_index, kind: alltime|version, version_code NULL,
               lap_ms, user_id, updated_at)             -- 全服历史/版本最佳（Toast 判定）
+hidden_missing_laps (user_id, lap_id, hidden_at,
+              PRIMARY KEY(user_id, lap_id))            -- 2026-10-20：屏蔽缺失配置记录
+              -- 按 lap_id 记（不是按赛道维度）——屏蔽是快照，只作用于点击当时
+              -- 已存在的圈；按维度记会把之后新传的缺失圈也误标成「已屏蔽」。
+              -- 积分/榜单从 best_laps 删行即自动生效（score.rs 是唯一窗口定义）；
+              -- 红标与 recalc_dims 的重算排除都按这张表判定。
 积分: 查询时按 best_laps 实时 rank 计算，或物化到 score 表（首期实时计算即可，
       16 赛道 × 用户量级小，无性能问题）
 ```
@@ -98,6 +104,34 @@ GET  /v1/me/avatar              (Bearer) → {uploaded, url}（查自己是否�
 GET  /v1/avatar/{user_id}       → 200 图片字节 | 404 无头像（公开端点）
     （2026-09-06：users.avatar_version=上传 epoch millis，榜单/ /v1/me 的 avatar_url
      带 ?v=<version>——客户端磁盘缓存失效开关；响应带 Cache-Control: immutable）
+    （2026-10-20：POST /v1/me/avatar 加 **30 天冷却**——`users.avatar_updated_at`
+     非空且未满 30 天时返回 429 + 中文剩余天数文案。⚠️ 冷却检查必须在 S3 写入
+     **之前**：先传后拒会把 Garage 对象换掉而 avatar_key 未更新，URL 版本号不变
+     却指向新内容，客户端按版本号失效的磁盘缓存会一直显示旧图。）
+
+--- 账号设置（2026-10-20 新增，`api/account.rs`）---
+
+GET  /v1/me/account             (Bearer) → {avatar_cooldown_secs, username_cooldown_secs,
+                                            hidden_missing, has_hidden_candidates}
+    账号设置页的全部状态。**冷却剩余秒数由服务端时钟算**（本机时间可被用户改，
+    客户端不自行推算"上次操作 + 30 天"）。`has_hidden_candidates` 口径 =
+    该用户榜上（best_laps）获胜圈五维配置有缺失的维度数 > 0。
+PUT  /v1/me/username            (Bearer) {username} → {username, cooldown_secs} | 409
+    ⚠️ **用户名就是登录名**（用户定案 2026-10-20）：改完必须用新名字登录，
+    旧名字因 UNIQUE 约束被释放、可被他人注册。30 天一次（`users.username_updated_at`）。
+    校验复用 `auth::validate_username`（与注册同一套规则）。
+POST /v1/me/hide-missing        (Bearer) → {hidden: 被移出榜单的维度数}
+    | 400「您没有可以屏蔽的圈速记录」| 409「您已经屏蔽过…该操作无法撤销」
+    **一次性、不可撤销**（用户定案）。语义 = 这些成绩不存在：
+    ① 把榜上获胜圈配置缺失的每个 (赛道,版本) 维度的**获胜圈 lap_id** 记进
+       `hidden_missing_laps`（快照语义）；② 删对应 `best_laps` 行；
+    ③ 从剩余圈回放重算 best_laps（**排除 hidden_missing_laps**）；
+    ④ 重算受影响赛道的 `records`（全服纪录也要让位）。
+    ⚠️ 排除依据必须是 `hidden_missing_laps` 的 lap_id，**不能**用「配置缺失」判据：
+       屏蔽是快照——之后旧版模块再上传的缺失圈照常进榜（用户定案），
+       拿配置判据当过滤器会把新圈也挡掉。
+    ⚠️ `admin::recalc_dims` 也必须带同样的排除：否则管理端任何一次编辑/删除
+       触发重算，被屏蔽的记录会被拉回榜单，不可撤销的承诺被打破。
 POST /v1/laps                   {gp_index, lap_ms, version_code,
                                  pedal_mode?, tc_mode?, tc_strength?,
                                  abs_mode?, abs_strength?}   (Bearer)
@@ -125,7 +159,9 @@ GET  /v1/driver/{user_id}?gp_index=&version=&assist=zero&best=1&sort=&limit=&off
      version_code, version_name, record_count, record_rank}；entries = laps 全量表的分页
      （不是 best_laps），每条含 lap_id / gp_index / track_name / version_code /
      version_name / lap_ms / lap_display / personal_best / pedal / tc / abs /
-     zero_assist / created（北京时间）。
+     zero_assist / created（北京时间）/ **hidden**。
+     （2026-10-20 加 `hidden`：该圈被本人「屏蔽缺失配置记录」移出了榜单 →
+     客户端显示红色「已屏蔽」标签。与 `personal_best` 互斥——屏蔽即删 best_laps 行。）
      筛选：gp_index 0..15、version=游戏 versionCode、assist=zero（TC 与 ABS 均关）、
      best=1（仅个人最佳，与榜单 best_laps 同源）。404 = 车手不存在。
 
