@@ -679,6 +679,9 @@ private const val GOLD_PERIOD_MILLIS = 2400
 /**
  * 金色流光样式：给 username / 数值两个 Text 换上带 `brush` 的 TextStyle。
  *
+ * 跨文件共用（`internal`）：车手主页的零辅助圈速金标也走这一份，避免第二份
+ * 色值/周期副本各自漂移。`LeaderboardScreen` 里是原产地，改这里两边同时生效。
+ *
  * ## 为什么用 brush 渐变而不是 `animateColor`
  *
  * 用户要的是"闪耀光泽"——一道高光**扫过**，不是整体明暗呼吸。渐变 + 相位平移
@@ -696,7 +699,7 @@ private const val GOLD_PERIOD_MILLIS = 2400
  * 不带 color 正好满足；调用处也**不要**再传 `color =`。
  */
 @Composable
-private fun goldShimmerStyle(base: TextStyle): TextStyle {
+internal fun goldShimmerStyle(base: TextStyle): TextStyle {
     val transition = rememberInfiniteTransition(label = "gold")
     val phase by transition.animateFloat(
         initialValue = 0f,

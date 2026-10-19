@@ -118,7 +118,7 @@ GET  /v1/me                      (Bearer) → {user_id, username, reg_seq, has_a
     （2026-09-01 实现：模块重进后恢复登录态展示；total_points=计时赛总积分，与积分总榜同口径
      （v39 起=各版本独立计分累加，无成绩=0）；401=token 失效→模块自动登出；
      2026-09-06 加 avatar_url=版本化头像 URL（无头像=缺省））
-GET  /v1/driver/{user_id}?gp_index=&version=&assist=zero&best=1&limit=&offset=
+GET  /v1/driver/{user_id}?gp_index=&version=&assist=zero&best=1&sort=&limit=&offset=
                                  → {profile, entries, total}（车手主页，公开端点）
     （2026-10-18 新增。profile = {user_id, username, reg_seq, avatar_url, total_points,
      total_rank, best_count, zero_count, gold, version_points, version_rank,
@@ -129,7 +129,14 @@ GET  /v1/driver/{user_id}?gp_index=&version=&assist=zero&best=1&limit=&offset=
      筛选：gp_index 0..15、version=游戏 versionCode、assist=zero（TC 与 ABS 均关）、
      best=1（仅个人最佳，与榜单 best_laps 同源）。404 = 车手不存在。
 
-     **2026-10-19 扩展（车手主页三页改版）**：
+     **2026-10-19 扩展（车手主页三页改版 + 排序）**：
+     - **`sort` 排序方式**（2026-10-19 新增，四选一）：
+       `time_desc`（缺省）= `created_at DESC` / `time_asc` = `created_at ASC` /
+       `lap_desc` = `lap_ms DESC`（慢的在前）/ `lap_asc` = `lap_ms ASC`（快的在前）。
+       **未知值回落 `time_desc`**（前向兼容：新版客户端传新值、旧版服务端不报错）。
+       命名跟数值方向而非"好坏"：`lap_asc` 是毫秒数升序 = 圈速快的在前。
+       ⚠️ 四个分支都必须带 `l.id` 兜底键且方向与主键一致——排序键有重复值时
+       （同秒上传、同毫秒圈速）LIMIT/OFFSET 跨页会重复或漏项。
      - `total_rank` / `version_rank` / `record_rank` 均为 **`Option<i64>`**（无成绩 = JSON
        `null`，**不是 0**）。名次语义 = **榜单行号**，用 `row_number()` 而非 `rank()`
        ——后者同分并列会跳号（1,1,3），主页就会显示"第 2 名"而榜单里他在第 3 行。

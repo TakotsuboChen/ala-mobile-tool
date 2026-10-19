@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -32,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.EmojiEvents
+import androidx.compose.material.icons.rounded.FilterAlt
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.runtime.Composable
@@ -50,10 +53,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -69,7 +75,9 @@ import tools.alamobile.mod.ui.util.BlurredBar
 import tools.alamobile.mod.ui.util.rememberBlurBackdrop
 import tools.alamobile.mod.util.Logger
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.DropdownItem
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.NavigationBar
@@ -78,8 +86,11 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
+import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.OverlaySpinnerPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -144,6 +155,8 @@ fun DriverScreen(userId: String) {
     var selectedVersion by remember { mutableIntStateOf(0) } // 0=全部，1..2 → VERSION_CODES
     var zeroOnly by remember { mutableStateOf(false) }
     var bestOnly by remember { mutableStateOf(false) }
+    // 排序方式（0..3 → SORT_KEYS）；默认 0 = 时间降序，与服务端缺省行为一致。
+    var sortIndex by remember { mutableIntStateOf(0) }
 
     val VERSION_CODES = arrayOf(tools.alamobile.mod.offsets.OffsetTable.PADDOCK_VERSION_CODE, 200146)
 
@@ -167,8 +180,9 @@ fun DriverScreen(userId: String) {
         enterSettled = true
     }
 
-    // 首屏 + 筛选变更：重置列表并拉第一页。
-    LaunchedEffect(selectedTrack, selectedVersion, zeroOnly, bestOnly) {
+    // 首屏 + 筛选/排序变更：重置列表并拉第一页。
+    // ⚠️ `sortIndex` 必须在 key 里：排序变了等同换了一套查询，旧列表整体作废。
+    LaunchedEffect(selectedTrack, selectedVersion, zeroOnly, bestOnly, sortIndex) {
         filterEpoch++
         val epoch = filterEpoch
         loading = true
@@ -190,6 +204,7 @@ fun DriverScreen(userId: String) {
                 version = if (selectedVersion == 0) null else VERSION_CODES.getOrNull(selectedVersion - 1),
                 zeroAssistOnly = zeroOnly,
                 bestOnly = bestOnly,
+                sort = SORT_KEYS.getOrNull(sortIndex),
                 limit = PaddockClient.PAGE_SIZE,
                 offset = 0,
             )
@@ -234,6 +249,15 @@ fun DriverScreen(userId: String) {
             .collect {
                 if (busy) return@collect
                 busy = true
+                // ⚠️ **`loadingMore` 必须用 try/finally 复位**（2026-10-19 实机修复：
+                //    "记录不足 30 条时最后一条下方持续显示加载中…"）：
+                //    置 true 后请求在 `withContext(Dispatchers.IO)` 挂起，此时若 effect
+                //    的 key（filterEpoch / tab / entries.size / total）变化，Compose 会
+                //    **取消整个协程** ⇒ `loadingMore = false` 那行永远执行不到。
+                //    而新启动的 effect 因为 `entries.size >= total` 立即 return，
+                //    再没人复位 ⇒ 底部永久卡在"加载中…"。
+                //    记录多时新 effect 会继续翻页、状态被复用所以看不出来；
+                //    记录少于 PAGE_SIZE(30) 时必然暴露。try/finally 在取消时同样执行。
                 loadingMore = true
                 val epoch = filterEpoch
                 val offset = entries.size
@@ -245,30 +269,35 @@ fun DriverScreen(userId: String) {
                 //    只打 offset 拿到日志也分不清是哪一条。
                 Logger.i(
                     TAG_DRIVER,
-                    "load more: offset=$offset total=$total " +
+                    "load more: offset=$offset total=$total sort=${SORT_KEYS.getOrNull(sortIndex)} " +
                         "track=$selectedTrack ver=$selectedVersion zero=$zeroOnly best=$bestOnly",
                 )
-                val page = withContext(Dispatchers.IO) {
-                    PaddockClient.fetchDriverPage(
-                        userId = userId,
-                        gpIndex = if (selectedTrack == 0) null else selectedTrack - 1,
-                        version = if (selectedVersion == 0) null else VERSION_CODES.getOrNull(selectedVersion - 1),
-                        zeroAssistOnly = zeroOnly,
-                        bestOnly = bestOnly,
-                        limit = PaddockClient.PAGE_SIZE,
-                        offset = offset,
-                    )
-                }
-                if (epoch == filterEpoch && page.ok) {
-                    // 空页 = 服务端已无更多（total 与实际行数不一致时的兜底），
-                    // 用"把 total 压到当前条数"表达"到底"，避免无限请求。
-                    if (page.entries.isEmpty()) total = entries.size else {
-                        entries = entries + page.entries
-                        total = page.total
+                try {
+                    val page = withContext(Dispatchers.IO) {
+                        PaddockClient.fetchDriverPage(
+                            userId = userId,
+                            gpIndex = if (selectedTrack == 0) null else selectedTrack - 1,
+                            version = if (selectedVersion == 0) null else VERSION_CODES.getOrNull(selectedVersion - 1),
+                            zeroAssistOnly = zeroOnly,
+                            bestOnly = bestOnly,
+                            sort = SORT_KEYS.getOrNull(sortIndex),
+                            limit = PaddockClient.PAGE_SIZE,
+                            offset = offset,
+                        )
                     }
+                    if (epoch == filterEpoch && page.ok) {
+                        // 空页 = 服务端已无更多（total 与实际行数不一致时的兜底），
+                        // 用"把 total 压到当前条数"表达"到底"，避免无限请求。
+                        if (page.entries.isEmpty()) total = entries.size else {
+                            entries = entries + page.entries
+                            total = page.total
+                        }
+                    }
+                } finally {
+                    // 协程被取消时也执行（CancellationException 穿透 finally 后继续传播）。
+                    loadingMore = false
+                    busy = false
                 }
-                loadingMore = false
-                busy = false
             }
     }
 
@@ -345,10 +374,14 @@ fun DriverScreen(userId: String) {
                         selectedVersion = selectedVersion,
                         zeroOnly = zeroOnly,
                         bestOnly = bestOnly,
-                        onTrack = { selectedTrack = it },
-                        onVersion = { selectedVersion = it },
-                        onZeroOnly = { zeroOnly = it },
-                        onBestOnly = { bestOnly = it },
+                        sortIndex = sortIndex,
+                        onApplyFilter = { track, version, zero, best, sort ->
+                            selectedTrack = track
+                            selectedVersion = version
+                            zeroOnly = zero
+                            bestOnly = best
+                            sortIndex = sort
+                        },
                     )
                     DRIVER_TAB_GRAND_PRIX -> GrandPrixPlaceholder(innerPadding)
                     else -> OverviewTab(
@@ -732,9 +765,19 @@ private fun countText(count: Long): String = if (count > 0) "$count" else "暂�
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * 计时赛页：四维筛选卡（固定在滚动区外）+ 全量圈速记录（分页）。
+ * 计时赛页：筛选入口卡 + 全量圈速记录（分页）。
  *
- * 筛选卡钉在滚动区之外的理由与排行榜页相同：下拉刷新/滚动时筛选控件不随内容移动。
+ * **筛选改为「入口卡 + 弹窗」**（2026-10-19 用户定案）：原来四维控件直接铺在页首，
+ * 占掉近半屏且随页面滚动时挡视线。现在页首只有一张「筛选条件」卡（漏斗图标 +
+ * 右侧箭头），点开才在弹窗里改条件，点「确认」才生效。
+ *
+ * ⚠️ **筛选卡随列表滚动，不固定**（用户 2026-10-19 定案）：排行榜那种钉在滚动区
+ *    之外的做法在这里不需要——筛选已收进弹窗，页首只剩一张入口卡，随内容滚走
+ *    反而给列表让出更多可视高度。
+ *
+ * ⚠️ **弹窗内是草稿态**：打开时把当前筛选拷进局部 state，只有点「确认」才回调
+ *    [onApplyFilter] 写回全局。点「取消」/点窗外 = 草稿丢弃，列表不变。
+ *    直接改全局会让用户滑一下 spinner 就触发一次重新请求。
  */
 @Composable
 private fun TimetrialTab(
@@ -753,60 +796,31 @@ private fun TimetrialTab(
     selectedVersion: Int,
     zeroOnly: Boolean,
     bestOnly: Boolean,
-    onTrack: (Int) -> Unit,
-    onVersion: (Int) -> Unit,
-    onZeroOnly: (Boolean) -> Unit,
-    onBestOnly: (Boolean) -> Unit,
+    sortIndex: Int,
+    onApplyFilter: (track: Int, version: Int, zero: Boolean, best: Boolean, sort: Int) -> Unit,
 ) {
-    Column {
-        // ── 筛选卡（固定在滚动区之外，同排行榜页的筛选卡位置）──
-        Column(
-            modifier = Modifier
-                .padding(top = innerPadding.calculateTopPadding())
-                .padding(horizontal = 12.dp),
-        ) {
-            Column(
-                modifier = Modifier.padding(vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    OverlaySpinnerPreference(
-                        items = remember {
-                            listOf(DropdownItem(text = "全部")) +
-                                TRACK_NAMES.map { DropdownItem(text = it) }
-                        },
-                        selectedIndex = selectedTrack,
-                        title = "赛道",
-                        onSelectedIndexChange = onTrack,
-                    )
-                    OverlaySpinnerPreference(
-                        items = remember {
-                            listOf(
-                                DropdownItem(text = "全部"),
-                                DropdownItem(text = "8.0.6"),
-                                DropdownItem(text = "8.0.4"),
-                            )
-                        },
-                        selectedIndex = selectedVersion,
-                        title = "版本",
-                        onSelectedIndexChange = onVersion,
-                    )
-                    SwitchPreference(
-                        checked = zeroOnly,
-                        onCheckedChange = onZeroOnly,
-                        title = "仅零辅助",
-                        summary = "TC 与 ABS 均为关",
-                    )
-                    SwitchPreference(
-                        checked = bestOnly,
-                        onCheckedChange = onBestOnly,
-                        title = "仅个人最佳",
-                        summary = "每个赛道版本只显示最快那一圈",
-                    )
-                }
-            }
-        }
-        // ── 圈速记录 ──
+    // 弹窗双变量：`filterMounted` 管组合树挂载，`filterShow` 驱动显示参数。
+    // 单变量会让退出动画被跳过（弹窗瞬间消失）——项目弹窗铁律，见 CLAUDE.md。
+    var filterMounted by remember { mutableStateOf(false) }
+    var filterShow by remember { mutableStateOf(false) }
+    // 草稿态：弹窗打开时从当前筛选快照一份，确认才写回。
+    var draftTrack by remember { mutableIntStateOf(selectedTrack) }
+    var draftVersion by remember { mutableIntStateOf(selectedVersion) }
+    var draftZero by remember { mutableStateOf(zeroOnly) }
+    var draftBest by remember { mutableStateOf(bestOnly) }
+    var draftSort by remember { mutableIntStateOf(sortIndex) }
+
+    fun openFilterDialog() {
+        draftTrack = selectedTrack
+        draftVersion = selectedVersion
+        draftZero = zeroOnly
+        draftBest = bestOnly
+        draftSort = sortIndex
+        filterMounted = true
+        filterShow = true
+    }
+
+    Box {
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -814,12 +828,32 @@ private fun TimetrialTab(
                 .scrollEndHaptic()
                 .overScrollVertical()
                 .nestedScroll(scrollBehavior.nestedScrollConnection)
-                .padding(horizontal = 12.dp)
-                // 视口顶缘圆角裁切（同排行榜页：行滚出时顶边保持圆角）
-                .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)),
-            contentPadding = PaddingValues(bottom = innerPadding.calculateBottomPadding()),
+                .padding(horizontal = 12.dp),
+            contentPadding = PaddingValues(
+                top = innerPadding.calculateTopPadding(),
+                bottom = innerPadding.calculateBottomPadding(),
+            ),
             overscrollEffect = null,
         ) {
+            // ── 筛选入口卡（随列表滚动，2026-10-19 用户定案不固定）──
+            item(key = "filter-entry") {
+                Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        ArrowPreference(
+                            title = "筛选条件",
+                            startAction = {
+                                Icon(
+                                    imageVector = Icons.Rounded.FilterAlt,
+                                    modifier = Modifier.padding(end = 6.dp),
+                                    contentDescription = null,
+                                    tint = colorScheme.onBackground,
+                                )
+                            },
+                            onClick = { openFilterDialog() },
+                        )
+                    }
+                }
+            }
             if (!enterSettled || (loading && !everLoaded)) {
                 item(key = "loading") {
                     Text(
@@ -856,9 +890,10 @@ private fun TimetrialTab(
                 }
             } else {
                 itemsIndexed(entries, key = { _, e -> e.lapId }) { i, e ->
-                    LapRow(e, rowShape = boardRowShape(i, entries.size))
+                    // 分隔线挂在**第 2 行及之后**（首行上方是筛选卡，多一条线没有意义）。
+                    LapRow(e, rowShape = boardRowShape(i, entries.size), showDivider = i > 0)
                 }
-                if (loadingMore) {
+                if (loadingMore && entries.size < total) {
                     item(key = "more") {
                         Text(
                             "加载中…",
@@ -874,79 +909,291 @@ private fun TimetrialTab(
                 item(key = "footer-space") { Spacer(Modifier.height(12.dp)) }
             }
         }
+        if (filterMounted) {
+            FilterDialog(
+                show = filterShow,
+                track = draftTrack,
+                version = draftVersion,
+                zeroOnly = draftZero,
+                bestOnly = draftBest,
+                sortIndex = draftSort,
+                onTrack = { draftTrack = it },
+                onVersion = { draftVersion = it },
+                onZeroOnly = { draftZero = it },
+                onBestOnly = { draftBest = it },
+                onSort = { draftSort = it },
+                onCancel = { filterShow = false },
+                onConfirm = {
+                    onApplyFilter(draftTrack, draftVersion, draftZero, draftBest, draftSort)
+                    filterShow = false
+                },
+                onDismissFinished = { filterMounted = false },
+            )
+        }
     }
 }
 
 /**
- * 一行圈速记录：赛道名（+「最佳」标记）…… 圈速，下方小字显示版本/时间/辅助配置。
+ * 筛选条件弹窗：赛道 / 版本 / 仅零辅助 / 仅个人最佳 / 排序方式。
  *
- * 为什么两行：赛道名 + 圈速是"扫读"信息（一眼看成绩），版本/时间/辅助配置是
- * "判断含金量"的信息（零辅助的圈更值钱），挤一行会把赛道名截成无意义前缀。
+ * 左「取消」（灰）右「确认」（蓝），与项目其余确认弹窗一致。
+ * `onDismissRequest` 走取消语义——点窗外等同放弃草稿。
  */
 @Composable
-private fun LapRow(e: PaddockClient.DriverLap, rowShape: Shape) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(color = colorScheme.surfaceContainer, shape = rowShape)
-            .padding(horizontal = 16.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+private fun FilterDialog(
+    show: Boolean,
+    track: Int,
+    version: Int,
+    zeroOnly: Boolean,
+    bestOnly: Boolean,
+    sortIndex: Int,
+    onTrack: (Int) -> Unit,
+    onVersion: (Int) -> Unit,
+    onZeroOnly: (Boolean) -> Unit,
+    onBestOnly: (Boolean) -> Unit,
+    onSort: (Int) -> Unit,
+    onCancel: () -> Unit,
+    onConfirm: () -> Unit,
+    onDismissFinished: () -> Unit,
+) {
+    OverlayDialog(
+        show = show,
+        title = "筛选条件",
+        onDismissRequest = onCancel,
+        onDismissFinished = onDismissFinished,
+        content = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(
-                    text = e.trackName,
-                    fontSize = 15.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
+                // ⚠️ 弹窗里的 spinner 必须 `renderInRootScaffold = false`：
+                //    弹窗内容本身挂在 DialogLayout 里，默认值会让下拉菜单渲染到
+                //    **根 Scaffold** 而非弹窗层，菜单被弹窗遮住或位置错位。
+                //    项目内暂无弹窗内 spinner 先例，这是按 miuix 参数语义取的稳妥值。
+                OverlaySpinnerPreference(
+                    items = remember {
+                        listOf(DropdownItem(text = "全部")) +
+                            TRACK_NAMES.map { DropdownItem(text = it) }
+                    },
+                    selectedIndex = track,
+                    title = "赛道",
+                    onSelectedIndexChange = onTrack,
+                    renderInRootScaffold = false,
                 )
-                if (e.personalBest) {
-                    Text(
-                        text = "最佳",
-                        fontSize = 11.sp,
-                        color = colorScheme.onBackground.copy(alpha = 0.55f),
+                OverlaySpinnerPreference(
+                    items = remember {
+                        listOf(
+                            DropdownItem(text = "全部"),
+                            DropdownItem(text = "8.0.6"),
+                            DropdownItem(text = "8.0.4"),
+                        )
+                    },
+                    selectedIndex = version,
+                    title = "版本",
+                    onSelectedIndexChange = onVersion,
+                    renderInRootScaffold = false,
+                )
+                // 两个开关**不带 summary**（用户 2026-10-19 定案：描述删掉）。
+                SwitchPreference(
+                    checked = zeroOnly,
+                    onCheckedChange = onZeroOnly,
+                    title = "仅零辅助",
+                )
+                SwitchPreference(
+                    checked = bestOnly,
+                    onCheckedChange = onBestOnly,
+                    title = "仅个人最佳",
+                )
+                OverlaySpinnerPreference(
+                    items = remember { SORT_LABELS.map { DropdownItem(text = it) } },
+                    selectedIndex = sortIndex,
+                    title = "排序方式",
+                    onSelectedIndexChange = onSort,
+                    renderInRootScaffold = false,
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    TextButton(
+                        text = "取消",
+                        onClick = onCancel,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(20.dp))
+                    TextButton(
+                        text = "确认",
+                        onClick = onConfirm,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.textButtonColorsPrimary(),
                     )
                 }
             }
+        },
+    )
+}
+
+/**
+ * 一行圈速记录，**三行**（2026-10-19 用户定案改版）：
+ *
+ * ```
+ * 🇮🇹 蒙扎国家赛车场  最佳                    1:11.189   ← 赛道名 + 圈速同行
+ * 时间：2026-10-06  21:24   版本：8.0.6                 ← 间隔 2 字符（日期/时分再×2）
+ * 踏板模式：双踏板  TC：关  ABS：关                        ← 间隔 2 字符
+ * ```
+ *
+ * 为什么这样排：
+ * - **圈速与赛道名同行**：圈速是扫读信息，和赛道名一起构成"一眼看成绩"的第一行；
+ *   旧实现把圈速放在右侧并垂直居中，视觉上落在两行之间、左缘贴着详情行，
+ *   既读不出层级也让详情被挤成半宽。
+ * - **详情占满卡片宽度**：旧实现详情在 `Column(weight(1f))` 里，右侧被圈速列
+ *   永久吃掉一截；三行结构下圈速已上移，详情不再有横向对手。
+ * - **详情用「间隔 2 字符」而非等分栏**（2026-10-19 用户第三次定案，推翻了
+ *   上一版的 0、1/2、1/3 固定分栏）：等分栏在窄屏上会给「时间」这种长字段
+ *   挤出省略号，而「版本：8.0.6」却留一大片空白；按内容流式排列 + 固定字符
+ *   间隔，信息密度与可读性都更好。字符间隔用 `Spacer(Modifier.width(...))`
+ *   按**正文实测字宽**计算，不写死 dp——字号/字体一变就自动跟着变。
+ */
+@Composable
+private fun LapRow(e: PaddockClient.DriverLap, rowShape: Shape, showDivider: Boolean = false) {
+    // 详情行的字符间隔宽度：2 个数字的实测宽度。
+    // 用 TextMeasurer 而非写死 dp，是因为 12sp 在用户调过系统字号/字体后会变，
+    // 而"间隔 2 个字符"的语义必须锚在字符上（同 `letterSpacing` 的动机）。
+    // ⚠️ 必须 `toDp()` 换算——`TextLayoutResult.size.width` 是**像素**，
+    //    直接 `.dp` 会把像素数当成 dp 值（在 3x 屏上间隔变成 3 倍）。
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    // ⚠️ 样式必须在 `remember` 之外取：`MiuixTheme.textStyles` 是 @Composable 属性，
+    //    在 remember 的非组合 lambda 里读会编译失败。
+    val detailStyle = MiuixTheme.textStyles.main.copy(fontSize = 12.sp)
+    val charGap = remember(measurer, density, detailStyle) {
+        val w = measurer.measure(
+            text = "00",
+            style = detailStyle,
+            softWrap = false,
+        ).size.width
+        with(density) { w.toDp() }
+    }
+    // 金色流光样式：只对零辅助圈求值（普通圈以 null 传入 → 完全走原样式，零开销）。
+    // ⚠️ 与排行榜同一条红线：**不能再传 `color =`**——miuix Text 的 color 会覆盖
+    //    brush，金光直接消失（见 LeaderboardScreen.goldShimmerStyle 注释）。
+    val goldStyle = if (e.zeroAssist) goldShimmerStyle(MiuixTheme.textStyles.main) else null
+    Column(
+        // 背景色在**外层**、分隔线在背景之内：若把 divider 放到背景之外，它会落在
+        // 页面底色上、与卡片色断开，视觉上像"卡片之间有条缝"而不是"卡片内分行"。
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(color = colorScheme.surfaceContainer, shape = rowShape),
+    ) {
+        // 相邻记录之间的分隔线（首行不画——上方是筛选卡，画了会多出一条无意义的线）。
+        // 左右 16dp 缩进 = 正文左缘，让分隔线只横跨内容区、不贴卡片边。
+        // 用 miuix `HorizontalDivider`（默认 `dividerLine` 色 + 0.75dp），
+        // 不手写 Canvas——主题色随深浅模式自动切。
+        if (showDivider) {
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 9.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            // ── 第 1 行：赛道名（+「最佳」）…… 圈速 ──
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                // 左侧分组整体吃满剩余宽度（weight 在外层），圈速因此恒贴右缘；
+                // 「最佳」在组内紧跟赛道名（内层 Text 用 fill=false 只占自身宽度）。
+                // ⚠️ 不要把 weight 放在赛道名上再补一个 Spacer(weight)：两个加权项
+                //    各分一半，赛道名短时那一半不会回收，圈速会被推到卡片中间而非右缘。
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = e.trackName,
+                        fontSize = 15.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (e.personalBest) {
+                        Text(
+                            text = "最佳",
+                            fontSize = 11.sp,
+                            // 蓝色取主题 primary（light 0xFF3482FF / dark 0xFF277AF7），
+                            // 不硬编码——深色模式下同一个蓝仍可读。
+                            color = colorScheme.primary,
+                        )
+                    }
+                }
+                Text(
+                    text = e.lapDisplay,
+                    fontSize = 15.sp,
+                    // 圈速列等宽（与排行榜同理由：右对齐后秒数位要对得上）。
+                    // 零辅助圈速走金色流光，与排行榜金标同一份实现（见 goldShimmerStyle）。
+                    style = (goldStyle ?: MiuixTheme.textStyles.main).merge(DriverTabularDigits),
+                    // ⚠️ 金标时**必须**是 Unspecified：传任何具体色都会覆盖 style 里的 brush，
+                    //    表现为"纯静态金色"（2026-10-19 用户报的正是这个 bug）。
+                    color = if (e.zeroAssist) Color.Unspecified else colorScheme.onBackground,
+                )
+            }
+            // ── 第 2 行：时间 / 版本（间隔 2 字符）──
+            // 日期与时分之间再拉开一倍（服务端格式是 `YYYY-MM-DD HH:MM`，恰好一个空格）：
+            // 单空格在 12sp 下只有 3dp 左右，日期和时间糊成一串数字，扫读时分不出来。
+            DetailRow(
+                cells = listOf("时间：${e.created.replace(" ", "  ")}", "版本：${e.versionName}"),
+                gap = charGap,
+            )
+            // ── 第 3 行：踏板 / TC / ABS（间隔 2 字符）──
+            DetailRow(
+                cells = listOf(
+                    "踏板模式：${assistValue(e.pedal)}",
+                    "TC：${assistValue(e.tc)}",
+                    "ABS：${assistValue(e.abs)}",
+                ),
+                gap = charGap,
+            )
+        }
+    }
+}
+
+/**
+ * 详情行：单元格之间固定间隔 [gap]，整体铺满卡片宽度。
+ *
+ * 缺失维**照常渲染为「缺失」**（用户 2026-10-19 定案）——早期实现直接跳过不渲染，
+ * 但那样会让"旧记录没报配置"和"配置恰好正常"在视觉上无法区分；显式写出「缺失」
+ * 才能让人知道这圈是数据不全，而不是辅助全默认。
+ */
+@Composable
+private fun DetailRow(cells: List<String>, gap: Dp) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        cells.forEachIndexed { i, cell ->
+            if (i > 0) Spacer(Modifier.width(gap))
             Text(
-                text = buildString {
-                    append(e.versionName)
-                    append(" · ")
-                    append(e.created)
-                    // "缺失"（旧记录/旧版模块没报配置）不展示，避免每行都拖一串"缺失"
-                    if (e.pedal.isNotEmpty() && e.pedal != "缺失") {
-                        append(" · ")
-                        append(e.pedal)
-                    }
-                    if (e.tc.isNotEmpty() && e.tc != "缺失") {
-                        append(" · TC ")
-                        append(e.tc)
-                    }
-                    if (e.abs.isNotEmpty() && e.abs != "缺失") {
-                        append(" · ABS ")
-                        append(e.abs)
-                    }
-                },
+                text = cell,
                 fontSize = 12.sp,
                 color = colorScheme.onBackground.copy(alpha = 0.5f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Text(
-            text = e.lapDisplay,
-            fontSize = 15.sp,
-            // 圈速列等宽（与排行榜同理由：右对齐后秒数位要对得上）。
-            style = MiuixTheme.textStyles.main.merge(DriverTabularDigits),
-            color = if (e.zeroAssist) Color(0xFFDAA520) else colorScheme.onBackground,
-        )
     }
 }
+
+/**
+ * 辅助配置的展示值：缺失维**显式显示「缺失」**（用户 2026-10-19 定案）。
+ *
+ * 服务端对缺失维返回的就是字面量 `"缺失"`（`token_label` 的空 token 分支），
+ * 这里只需把空串也归一成同一个词——两套"缺失"写法会让同一张卡片出现
+ * 空值和「缺失」两种表现。
+ */
+private fun assistValue(value: String): String =
+    if (value.isEmpty()) "缺失" else value
 
 /**
  * 圈速列的等宽数字样式（只开 OpenType `tnum`）。
@@ -975,6 +1222,13 @@ private const val DRIVER_TAB_GRAND_PRIX = 2
 
 /** 底栏页数（pager 的 pageCount）。 */
 private const val DRIVER_TAB_COUNT = 3
+
+// ── 排序方式 ──
+// 下标 = 对话框里 spinner 的序号；值 = 服务端 `sort` 参数（见 docs/PADDOCK_PLAN.md）。
+// ⚠️ 默认 0 = 时间降序，与服务端缺省一致：两处若不一致，用户没动过排序也会
+//    在首屏看到与服务端默认不同的次序（客户端传 time_desc 只是显式化了同一件事）。
+private val SORT_LABELS = listOf("时间降序", "时间升序", "圈速降序", "圈速升序")
+private val SORT_KEYS = listOf("time_desc", "time_asc", "lap_desc", "lap_asc")
 
 /**
  * 车手主页底栏三项。

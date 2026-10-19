@@ -1143,6 +1143,7 @@ object PaddockClient {
         version: Int? = null,
         zeroAssistOnly: Boolean = false,
         bestOnly: Boolean = false,
+        sort: String? = null,
         limit: Int = PAGE_SIZE,
         offset: Int = 0,
     ): DriverPage {
@@ -1153,6 +1154,8 @@ object PaddockClient {
                 if (version != null) append("&version=").append(version)
                 if (zeroAssistOnly) append("&assist=zero")
                 if (bestOnly) append("&best=1")
+                // 缺省不传 = 服务端默认 time_desc，与改动前行为逐字一致。
+                if (!sort.isNullOrEmpty()) append("&sort=").append(sort)
             }
             val url = "$serverBase/v1/driver/$userId$q"
             Logger.log(Log.INFO, TAG, "fetchDriverPage: GET $url")
