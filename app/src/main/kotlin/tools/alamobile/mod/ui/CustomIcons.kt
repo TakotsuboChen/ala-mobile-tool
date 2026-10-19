@@ -398,6 +398,26 @@ val SteeringWheelIcon: ImageVector = svgIconMulti(
     viewportOriginY = 1f
 )
 
+// ── 车手主页底栏 icon：计时赛（秒表） ───
+// 用户 2026-10-19 提供的 `Time Trial.svg`，viewBox `13.9 6.4 85.7 95.6`。
+// ⚠️ 该 viewBox **同时踩中两个坑**（见 svgIconMulti 的注释）：
+//   ① 非零原点（13.9, 6.4）→ 必须走 viewportOriginX/Y，否则左上被裁；
+//   ② 非正方形（85.7 × 95.6，比例 0.896:1）→ intrinsic 尺寸必须同比例，
+//      否则非等比拉伸。这里取 24×26.77（24 / 0.896 = 26.78，保留两位）。
+// path 数据**逐字符搬运**，只归一空白——不做任何坐标改写。
+val TimeTrialIcon: ImageVector = svgIconMulti(
+    "TimeTrialIcon", 85.7f, 95.6f,
+    listOf(
+        SvgPath(
+            d = "M94.4,33.4l5.2-5.2L87.4,16.1l-5.2,5.2C87,24.5,91.1,28.6,94.4,33.4z M46.8,14.9c2.8-0.6,5.6-0.9,8.6-0.9 c2.9,0,5.8,0.3,8.6,0.9v-3.1h2.4V6.4H44.3v5.3h2.4L46.8,14.9L46.8,14.9z M55.4,19c-22.9,0-41.5,18.6-41.5,41.5S32.4,102,55.4,102 s41.5-18.6,41.5-41.5C96.8,37.6,78.3,19,55.4,19z M55.4,60.6V29.2c17.4,0,31.4,14.1,31.4,31.4H55.4z"
+        ),
+    ),
+    defaultWidth = 24.dp,
+    defaultHeight = 26.78.dp,
+    viewportOriginX = 13.9f,
+    viewportOriginY = 6.4f,
+)
+
 // ── 围场（Paddock）底栏 icon：挥舞方格旗 ───
 // 用户提供 SVG（100×100 viewBox，单 path fill），path 数据原样搬运。
 val ChequeredFlagIcon: ImageVector = svgIconMulti(

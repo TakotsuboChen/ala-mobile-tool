@@ -14,8 +14,10 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.add
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -23,17 +25,22 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -49,10 +56,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import tools.alamobile.mod.PaddockClient
 import tools.alamobile.mod.ui.navigation3.LocalNavigator
@@ -64,7 +74,10 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
+import top.yukonga.miuix.kmp.basic.NavigationBar
+import top.yukonga.miuix.kmp.basic.NavigationBarItem
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
@@ -76,11 +89,16 @@ import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
 /**
- * 车手主页（2026-10-18）：资料卡 + 全量圈速记录（分页 + 四维筛选）。
+ * 车手主页（2026-10-19 改版）：资料卡 + 三个底栏页（概览 / 计时赛 / 大奖赛）。
  *
  * ## 入口
  * - 围场主页信息卡（整卡可点，右侧指引箭头）
  * - 计时赛排行榜任意一行
+ *
+ * ## 三页分工（用户 2026-10-19 定案）
+ * - **概览**：资料卡（头像/用户名/车手号）+ 个人计时赛成绩卡（两列 × 三组）
+ * - **计时赛**：全量圈速记录（分页 + 四维筛选）
+ * - **大奖赛**：开发中占位（点击 Toast「开发中，敬请期待！」）
  *
  * ## 分页（用户定案：一次最多 30 条）
  * 滚到接近底部时自动拉下一页；`total` 来自服务端，`entries.size >= total` 即到底。
@@ -90,15 +108,37 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
  *
  * ⚠️ **分页游标用 `entries.size`**，不用页码：服务端按 `created_at DESC, lap_id DESC`
  *    稳定排序，条数即偏移量；用页码在"筛选后总数不足整页"时会算错。
+ *
+ * ⚠️ **底栏切页不销毁数据状态**：三个页共用同一份 `entries`/`profile`，切到
+ *    大奖赛再切回来不重新请求。分页 effect 只在 `tab == 计时赛` 时武装。
  */
 @Composable
 fun DriverScreen(userId: String) {
     val navigator = LocalNavigator.current
     val scrollBehavior = MiuixScrollBehavior()
     val enableBlur = LocalEnableBlur.current
+    // ⚠️ 顶栏与底栏**共用同一个 backdrop 是安全的**（2026-10-19 查证）：
+    //    `BlurredBar` 走 `textureBlur`，它只**读** backdrop（把 backdrop 内容录进
+    //    自己每次绘制的离屏 layer），不写 `backdrop.graphicsLayer`。真正会冲突的是
+    //    **两处 `layerBackdrop`**——那才共用同一个 graphicsLayer 录制通道。
+    //    本页只有内容层一处 `layerBackdrop`（下面 Column），故单实例正确。
     val backdrop = rememberBlurBackdrop(enableBlur)
     val blurActive = backdrop != null
     val barColor = if (blurActive) Color.Transparent else colorScheme.surface
+    val context = LocalContext.current
+    // 底栏点击切页用（animateScrollToPage 是 suspend）。
+    val scope = rememberCoroutineScope()
+
+    // ── 三页 pager（0=概览 1=计时赛 2=大奖赛）──
+    // 2026-10-19：从 `when(tab)` 静态切换改为 HorizontalPager，支持左右滑动。
+    // `tab` 不再是独立 state，而是**从 pagerState.settledPage 派生**——
+    // 两份 state 会漂移（滑到某页但底栏高亮旧页），单一事实源必须是 pager。
+    val pagerState = rememberPagerState(initialPage = DRIVER_TAB_OVERVIEW) { DRIVER_TAB_COUNT }
+    val tab = pagerState.currentPage
+
+    // 分页 effect 的 key 需要"当前是否在计时赛页"，用派生值参与 key。
+    // ⚠️ 用 `currentPage` 而非 `settledPage`：滑动过半即算切换，分页逻辑
+    //    在动画结束前就该武装好，避免用户滑到位后还要等一次重组。
 
     // ── 筛选状态（0 = 全部）──
     var selectedTrack by remember { mutableIntStateOf(0) }   // 0=全部，1..16 → 赛道 0..15
@@ -136,7 +176,14 @@ fun DriverScreen(userId: String) {
         errorText = ""
         entries = emptyList()
         total = 0
-        listState.scrollToItem(0)
+        // ⚠️ **这里绝不能调 `listState.scrollToItem(0)`**（2026-10-19 实机修复）：
+        //    它是 **suspend** 函数，会挂起直到 LazyColumn 完成测量。而车手主页的
+        //    默认页是「概览」——那个 LazyColumn 根本没挂这个 `listState`（只有计时赛页
+        //    的列表用它）⇒ 协程卡死在 scrollToItem，后面的请求代码永远执行不到，
+        //    表现为「概览一直显示加载中，切到计时赛再切回来才加载出来」
+        //    （切页时列表挂上 → 挂起解除 → 请求才发出）。
+        //    也不需要手动归零：`entries = emptyList()` 已让列表项数变 0，
+        //    Compose 会自动把滚动位置 clamp 回顶部。
         val page = withContext(Dispatchers.IO) {
             PaddockClient.fetchDriverPage(
                 userId = userId,
@@ -165,7 +212,11 @@ fun DriverScreen(userId: String) {
     // ⚠️ **`loadingMore` 绝不能放进 key**：在 effect 内把它置 true 会触发重组 →
     //    key 变化 → Compose 取消**当前正在跑的这个协程** → `loadingMore = false`
     //    永不执行 → 底部永远卡在"加载中…"且不再翻页。改用协程内局部变量守卫。
-    LaunchedEffect(filterEpoch, entries.size, total, loading) {
+    //
+    // ⚠️ **`tab` 必须在 key 里**：不在计时赛页时不武装（否则在概览页也会因为
+    //    listState 布局为 0 而误判"滚到底"）。切回计时赛时 key 变化 → 重新武装。
+    LaunchedEffect(filterEpoch, entries.size, total, loading, tab) {
+        if (tab != DRIVER_TAB_TIMETRIAL) return@LaunchedEffect
         if (!everLoaded || loading) return@LaunchedEffect
         if (entries.size >= total) return@LaunchedEffect   // 已到底
         var busy = false
@@ -226,7 +277,10 @@ fun DriverScreen(userId: String) {
         topBar = {
             BlurredBar(backdrop) {
                 TopAppBar(
-                    title = profile?.username ?: "车手主页",
+                    // ⚠️ 标题恒为「车手主页」，**不用用户名**（用户 2026-10-19 定案）：
+                    //    用户名已经在资料卡里以粗体显示，标题再放一遍是重复信息，
+                    //    且长昵称会把标题栏挤成省略号。
+                    title = "车手主页",
                     color = barColor,
                     scrollBehavior = scrollBehavior,
                     navigationIcon = {
@@ -241,124 +295,75 @@ fun DriverScreen(userId: String) {
                 )
             }
         },
-        popupHost = { },
-        contentWindowInsets = WindowInsets.systemBars.add(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal),
-    ) { innerPadding ->
-        Column(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
-            // ── 资料卡 + 筛选卡（固定在滚动区之外，同排行榜页的筛选卡位置）──
-            Column(
-                modifier = Modifier
-                    .padding(top = innerPadding.calculateTopPadding())
-                    .padding(horizontal = 12.dp),
-            ) {
-                Column(
-                    modifier = Modifier.padding(vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    profile?.let { ProfileCard(it) }
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        OverlaySpinnerPreference(
-                            items = remember {
-                                listOf(DropdownItem(text = "全部")) +
-                                    TRACK_NAMES.map { DropdownItem(text = it) }
+        bottomBar = {
+            BlurredBar(backdrop) {
+                NavigationBar(color = barColor) {
+                    DriverTab.entries.forEachIndexed { index, d ->
+                        NavigationBarItem(
+                            modifier = Modifier.weight(1f),
+                            icon = d.icon,
+                            label = d.label,
+                            selected = tab == index,
+                            onClick = {
+                                if (index == DRIVER_TAB_GRAND_PRIX) {
+                                    // 大奖赛未实现：点底栏只弹提示、**不切页**
+                                    // （用户 2026-10-19 定案）。
+                                    // ⚠️ 滑动**无法拦截**——从计时赛继续左滑仍会到达
+                                    //    该页，那里有 `GrandPrixPlaceholder` 占位。
+                                    Toast.makeText(context, "开发中，敬请期待！", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    scope.launch { pagerState.animateScrollToPage(index) }
+                                }
                             },
-                            selectedIndex = selectedTrack,
-                            title = "赛道",
-                            onSelectedIndexChange = { selectedTrack = it },
-                        )
-                        OverlaySpinnerPreference(
-                            items = remember {
-                                listOf(
-                                    DropdownItem(text = "全部"),
-                                    DropdownItem(text = "8.0.6"),
-                                    DropdownItem(text = "8.0.4"),
-                                )
-                            },
-                            selectedIndex = selectedVersion,
-                            title = "版本",
-                            onSelectedIndexChange = { selectedVersion = it },
-                        )
-                        SwitchPreference(
-                            checked = zeroOnly,
-                            onCheckedChange = { zeroOnly = it },
-                            title = "仅零辅助",
-                            summary = "TC 与 ABS 均为关",
-                        )
-                        SwitchPreference(
-                            checked = bestOnly,
-                            onCheckedChange = { bestOnly = it },
-                            title = "仅个人最佳",
-                            summary = "每个赛道版本只显示最快那一圈",
                         )
                     }
                 }
             }
-            // ── 圈速记录 ──
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .scrollEndHaptic()
-                    .overScrollVertical()
-                    .nestedScroll(scrollBehavior.nestedScrollConnection)
-                    .padding(horizontal = 12.dp)
-                    // 视口顶缘圆角裁切（同排行榜页：行滚出时顶边保持圆角）
-                    .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)),
-                contentPadding = PaddingValues(bottom = innerPadding.calculateBottomPadding()),
-                overscrollEffect = null,
-            ) {
-                if (!enterSettled || (loading && !everLoaded)) {
-                    item(key = "loading") {
-                        Text(
-                            "加载中…",
-                            fontSize = 14.sp,
-                            color = colorScheme.onBackground.copy(alpha = 0.5f),
-                            modifier = Modifier.padding(16.dp),
-                        )
-                    }
-                } else if (errorText.isNotEmpty()) {
-                    item(key = "error") {
-                        Text(
-                            errorText,
-                            fontSize = 14.sp,
-                            color = colorScheme.onBackground.copy(alpha = 0.5f),
-                            modifier = Modifier.padding(16.dp),
-                        )
-                    }
-                } else if (entries.isEmpty()) {
-                    item(key = "empty") {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(colorScheme.surfaceContainer, RoundedCornerShape(16.dp)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                "暂无成绩",
-                                fontSize = 14.sp,
-                                color = colorScheme.onBackground.copy(alpha = 0.5f),
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                            )
-                        }
-                    }
-                } else {
-                    itemsIndexed(entries, key = { _, e -> e.lapId }) { i, e ->
-                        LapRow(e, rowShape = boardRowShape(i, entries.size))
-                    }
-                    if (loadingMore) {
-                        item(key = "more") {
-                            Text(
-                                "加载中…",
-                                fontSize = 13.sp,
-                                color = colorScheme.onBackground.copy(alpha = 0.5f),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 12.dp),
-                                textAlign = TextAlign.Center,
-                            )
-                        }
-                    }
-                    item(key = "footer-space") { Spacer(Modifier.height(12.dp)) }
+        },
+        popupHost = { },
+        contentWindowInsets = WindowInsets.systemBars.add(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal),
+    ) { innerPadding ->
+        Column(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
+            // 三页左右滑动切换（2026-10-19 用户要求）。
+            // ⚠️ **大奖赛页在 pager 里也必须有内容**——它虽然点底栏只弹 Toast，
+            //    但用户可能从概览**左滑**直接滑到它（越过计时赛）。给一个居中的
+            //    「开发中，敬请期待！」占位，避免滑到空白页。
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxHeight(),
+                // 只在真正可滑的两页间滑动；大奖赛页滑过去会显示占位文案。
+                userScrollEnabled = true,
+            ) { page ->
+                when (page) {
+                    DRIVER_TAB_TIMETRIAL -> TimetrialTab(
+                        profile = profile,
+                        entries = entries,
+                        total = total,
+                        loading = loading,
+                        loadingMore = loadingMore,
+                        everLoaded = everLoaded,
+                        enterSettled = enterSettled,
+                        errorText = errorText,
+                        listState = listState,
+                        scrollBehavior = scrollBehavior,
+                        innerPadding = innerPadding,
+                        selectedTrack = selectedTrack,
+                        selectedVersion = selectedVersion,
+                        zeroOnly = zeroOnly,
+                        bestOnly = bestOnly,
+                        onTrack = { selectedTrack = it },
+                        onVersion = { selectedVersion = it },
+                        onZeroOnly = { zeroOnly = it },
+                        onBestOnly = { bestOnly = it },
+                    )
+                    DRIVER_TAB_GRAND_PRIX -> GrandPrixPlaceholder(innerPadding)
+                    else -> OverviewTab(
+                        profile = profile,
+                        loading = loading && !everLoaded,
+                        errorText = errorText,
+                        scrollBehavior = scrollBehavior,
+                        innerPadding = innerPadding,
+                    )
                 }
             }
         }
@@ -366,9 +371,88 @@ fun DriverScreen(userId: String) {
 }
 
 /**
- * 车手资料卡：头像 + 用户名 + N 号车手 + 三项统计。
- * 视觉与围场主页的信息卡一致（同一套字号/间距/统计行），让"我的主页"和
- * "别人的主页"看起来是同一个东西。
+ * 大奖赛占位页：左右滑到这里时显示的「开发中」提示。
+ *
+ * 点底栏的「大奖赛」只弹 Toast、不切页（用户定案），但**滑动**无法拦截，
+ * 所以必须有一个不空的页面，否则滑过来是一片空白。
+ */
+@Composable
+private fun GrandPrixPlaceholder(innerPadding: PaddingValues) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(innerPadding),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "开发中，敬请期待！",
+            fontSize = 15.sp,
+            color = colorScheme.onBackground.copy(alpha = 0.5f),
+        )
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 概览页
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * 概览页：资料卡 + 个人计时赛成绩卡（两列 × 三组）。
+ *
+ * 用户 2026-10-19 定案：把原先塞在资料卡里的三列统计**移出**，改成独立卡片、
+ * 两列形式，并按"个人计时赛"分组。理由是资料卡是"身份"、成绩卡是"战绩"，
+ * 混在一张卡里既挤又难扫读。
+ */
+@Composable
+private fun OverviewTab(
+    profile: PaddockClient.DriverProfile?,
+    loading: Boolean,
+    errorText: String,
+    scrollBehavior: ScrollBehavior,
+    innerPadding: PaddingValues,
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxHeight()
+            .scrollEndHaptic()
+            .overScrollVertical()
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .padding(horizontal = 12.dp),
+        contentPadding = innerPadding,
+        overscrollEffect = null,
+    ) {
+        item(key = "overview") {
+            Column(
+                modifier = Modifier.padding(vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                when {
+                    loading -> Text(
+                        "加载中…",
+                        fontSize = 14.sp,
+                        color = colorScheme.onBackground.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(16.dp),
+                    )
+                    errorText.isNotEmpty() -> Text(
+                        errorText,
+                        fontSize = 14.sp,
+                        color = colorScheme.onBackground.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(16.dp),
+                    )
+                    profile != null -> {
+                        ProfileCard(profile)
+                        StatsCard(profile)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 车手资料卡：头像 + 用户名 + N 号车手。
+ *
+ * 2026-10-19：三列统计已移出到 [StatsCard]（用户定案），本卡只留身份信息。
  */
 @Composable
 private fun ProfileCard(p: PaddockClient.DriverProfile) {
@@ -382,87 +466,404 @@ private fun ProfileCard(p: PaddockClient.DriverProfile) {
         }
     }
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 12.dp, horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                if (avatar != null) {
-                    Image(
-                        bitmap = avatar!!.asImageBitmap(),
+            if (avatar != null) {
+                Image(
+                    bitmap = avatar!!.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier.size(56.dp).clip(CircleShape),
+                )
+            } else {
+                Box(
+                    modifier = Modifier.size(56.dp).clip(CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Rounded.Person,
+                        modifier = Modifier.size(32.dp),
                         contentDescription = null,
-                        modifier = Modifier.size(56.dp).clip(CircleShape),
+                        tint = colorScheme.onBackground,
                     )
-                } else {
-                    Box(
-                        modifier = Modifier.size(56.dp).clip(CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Icons.Rounded.Person,
-                            modifier = Modifier.size(32.dp),
-                            contentDescription = null,
-                            tint = colorScheme.onBackground,
-                        )
-                    }
                 }
-                Column(modifier = Modifier.weight(1f)) {
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = p.username.ifBlank { "车手" },
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (p.regSeq > 0) {
                     Text(
-                        text = p.username.ifBlank { "车手" },
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                        text = "${p.regSeq} 号车手",
+                        fontSize = 13.sp,
+                        color = colorScheme.onBackground.copy(alpha = 0.6f),
                     )
-                    if (p.regSeq > 0) {
-                        Text(
-                            text = "${p.regSeq} 号车手",
-                            fontSize = 13.sp,
-                            color = colorScheme.onBackground.copy(alpha = 0.6f),
-                        )
-                    }
                 }
-            }
-            Row(modifier = Modifier.fillMaxWidth()) {
-                StatCell("计时赛积分", Modifier.weight(1f))
-                StatCell("有成绩赛道", Modifier.weight(1f))
-                StatCell("零辅助最快圈", Modifier.weight(1f))
-            }
-            Row(modifier = Modifier.fillMaxWidth()) {
-                StatValue(if (p.totalPoints > 0) "${p.totalPoints}" else "暂无", Modifier.weight(1f))
-                StatValue("${p.bestCount}", Modifier.weight(1f))
-                StatValue("${p.zeroCount}", Modifier.weight(1f))
             }
         }
     }
 }
 
-/** 统计列标题（与围场主页同款）。 */
+/**
+ * 个人计时赛成绩卡：两列 × 三组（总/版本/纪录）。
+ *
+ * ## 名次的奖牌形式
+ * 前三名沿用排行榜的 🥇🥈🥉（[rankLabel]），其余显示数字——用户 2026-10-19 定案。
+ * 前三名 emoji 放大到 22.5sp（与排行榜行完全一致），数字名次 15sp。
+ *
+ * ## 为什么"版本"三行没有独立标题
+ * 用户给的版式是「个人计时赛 / 总积分 总排名 / 版本积分 版本排名 / 全服最快圈数量 最快圈数量排名」，
+ * 即三组共用一个「个人计时赛」小标题。版本号写在卡片副标题里（如「8.0.6」），
+ * 避免用户误以为"版本积分"是另一个赛季的总和。
+ */
 @Composable
-private fun StatCell(title: String, modifier: Modifier = Modifier) {
-    Text(
-        text = title,
-        fontSize = 15.sp,
-        color = colorScheme.onBackground.copy(alpha = 0.6f),
+private fun StatsCard(p: PaddockClient.DriverProfile) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            // ── 卡片标题 ──
+            // 2026-10-19：版本号已删除（用户定案）——「版本积分/版本排名」两行本身
+            // 就是版本维度，标题旁再挂一个 8.0.6 反而让人以为整张卡只算该版本。
+            Text(
+                text = "个人计时赛",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+            )
+
+            // ── 三组两列数据 ──
+            // 每组 = 左右两个「标题 + 值」列，**两列各自居中对齐**：
+            // 左列中心落在卡片宽度的 1/3 处、右列中心落在 2/3 处（用户定案）。
+            // 实现 = 两列各 weight(1f) + textAlign = Center，卡片水平内边距 16dp。
+            StatPair(
+                leftTitle = "总积分",
+                leftValue = pointsText(p.totalPoints),
+                rightTitle = "总排名",
+                rightRank = p.totalRank,
+            )
+            StatPair(
+                leftTitle = "版本积分",
+                leftValue = pointsText(p.versionPoints),
+                rightTitle = "版本排名",
+                rightRank = p.versionRank,
+            )
+            StatPair(
+                leftTitle = "全服最快圈数量",
+                leftValue = countText(p.recordCount),
+                rightTitle = "最快圈数量排名",
+                rightRank = p.recordRank,
+            )
+        }
+    }
+}
+
+/**
+ * 一组两列统计：左列"标题 + 数值"，右列"标题 + 名次"，两列**各自居中**。
+ *
+ * ## 对齐（2026-10-19 用户定案 + 修复）
+ * 两列各 `weight(1f)` + `textAlign = Center` ⇒ 左列中心在卡片 1/3 处、右列在 2/3 处。
+ *
+ * ⚠️ **对齐靠结构对称，不靠调字号**（2026-10-19 三次迭代后的定案）：
+ *    左右两格都走 [`StatCell`]——标题固定 20dp、值固定 30dp，值格是
+ *    `Box(contentAlignment = Center)`。**两个 Column 的子元素高度完全相同**，
+ *    值格的 y 坐标必然相等，此时 17sp 数字与 22.5sp 奖牌 emoji 各自在
+ *    30dp 格内居中即可对齐，字号可以保持差异。
+ *
+ *    前两次修错的路径（勿重蹈）：① 左边 `Text` 直接加 `heightIn`（文本顶部对齐）
+ *    而右边用 `Box(Center)` —— 容器不同，必然错开；② 归因到"字号不同"并把
+ *    emoji 压回 17sp —— 对齐问题解决了但奖牌变小，用户立刻反馈。
+ *    **真正的不变量是"两侧结构相同"，不是"字号相同"。**
+ *
+ * 名次为 null / 0（无成绩）时显示「暂无」，与积分的 0 同口径——用户 2026-10-19 定案：
+ * 「0」和「-」都改为「暂无」。
+ */
+@Composable
+private fun StatPair(
+    leftTitle: String,
+    leftValue: String,
+    rightTitle: String,
+    rightRank: Long?,
+) {
+    Row(modifier = Modifier.fillMaxWidth()) {
+        StatCell(
+            title = leftTitle,
+            modifier = Modifier.weight(1f),
+        ) {
+            // ⚠️ 空值文案与名次侧的「暂无」**必须同色**（2026-10-19 用户反馈
+            //    "一个暂无是黑的、一个是灰的"）：左值走 `pointsText`/`countText`
+            //    返回「暂无」时若用默认主题色（黑）而右侧显式 alpha=0.5（灰），
+            //    同一张卡里两个语义相同的占位符长得不一样。
+            //    统一走 [`StatValueText`]，空值与数字的颜色分支只在这一处定义。
+            StatValueText(
+                text = leftValue,
+                empty = leftValue == EMPTY_VALUE,
+            )
+        }
+        StatCell(
+            title = rightTitle,
+            modifier = Modifier.weight(1f),
+        ) {
+            val rank = rightRank?.takeIf { it > 0 }?.toInt()
+            if (rank == null) {
+                StatValueText(text = EMPTY_VALUE, empty = true)
+            } else {
+                Text(
+                    text = rankLabel(rank),
+                    // 前三名 emoji 放大 50%（17→22.5sp），与排行榜行同比例
+                    // （用户 2026-10-19 反馈"奖牌变小了"后恢复）。
+                    // ⚠️ 放大**不会**破坏对齐：值格是固定 30dp 高的
+                    //    `Box(contentAlignment = Center)`，22.5sp 在 30dp 内仍居中，
+                    //    与左侧 17sp 数字共用同一视觉中心线。
+                    fontSize = if (rank <= 3) 22.5.sp else 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    style = MiuixTheme.textStyles.main.merge(DriverTabularDigits),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 一格统计：**标题行固定高度 + 值格固定高度**，左右两格结构完全一致。
+ *
+ * ⚠️ 2026-10-19 对齐修复（三次迭代后的定案）：
+ *    - 首版左右容器不同（左 `Text+heightIn` 顶部对齐、右 `Box(Center)` 居中）→ 错开；
+ *    - 二版两边都 `Box(Center)`，但**标题行高度随字数/字体度量浮动**
+ *      （「总积分」4 字 vs「总排名」3 字），两个 Column 的值格起始 y 不同 → 仍错开；
+ *    - 定案 = 标题与值**各自固定高度**，两侧结构逐字相同，值格的 y 坐标必然相等。
+ *
+ * 标题高度按 13sp 单行的实际行高取 20dp（13sp × 1.5 ≈ 19.5dp，取整），
+ * 值格 30dp 容得下 17sp 粗体与 emoji。
+ */
+@Composable
+private fun StatCell(
+    title: String,
+    modifier: Modifier = Modifier,
+    value: @Composable () -> Unit,
+) {
+    Column(
         modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier.height(STAT_TITLE_HEIGHT),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = title,
+                fontSize = 13.sp,
+                color = colorScheme.onBackground.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Box(
+            modifier = Modifier.height(STAT_VALUE_HEIGHT),
+            contentAlignment = Alignment.Center,
+        ) {
+            value()
+        }
+    }
+}
+
+/** 标题行固定高度（13sp 单行行高）。 */
+private val STAT_TITLE_HEIGHT = 20.dp
+
+/** 统计值格固定高度（容得下 17sp 粗体数字与奖牌 emoji）。 */
+private val STAT_VALUE_HEIGHT = 30.dp
+
+/** 无数据时的统一占位文案。 */
+private const val EMPTY_VALUE = "暂无"
+
+/**
+ * 统计值文本：**空值（「暂无」）统一灰色**，有数据时用主题前景色。
+ *
+ * ⚠️ 颜色分支只在这里定义一次（2026-10-19）：此前左值走默认色（黑）、
+ *    右侧名次空值显式 `alpha = 0.5f`（灰），同一张卡里两个「暂无」不同色。
+ */
+@Composable
+private fun StatValueText(text: String, empty: Boolean) {
+    Text(
+        text = text,
+        fontSize = 17.sp,
+        fontWeight = FontWeight.Bold,
         textAlign = TextAlign.Center,
+        color = if (empty) {
+            colorScheme.onBackground.copy(alpha = 0.5f)
+        } else {
+            colorScheme.onBackground
+        },
+        style = MiuixTheme.textStyles.main.merge(DriverTabularDigits),
     )
 }
 
-/** 统计列值（与围场主页同款）。 */
+/** 积分文案：0 分显示「暂无」（与围场主页信息卡同口径）。 */
+private fun pointsText(points: Long): String = if (points > 0) "$points" else "暂无"
+
+/** 计数文案：0 显示「暂无」（用户 2026-10-19 定案：「0」改为「暂无」）。 */
+private fun countText(count: Long): String = if (count > 0) "$count" else "暂无"
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 计时赛页
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * 计时赛页：四维筛选卡（固定在滚动区外）+ 全量圈速记录（分页）。
+ *
+ * 筛选卡钉在滚动区之外的理由与排行榜页相同：下拉刷新/滚动时筛选控件不随内容移动。
+ */
 @Composable
-private fun StatValue(value: String, modifier: Modifier = Modifier) {
-    Text(
-        text = value,
-        fontSize = 15.sp,
-        modifier = modifier,
-        textAlign = TextAlign.Center,
-    )
+private fun TimetrialTab(
+    profile: PaddockClient.DriverProfile?,
+    entries: List<PaddockClient.DriverLap>,
+    total: Int,
+    loading: Boolean,
+    loadingMore: Boolean,
+    everLoaded: Boolean,
+    enterSettled: Boolean,
+    errorText: String,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    scrollBehavior: ScrollBehavior,
+    innerPadding: PaddingValues,
+    selectedTrack: Int,
+    selectedVersion: Int,
+    zeroOnly: Boolean,
+    bestOnly: Boolean,
+    onTrack: (Int) -> Unit,
+    onVersion: (Int) -> Unit,
+    onZeroOnly: (Boolean) -> Unit,
+    onBestOnly: (Boolean) -> Unit,
+) {
+    Column {
+        // ── 筛选卡（固定在滚动区之外，同排行榜页的筛选卡位置）──
+        Column(
+            modifier = Modifier
+                .padding(top = innerPadding.calculateTopPadding())
+                .padding(horizontal = 12.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    OverlaySpinnerPreference(
+                        items = remember {
+                            listOf(DropdownItem(text = "全部")) +
+                                TRACK_NAMES.map { DropdownItem(text = it) }
+                        },
+                        selectedIndex = selectedTrack,
+                        title = "赛道",
+                        onSelectedIndexChange = onTrack,
+                    )
+                    OverlaySpinnerPreference(
+                        items = remember {
+                            listOf(
+                                DropdownItem(text = "全部"),
+                                DropdownItem(text = "8.0.6"),
+                                DropdownItem(text = "8.0.4"),
+                            )
+                        },
+                        selectedIndex = selectedVersion,
+                        title = "版本",
+                        onSelectedIndexChange = onVersion,
+                    )
+                    SwitchPreference(
+                        checked = zeroOnly,
+                        onCheckedChange = onZeroOnly,
+                        title = "仅零辅助",
+                        summary = "TC 与 ABS 均为关",
+                    )
+                    SwitchPreference(
+                        checked = bestOnly,
+                        onCheckedChange = onBestOnly,
+                        title = "仅个人最佳",
+                        summary = "每个赛道版本只显示最快那一圈",
+                    )
+                }
+            }
+        }
+        // ── 圈速记录 ──
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxHeight()
+                .scrollEndHaptic()
+                .overScrollVertical()
+                .nestedScroll(scrollBehavior.nestedScrollConnection)
+                .padding(horizontal = 12.dp)
+                // 视口顶缘圆角裁切（同排行榜页：行滚出时顶边保持圆角）
+                .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)),
+            contentPadding = PaddingValues(bottom = innerPadding.calculateBottomPadding()),
+            overscrollEffect = null,
+        ) {
+            if (!enterSettled || (loading && !everLoaded)) {
+                item(key = "loading") {
+                    Text(
+                        "加载中…",
+                        fontSize = 14.sp,
+                        color = colorScheme.onBackground.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(16.dp),
+                    )
+                }
+            } else if (errorText.isNotEmpty()) {
+                item(key = "error") {
+                    Text(
+                        errorText,
+                        fontSize = 14.sp,
+                        color = colorScheme.onBackground.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(16.dp),
+                    )
+                }
+            } else if (entries.isEmpty()) {
+                item(key = "empty") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(colorScheme.surfaceContainer, RoundedCornerShape(16.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "暂无成绩",
+                            fontSize = 14.sp,
+                            color = colorScheme.onBackground.copy(alpha = 0.5f),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                        )
+                    }
+                }
+            } else {
+                itemsIndexed(entries, key = { _, e -> e.lapId }) { i, e ->
+                    LapRow(e, rowShape = boardRowShape(i, entries.size))
+                }
+                if (loadingMore) {
+                    item(key = "more") {
+                        Text(
+                            "加载中…",
+                            fontSize = 13.sp,
+                            color = colorScheme.onBackground.copy(alpha = 0.5f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp),
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+                item(key = "footer-space") { Spacer(Modifier.height(12.dp)) }
+            }
+        }
+    }
 }
 
 /**
@@ -553,3 +954,29 @@ private const val LOAD_MORE_THRESHOLD = 3
 
 /** 分页日志 tag：与 `LeaderboardScreen` 的 `TAG_BOARD` 分开，便于按页面过滤。 */
 private const val TAG_DRIVER = "Driver"
+
+// ── 底栏页签序号 ──
+// ⚠️ 用常量而非裸 0/1/2：`tab` 同时出现在 LaunchedEffect key、when 分支、
+//    底栏点击判定三处，裸数字写错一处就是"分页在概览页乱跑"这类隐蔽 bug。
+private const val DRIVER_TAB_OVERVIEW = 0
+private const val DRIVER_TAB_TIMETRIAL = 1
+private const val DRIVER_TAB_GRAND_PRIX = 2
+
+/** 底栏页数（pager 的 pageCount）。 */
+private const val DRIVER_TAB_COUNT = 3
+
+/**
+ * 车手主页底栏三项。
+ *
+ * 图标（2026-10-19 用户定案）：
+ * - 计时赛 = 用户提供的 `Time Trial.svg`（秒表，`TimeTrialIcon`）
+ * - 大奖赛 = **原计时赛用的奖杯图标**（`Icons.Rounded.EmojiEvents`）
+ * - 概览 = 人像
+ *
+ * ⚠️ 图标是用户的决策域，改之前必须先问——本会话曾自作主张直接挑图标被纠正。
+ */
+private enum class DriverTab(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    Overview("概览", Icons.Rounded.Person),
+    Timetrial("计时赛", tools.alamobile.mod.ui.TimeTrialIcon),
+    GrandPrix("大奖赛", Icons.Rounded.EmojiEvents),
+}

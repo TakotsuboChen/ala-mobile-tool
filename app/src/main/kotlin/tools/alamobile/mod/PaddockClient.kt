@@ -1091,16 +1091,32 @@ object PaddockClient {
         val created: String,
     )
 
-    /** 车手资料卡（与围场主页信息卡同口径）。 */
+    /**
+     * 车手资料卡（与围场主页信息卡同口径）。
+     *
+     * 2026-10-19 扩展：新增版本维度四值（版本积分/版本排名/纪录数/纪录排名）。
+     * "最新版本"由服务端从数据里现取（`max(version_code)`），模块不硬编码——
+     * 游戏升版后新圈入库即自动切换。
+     */
     data class DriverProfile(
         val userId: String,
         val username: String,
         val regSeq: Long,
         val avatarUrl: String?,
         val totalPoints: Long,
+        /** 总积分在总榜里的**行号**（与榜单展示顺序逐行对齐；null = 无成绩） */
+        val totalRank: Long? = null,
         val bestCount: Int,
         val zeroCount: Int,
         val gold: Boolean,
+        /** 最新版本口径的积分与名次（版本 = 独立赛季） */
+        val versionPoints: Long = 0,
+        val versionRank: Long? = null,
+        val versionCode: Int? = null,
+        val versionName: String = "",
+        /** 该用户在最新版本下持有的赛道纪录数（版本 × 赛道，不跨版本混算） */
+        val recordCount: Long = 0,
+        val recordRank: Long? = null,
     )
 
     data class DriverPage(
@@ -1147,15 +1163,26 @@ object PaddockClient {
             val j = JSONObject(resp)
             val p = j.optJSONObject("profile")
             val profile = p?.let {
+                // `optLong` 在字段缺失/为 JSON null 时返回 0——而排名 0 在语义上
+                // 是"不存在的名次"。必须显式判 null，否则无成绩的车手会显示"第 0 名"。
+                fun nullableLong(key: String): Long? =
+                    if (it.isNull(key)) null else it.optLong(key)
                 DriverProfile(
                     userId = it.optString("user_id"),
                     username = it.optString("username"),
                     regSeq = it.optLong("reg_seq"),
                     avatarUrl = it.optString("avatar_url").takeIf { s -> s.isNotEmpty() },
                     totalPoints = it.optLong("total_points"),
+                    totalRank = nullableLong("total_rank"),
                     bestCount = it.optInt("best_count"),
                     zeroCount = it.optInt("zero_count"),
                     gold = it.optBoolean("gold"),
+                    versionPoints = it.optLong("version_points"),
+                    versionRank = nullableLong("version_rank"),
+                    versionCode = if (it.isNull("version_code")) null else it.optInt("version_code"),
+                    versionName = it.optString("version_name"),
+                    recordCount = it.optLong("record_count"),
+                    recordRank = nullableLong("record_rank"),
                 )
             }
             val arr = j.optJSONArray("entries") ?: org.json.JSONArray()

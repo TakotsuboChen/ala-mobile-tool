@@ -505,8 +505,14 @@ private fun AvatarOrPlaceholder(avatarUrl: String?) {
     }
 }
 
-/** 前三名奖牌 emoji（其余名次显示数字）。 */
-private fun rankLabel(rank: Int): String = when (rank) {
+/**
+ * 前三名奖牌 emoji（其余名次显示数字）。
+ *
+ * `internal` 供 DriverScreen 的成绩卡复用——用户定案（2026-10-19）：
+ * 车手主页的名次也要用排行榜同款奖牌。**不要复制第二份**，否则两处奖牌
+ * 配色/名次边界会静默漂移。
+ */
+internal fun rankLabel(rank: Int): String = when (rank) {
     1 -> "🥇"
     2 -> "🥈"
     3 -> "🥉"
