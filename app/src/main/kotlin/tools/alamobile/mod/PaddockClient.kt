@@ -1081,6 +1081,11 @@ object PaddockClient {
         val lapDisplay: String,
         /** 该圈是否是该车手在该赛道该版本的个人最佳 */
         val personalBest: Boolean,
+        /**
+         * 该圈是否被本人「屏蔽缺失配置记录」移出了榜单（2026-10-20）。
+         * 与 [personalBest] 互斥——屏蔽即从 best_laps 删行，不可能同时是最佳。
+         */
+        val hidden: Boolean = false,
         /** 辅助配置三维展示（踏板 / TC / ABS），缺失维 = "缺失" */
         val pedal: String,
         val tc: String,
@@ -1199,6 +1204,7 @@ object PaddockClient {
                     versionName = e.optString("version_name"),
                     lapDisplay = e.optString("lap_display"),
                     personalBest = e.optBoolean("personal_best"),
+                    hidden = e.optBoolean("hidden"),
                     pedal = e.optString("pedal"),
                     tc = e.optString("tc"),
                     abs = e.optString("abs"),
@@ -1241,6 +1247,81 @@ object PaddockClient {
             } finally {
                 conn.disconnect()
             }
+        } catch (e: Throwable) {
+            "网络错误: ${e.message}"
+        }
+    }
+
+    // ── 账号设置（2026-10-20）────────────────────────────────
+
+    /**
+     * 账号设置页状态（GET /v1/me/account，Bearer）。阻塞 IO。
+     *
+     * `ok=false` 时其余字段无意义，调用方按 [AccountState.error] 提示。
+     */
+    data class AccountState(
+        val ok: Boolean = false,
+        /** 距下次可换头像的剩余秒数（0 = 现在就能换） */
+        val avatarCooldownSecs: Long = 0,
+        /** 距下次可改用户名的剩余秒数 */
+        val usernameCooldownSecs: Long = 0,
+        /** 本人是否已执行过屏蔽（true → 直接弹「已屏蔽过」提示，不发请求） */
+        val hiddenMissing: Boolean = false,
+        /** 当前是否**存在**可屏蔽的缺失配置记录 */
+        val hasHiddenCandidates: Boolean = false,
+        val error: String = "",
+    )
+
+    fun fetchAccountState(): AccountState {
+        val token = authToken ?: return AccountState(error = "未登录")
+        return try {
+            val (code, resp) = getJson("$serverBase/v1/me/account", token)
+            when {
+                code == 200 -> {
+                    val j = JSONObject(resp)
+                    AccountState(
+                        ok = true,
+                        avatarCooldownSecs = j.optLong("avatar_cooldown_secs"),
+                        usernameCooldownSecs = j.optLong("username_cooldown_secs"),
+                        hiddenMissing = j.optBoolean("hidden_missing"),
+                        hasHiddenCandidates = j.optBoolean("has_hidden_candidates"),
+                    )
+                }
+                code == 401 -> AccountState(error = "登录已过期，请重新登录")
+                else -> AccountState(error = errText(code, resp))
+            }
+        } catch (e: Throwable) {
+            Logger.log(Log.WARN, TAG, "fetchAccountState failed: ${e.message}")
+            AccountState(error = "网络错误: ${e.message}")
+        }
+    }
+
+    /**
+     * 改用户名（PUT /v1/me/username，Bearer）。成功返回 null，失败返回错误文案。
+     *
+     * ⚠️ 用户名是**登录名**：成功后本机存的是 token 不是用户名，故无需改本地凭据，
+     *    但用户下次手动登录要用新名字（服务端已把旧名字释放）。
+     */
+    fun changeUsername(newName: String): String? {
+        val token = authToken ?: return "未登录"
+        return try {
+            val body = JSONObject().put("username", newName)
+            val (code, resp) = putJson("$serverBase/v1/me/username", body, token)
+            if (code == 200) null else errText(code, resp)
+        } catch (e: Throwable) {
+            "网络错误: ${e.message}"
+        }
+    }
+
+    /**
+     * 屏蔽缺失配置的记录（POST /v1/me/hide-missing，Bearer）。
+     * 成功返回 null，失败返回错误文案。**不可撤销**，调用方必须先确认。
+     */
+    fun hideMissingRecords(): String? {
+        val token = authToken ?: return "未登录"
+        return try {
+            val (code, resp) = postJson("$serverBase/v1/me/hide-missing", JSONObject(), token)
+            if (code == 200) null else errText(code, resp)
         } catch (e: Throwable) {
             "网络错误: ${e.message}"
         }
@@ -1392,6 +1473,35 @@ object PaddockClient {
     private fun postJson(url: String, body: JSONObject, token: String?): Pair<Int, String> {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
+            connectTimeout = CONNECT_TIMEOUT
+            readTimeout = READ_TIMEOUT
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            if (token != null) setRequestProperty("Authorization", "Bearer $token")
+        }
+        try {
+            conn.outputStream.use { os ->
+                os.write(body.toString().toByteArray(StandardCharsets.UTF_8))
+            }
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val text = stream?.bufferedReader(StandardCharsets.UTF_8)?.use { it.readText() } ?: ""
+            return Pair(code, if (code in 200..299 && text.isEmpty()) "{}" else text)
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /**
+     * 极简 HTTPS PUT（与 [postJson] 同构，只差 requestMethod）。
+     *
+     * 为什么不复用 postJson 加参数：两者语义不同（POST = 创建、PUT = 覆盖），
+     * 混成一个带 `method` 参数的方法会让调用点看不出语义；复制这 20 行
+     * 比引入一个"看参数才知道是什么请求"的入口更清楚。
+     */
+    private fun putJson(url: String, body: JSONObject, token: String?): Pair<Int, String> {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "PUT"
             connectTimeout = CONNECT_TIMEOUT
             readTimeout = READ_TIMEOUT
             doOutput = true

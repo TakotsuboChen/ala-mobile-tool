@@ -194,6 +194,9 @@ class ConfigActivity : ComponentActivity() {
                                 entry<Route.About> { AboutScreen() }
                                 entry<Route.Paddock> { tools.alamobile.mod.ui.screen.paddock.LeaderboardScreen() }
                                 entry<Route.Avatar> { tools.alamobile.mod.ui.screen.paddock.AvatarScreen() }
+                                entry<Route.AccountSettings> {
+                                    tools.alamobile.mod.ui.screen.paddock.AccountSettingsScreen()
+                                }
                                 entry<Route.Driver> { key ->
                                     tools.alamobile.mod.ui.screen.paddock.DriverScreen(key.userId)
                                 }

@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.Leaderboard
 import androidx.compose.material.icons.rounded.Logout
+import androidx.compose.material.icons.rounded.ManageAccounts
 import androidx.compose.material.icons.rounded.MenuBook
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.SportsEsports
@@ -350,6 +351,19 @@ private fun PaddockContent(
                     Icon(Icons.Rounded.MenuBook, modifier = Modifier.padding(end = 6.dp), contentDescription = null, tint = colorScheme.onBackground)
                 },
                 onClick = { actions.setShowGuide(true) },
+            )
+        }
+
+        // 账号设置（独立卡，2026-10-20）：更换头像 / 修改用户名（各 30 天一次）
+        // + 屏蔽缺失配置的圈速记录（一次性、不可撤销）。三个动作全部在二级页里，
+        // 主页只留一个入口——不可逆操作不放在一级页面上。
+        Card(modifier = Modifier.fillMaxWidth()) {
+            ArrowPreference(
+                title = "账号设置",
+                startAction = {
+                    Icon(Icons.Rounded.ManageAccounts, modifier = Modifier.padding(end = 6.dp), contentDescription = null, tint = colorScheme.onBackground)
+                },
+                onClick = { navigator.push(Route.AccountSettings) },
             )
         }
 

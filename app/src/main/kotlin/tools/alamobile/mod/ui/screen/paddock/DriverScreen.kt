@@ -1121,7 +1121,17 @@ private fun LapRow(e: PaddockClient.DriverLap, rowShape: Shape, showDivider: Boo
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false),
                     )
-                    if (e.personalBest) {
+                    if (e.hidden) {
+                        // 「已屏蔽」红标（2026-10-20）：该圈被本人「屏蔽缺失配置记录」
+                        // 移出了榜单。服务端已强制与 personal_best 互斥
+                        // （driver.rs 的 `personal_best && !hidden`），故这里先判 hidden。
+                        Text(
+                            text = "已屏蔽",
+                            fontSize = 11.sp,
+                            // 用主题 error 色而非硬编码红：深浅模式都有足够对比度。
+                            color = colorScheme.error,
+                        )
+                    } else if (e.personalBest) {
                         Text(
                             text = "最佳",
                             fontSize = 11.sp,

@@ -37,6 +37,15 @@ sealed interface Route : NavKey, Parcelable {
     data object Avatar : Route
 
     /**
+     * 账号设置（2026-10-20）：更换头像 / 修改用户名（各 30 天一次）+
+     * 屏蔽缺失配置的圈速记录（一次性、不可撤销）。
+     * 入口 = 围场主页「围场指南」下方的独立卡。
+     */
+    @Parcelize
+    @Serializable
+    data object AccountSettings : Route
+
+    /**
      * 车手主页（2026-10-18）：`userId` = 服务端 users.id。
      * 从围场主页信息卡 / 排行榜任意一行点进来，展示该车手的全量圈速记录。
      */
