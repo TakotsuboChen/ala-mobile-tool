@@ -121,11 +121,27 @@ GET  /v1/me                      (Bearer) → {user_id, username, reg_seq, has_a
 GET  /v1/driver/{user_id}?gp_index=&version=&assist=zero&best=1&limit=&offset=
                                  → {profile, entries, total}（车手主页，公开端点）
     （2026-10-18 新增。profile = {user_id, username, reg_seq, avatar_url, total_points,
-     best_count, zero_count, gold}；entries = laps 全量表的分页（不是 best_laps），
-     每条含 lap_id / gp_index / track_name / version_code / version_name / lap_ms /
-     lap_display / personal_best / pedal / tc / abs / zero_assist / created（北京时间）。
+     total_rank, best_count, zero_count, gold, version_points, version_rank,
+     version_code, version_name, record_count, record_rank}；entries = laps 全量表的分页
+     （不是 best_laps），每条含 lap_id / gp_index / track_name / version_code /
+     version_name / lap_ms / lap_display / personal_best / pedal / tc / abs /
+     zero_assist / created（北京时间）。
      筛选：gp_index 0..15、version=游戏 versionCode、assist=zero（TC 与 ABS 均关）、
-     best=1（仅个人最佳，与榜单 best_laps 同源）。404 = 车手不存在。）
+     best=1（仅个人最佳，与榜单 best_laps 同源）。404 = 车手不存在。
+
+     **2026-10-19 扩展（车手主页三页改版）**：
+     - `total_rank` / `version_rank` / `record_rank` 均为 **`Option<i64>`**（无成绩 = JSON
+       `null`，**不是 0**）。名次语义 = **榜单行号**，用 `row_number()` 而非 `rank()`
+       ——后者同分并列会跳号（1,1,3），主页就会显示"第 2 名"而榜单里他在第 3 行。
+       `row_number()` 的排序键与积分榜 `ORDER BY points DESC, username ASC` 逐字一致。
+     - **`version_*` 的"最新版本"由服务端现取 `max(best_laps.version_code)`**，不硬编码：
+       游戏升版后新圈入库即自动切换，无需发版。`version_code`/`version_name` 一并下发
+       供客户端展示（如「8.0.6」）。
+     - **`record_count` 口径 = 版本 × 赛道**（`records` 表 `kind='version'`，
+       主键 `(gp_index, kind, version_code)` ⇒ 每赛道每版本恰好一条）。
+       同一条赛道在 8.0.4 与 8.0.6 各算一条，**不跨版本混算**（用户 2026-10-19 定案）。
+     - 积分聚合已收口到 `score::user_points_and_rank`（单一实现点），
+       榜单 / `/v1/me` / 车手主页三处共用 `score::scored_cte` 生成的窗口定义。）
 ```
 
 ### 分页契约（2026-10-18 定案）
