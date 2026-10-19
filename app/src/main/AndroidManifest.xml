@@ -29,6 +29,20 @@
     <queries>
         <package android:name="top.nkbe.npatch" />
         <package android:name="com.Takotsubo.AlamobileFormula" />
+        <!--
+            头像选图需要自行汇总候选 App（见 AvatarScreen.kt 的 ChooserImageContract）：
+            Android 11+ 不声明就 queryIntentActivities 恒返回空，选择器会被系统当成
+            "单目标"直接直通。两个 action 都要声明——相册通常只注册 GET_CONTENT，
+            文件管理器通常只注册 OPEN_DOCUMENT。
+        -->
+        <intent>
+            <action android:name="android.intent.action.GET_CONTENT" />
+            <data android:mimeType="image/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.OPEN_DOCUMENT" />
+            <data android:mimeType="image/*" />
+        </intent>
     </queries>
 
     <application
