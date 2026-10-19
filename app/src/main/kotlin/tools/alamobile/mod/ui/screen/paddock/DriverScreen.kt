@@ -56,8 +56,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import android.widget.Toast
-import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -78,6 +76,7 @@ import top.yukonga.miuix.kmp.basic.NavigationBar
 import top.yukonga.miuix.kmp.basic.NavigationBarItem
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
+import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
@@ -98,7 +97,8 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
  * ## 三页分工（用户 2026-10-19 定案）
  * - **概览**：资料卡（头像/用户名/车手号）+ 个人计时赛成绩卡（两列 × 三组）
  * - **计时赛**：全量圈速记录（分页 + 四维筛选）
- * - **大奖赛**：开发中占位（点击 Toast「开发中，敬请期待！」）
+ * - **大奖赛**：开发中占位页（页内显示「开发中，敬请期待！」）。
+ *   点底栏正常切页，与左右滑动一致（用户 2026-10-19 定案）。
  *
  * ## 分页（用户定案：一次最多 30 条）
  * 滚到接近底部时自动拉下一页；`total` 来自服务端，`entries.size >= total` 即到底。
@@ -125,7 +125,6 @@ fun DriverScreen(userId: String) {
     val backdrop = rememberBlurBackdrop(enableBlur)
     val blurActive = backdrop != null
     val barColor = if (blurActive) Color.Transparent else colorScheme.surface
-    val context = LocalContext.current
     // 底栏点击切页用（animateScrollToPage 是 suspend）。
     val scope = rememberCoroutineScope()
 
@@ -305,15 +304,11 @@ fun DriverScreen(userId: String) {
                             label = d.label,
                             selected = tab == index,
                             onClick = {
-                                if (index == DRIVER_TAB_GRAND_PRIX) {
-                                    // 大奖赛未实现：点底栏只弹提示、**不切页**
-                                    // （用户 2026-10-19 定案）。
-                                    // ⚠️ 滑动**无法拦截**——从计时赛继续左滑仍会到达
-                                    //    该页，那里有 `GrandPrixPlaceholder` 占位。
-                                    Toast.makeText(context, "开发中，敬请期待！", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    scope.launch { pagerState.animateScrollToPage(index) }
-                                }
+                                // 三个 tab 一视同仁：点击即切页（用户 2026-10-19 定案）。
+                                // 大奖赛是开发中占位页（页内已有「开发中，敬请期待！」），
+                                // 点击切过去与左滑到达行为一致——不能"点不动只能滑"，
+                                // 那会让底栏按钮看起来像失灵。
+                                scope.launch { pagerState.animateScrollToPage(index) }
                             },
                         )
                     }
@@ -325,9 +320,8 @@ fun DriverScreen(userId: String) {
     ) { innerPadding ->
         Column(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
             // 三页左右滑动切换（2026-10-19 用户要求）。
-            // ⚠️ **大奖赛页在 pager 里也必须有内容**——它虽然点底栏只弹 Toast，
-            //    但用户可能从概览**左滑**直接滑到它（越过计时赛）。给一个居中的
-            //    「开发中，敬请期待！」占位，避免滑到空白页。
+            // ⚠️ **大奖赛页在 pager 里必须有内容**：底栏点击与左右滑动都能到达
+            //    该页，页内必须给出「开发中，敬请期待！」占位，否则是空白页。
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxHeight(),
@@ -371,10 +365,10 @@ fun DriverScreen(userId: String) {
 }
 
 /**
- * 大奖赛占位页：左右滑到这里时显示的「开发中」提示。
+ * 大奖赛占位页：底栏点击或左右滑到这里时显示的「开发中」提示。
  *
- * 点底栏的「大奖赛」只弹 Toast、不切页（用户定案），但**滑动**无法拦截，
- * 所以必须有一个不空的页面，否则滑过来是一片空白。
+ * 该页尚未实现，但**底栏点击与滑动行为必须一致**（用户 2026-10-19 定案）——
+ * 只让滑动可达而点击无反应，会让底栏按钮看起来像失灵。
  */
 @Composable
 private fun GrandPrixPlaceholder(innerPadding: PaddingValues) {
@@ -424,7 +418,14 @@ private fun OverviewTab(
         item(key = "overview") {
             Column(
                 modifier = Modifier.padding(vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                // ⚠️ **不要用 `Arrangement.spacedBy` 给「小标题 + 卡片」分组排版**
+                //    （2026-10-19 用户反馈「间距不对」的根因）：miuix 的小标题规范是
+                //    **上远下近**——卡片自带 `padding(bottom = 12.dp)`，SmallTitle 内边距
+                //    上下各 8dp ⇒ 上方 12+8=20dp、下方 8dp（见 miuix 官方
+                //    `docs/zh_CN/components/smalltitle.md` 的组合示例与 KernelSU 的
+                //    `AppProfileMiuix.kt`）。若外面再套 `spacedBy(12.dp)`，上下会各加
+                //    12dp 变成 20/20 对称，小标题就"悬浮"在两个卡片正中间了。
+                //    ⇒ 间距一律由各元素自己的 padding 表达。
             ) {
                 when {
                     loading -> Text(
@@ -440,7 +441,31 @@ private fun OverviewTab(
                         modifier = Modifier.padding(16.dp),
                     )
                     profile != null -> {
-                        ProfileCard(profile)
+                        // 卡片自带底部 12dp —— 这是「小标题上方间距」的一半，
+                        // 另一半由 SmallTitle 自己的 8dp 上内边距提供（合计 20dp）。
+                        ProfileCard(profile, modifier = Modifier.padding(bottom = 12.dp))
+                        // 「个人计时赛」是成绩卡的小标题，**在卡片之外**（用户 2026-10-19 定案：
+                        // 原先是卡片内的标题行，移到上方作为分组小标题）。
+                        //
+                        // ⚠️ 必须用 miuix 的 [`SmallTitle`] 而不是手写 `Text`（用户 2026-10-19
+                        //    反馈「不符合 miuix 小标题规范」）：它固定走 `textStyles.subtitle`
+                        //    + `onBackgroundVariant`，字号与颜色都属于主题，能跟全 App 其他
+                        //    分组标题保持一致；手写 14sp + alpha 只是数值上接近的仿制品。
+                        //
+                        // ⚠️ `textColor` 覆盖成中性灰（用户 2026-10-19 定案「不需要动态取色，
+                        //    灰色就行」）：默认的 `onBackgroundVariant` 在本项目的
+                        //    `lightColorScheme()` 里是 `0xFF8C93B0`（偏蓝的蓝灰），不是中性灰。
+                        //    改用 `onBackground.copy(alpha = 0.6f)` —— 与资料卡「N 号车手」、
+                        //    统计列标题等本项目既有的次要文字同色。
+                        //
+                        // ⚠️ `insideMargin` 横向覆盖成 16dp：默认 28dp 是为「页面无横向内边距 +
+                        //    卡片自带 horizontal 12dp」的结构设计的；本项目 LazyColumn 已有
+                        //    12dp 横向内边距，12+16=28 与卡片内文字（12 页面 + 16 卡内）左对齐。
+                        SmallTitle(
+                            text = "个人计时赛",
+                            textColor = colorScheme.onBackground.copy(alpha = 0.6f),
+                            insideMargin = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        )
                         StatsCard(profile)
                     }
                 }
@@ -455,7 +480,10 @@ private fun OverviewTab(
  * 2026-10-19：三列统计已移出到 [StatsCard]（用户定案），本卡只留身份信息。
  */
 @Composable
-private fun ProfileCard(p: PaddockClient.DriverProfile) {
+private fun ProfileCard(
+    p: PaddockClient.DriverProfile,
+    modifier: Modifier = Modifier,
+) {
     var avatar by remember(p.avatarUrl) {
         mutableStateOf(p.avatarUrl?.let { PaddockClient.fetchAvatarFromCache(it) })
     }
@@ -465,7 +493,7 @@ private fun ProfileCard(p: PaddockClient.DriverProfile) {
             avatar = withContext(Dispatchers.IO) { PaddockClient.fetchAvatar(url) }
         }
     }
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -519,10 +547,9 @@ private fun ProfileCard(p: PaddockClient.DriverProfile) {
  * 前三名沿用排行榜的 🥇🥈🥉（[rankLabel]），其余显示数字——用户 2026-10-19 定案。
  * 前三名 emoji 放大到 22.5sp（与排行榜行完全一致），数字名次 15sp。
  *
- * ## 为什么"版本"三行没有独立标题
- * 用户给的版式是「个人计时赛 / 总积分 总排名 / 版本积分 版本排名 / 全服最快圈数量 最快圈数量排名」，
- * 即三组共用一个「个人计时赛」小标题。版本号写在卡片副标题里（如「8.0.6」），
- * 避免用户误以为"版本积分"是另一个赛季的总和。
+ * ## 小标题在卡片之外
+ * 「个人计时赛」已移到本卡**上方**（用户 2026-10-19 定案），由 [OverviewTab] 渲染。
+ * 卡片内不再有标题行，三组数据直接是 `Column` 的直接子项。
  */
 @Composable
 private fun StatsCard(p: PaddockClient.DriverProfile) {
@@ -533,15 +560,6 @@ private fun StatsCard(p: PaddockClient.DriverProfile) {
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            // ── 卡片标题 ──
-            // 2026-10-19：版本号已删除（用户定案）——「版本积分/版本排名」两行本身
-            // 就是版本维度，标题旁再挂一个 8.0.6 反而让人以为整张卡只算该版本。
-            Text(
-                text = "个人计时赛",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-            )
-
             // ── 三组两列数据 ──
             // 每组 = 左右两个「标题 + 值」列，**两列各自居中对齐**：
             // 左列中心落在卡片宽度的 1/3 处、右列中心落在 2/3 处（用户定案）。
@@ -600,15 +618,11 @@ private fun StatPair(
             title = leftTitle,
             modifier = Modifier.weight(1f),
         ) {
-            // ⚠️ 空值文案与名次侧的「暂无」**必须同色**（2026-10-19 用户反馈
-            //    "一个暂无是黑的、一个是灰的"）：左值走 `pointsText`/`countText`
-            //    返回「暂无」时若用默认主题色（黑）而右侧显式 alpha=0.5（灰），
-            //    同一张卡里两个语义相同的占位符长得不一样。
-            //    统一走 [`StatValueText`]，空值与数字的颜色分支只在这一处定义。
-            StatValueText(
-                text = leftValue,
-                empty = leftValue == EMPTY_VALUE,
-            )
+            // ⚠️ 空值「暂无」与数字**同色**（2026-10-19 用户定案：改用黑色）。
+            //    历史：首版左值走默认主题色（黑）、右侧名次空值显式 alpha=0.5（灰），
+            //    同一张卡里两个「暂无」不同色；随后统一为灰；最终用户要求统一改黑。
+            //    颜色只在这里定义一次，左右两侧都走 [`StatValueText`]。
+            StatValueText(text = leftValue)
         }
         StatCell(
             title = rightTitle,
@@ -616,7 +630,7 @@ private fun StatPair(
         ) {
             val rank = rightRank?.takeIf { it > 0 }?.toInt()
             if (rank == null) {
-                StatValueText(text = EMPTY_VALUE, empty = true)
+                StatValueText(text = EMPTY_VALUE)
             } else {
                 Text(
                     text = rankLabel(rank),
@@ -689,23 +703,20 @@ private val STAT_VALUE_HEIGHT = 30.dp
 private const val EMPTY_VALUE = "暂无"
 
 /**
- * 统计值文本：**空值（「暂无」）统一灰色**，有数据时用主题前景色。
+ * 统计值文本：**空值（「暂无」）与数字同色**，一律用主题前景色。
  *
- * ⚠️ 颜色分支只在这里定义一次（2026-10-19）：此前左值走默认色（黑）、
- *    右侧名次空值显式 `alpha = 0.5f`（灰），同一张卡里两个「暂无」不同色。
+ * 2026-10-19 用户定案：空值不再用灰色（此前 `empty` 参数走 `alpha = 0.5f`）。
+ * 因此不再需要 `empty` 参数——颜色只有一个分支，保留参数只会让人误以为
+ * 「暂无」还有特殊配色。若将来要恢复弱化效果，在这里加分支即可。
  */
 @Composable
-private fun StatValueText(text: String, empty: Boolean) {
+private fun StatValueText(text: String) {
     Text(
         text = text,
         fontSize = 17.sp,
         fontWeight = FontWeight.Bold,
         textAlign = TextAlign.Center,
-        color = if (empty) {
-            colorScheme.onBackground.copy(alpha = 0.5f)
-        } else {
-            colorScheme.onBackground
-        },
+        color = colorScheme.onBackground,
         style = MiuixTheme.textStyles.main.merge(DriverTabularDigits),
     )
 }
