@@ -1,67 +1,77 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-10-20T02:00:00+08:00 · Git HEAD: `80411ef`
+生成时间: 2026-10-20T13:20:00+08:00 · Git HEAD: `7fecbe0`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: 模块 `main` @ `80411ef`（已 push）· 服务端 `main` @ `6b8658b`（已 push）
-- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `80411ef`——HEAD 必是本次 handoff 提交，
+- 锚点: 模块 `main` @ `7fecbe0`（已 push）· 服务端 `main` @ `668d26e`（已 push）
+- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `7fecbe0`——HEAD 必是本次 handoff 提交，
   其 parent 才是文档记录的 SHA
 - 待重探的 [?]: §5 中标记的继承项
-- 先读: `app/src/main/kotlin/tools/alamobile/mod/ui/screen/paddock/AccountSettingsScreen.kt`
-  （文件头 + 三个弹窗的注释写满了「为什么」）
+- 先读: `paddock-api/src/api/account.rs` 的 `hide_missing` 函数头注释
+  （写满了「为什么范围必须是全部缺失圈」）
 
 ## 1. 当前目标
-无进行中的功能切片。本会话完成「账号设置」页：更换头像 / 修改用户名（各 30 天一次）
-+ 屏蔽缺失配置的圈速记录（一次性不可撤销）。两仓已提交、已推送、已部署、已装机。
+无进行中的功能切片。本会话修复了「屏蔽缺失配置的圈速记录」的范围 bug：
+从「只屏蔽每维度获胜圈」改为「屏蔽全部缺失圈」。两仓已提交推送、服务端已部署、
+存量数据已回滚、用户已重新执行并验证通过。
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **服务端已部署**：`paddock-api:1.0.1-account` 运行中（`Up`），
-  `.env` 的 `PADDOCK_IMAGE` 已改，迁移 `0010` 生效（`hidden_missing_laps` 表 +
-  `users` 三个时间戳列均已建）。
-- [V] **线上端点验证**：`/v1/leaderboard/points` 200、`/v1/leaderboard/track/0` 200、
-  `/v1/me/account` 未鉴权 401、`/v1/driver/{id}` 响应含 `"hidden": false`。
-- [V] **APK 已装机**：魅族 20（`192.168.50.142:5555`），APK 01:56:33，
-  `lastUpdateTime=2026-10-20 01:56:43`，Success。
-- [V] **文案双向验证**：新增 6 条全部入包；删除 3 条（「头像、用户名与圈速记录管理」
-  「积分与排名会按剩余记录重新计算」「请谨慎选择」）grep 归零。
-- [V] **测试**：`cargo test --bin paddock-api` → 18 passed / 0 failed / 11 ignored；
-  `./gradlew :app:lint` → BUILD SUCCESSFUL（0 errors）。
-- [V] **版本号未动**：模块 `1.0.4 Alpha 4` / `104140`；服务端 `1.0.1`。
+- [V] **bug 根因定位**：`hide_missing` 用 `DISTINCT ON (gp_index, version_code)` 只取
+  每维度最快圈 → 每维度最多屏蔽 1 条；被屏蔽的获胜圈移出 `best_laps` 后回放挑**次快圈**
+  顶上，而它往往同样缺失 → 「已屏蔽」与「最佳」同挂一条。实机：飞行雪绒 65 条缺失圈
+  只标 7 条（= 7 个维度的获胜圈），GP2/GP3/GP4/GP15 四条同时带两个标。
+- [V] **修复已上线**：镜像 `paddock-api:1.0.1-hidefix`，`.env` 的 `PADDOCK_IMAGE` 已改，
+  容器 `Up`；`/v1/leaderboard/points` 200、`/v1/me/account` 401（未鉴权正确）。
+- [V] **测试**：`cargo test --bin paddock-api` → 18 passed / 0 failed / 14 ignored；
+  真库串行 `-- --ignored --test-threads=1` → **14 passed / 0 failed**（新增 3 条）。
+- [V] **存量数据已回滚**：飞行雪绒 `hidden_missing_at` = NULL、`hidden_missing_laps` 0 条、
+  `best_laps` 恢复到 16 行（含 7 行指向缺失圈 = 屏蔽前原始状态）、`records` 16 行重算。
+  备份在 VPS `~/hidefix-backup-20261020125606.sql`。
+- [V] **用户已重新执行**：`hidden_missing_at` = 2026-10-20 05:10:34 UTC，
+  `hidden_missing_laps` = **65 条**（全部缺失圈）。
+- [V] **三条不变量全部成立**（线上查询实证）：
+  `best_laps` 指向缺失圈 = **0**；`records` 指向被屏蔽圈 = **0**；
+  同圈同时带两标 = **0**。
+- [V] **结果**：剩余 13 个维度（GP0/1/2/4/5/6/7/8/9/10/12/13/14），配置全完整；
+  GP3/GP11/GP15 无任何完整圈 → 维度整体退出榜单。积分 1873，总榜第 2。
+- [V] **版本号未动**：模块 `1.0.4 Alpha 4` / `104140`；服务端 `1.0.1`（镜像 tag 后缀
+  `-hidefix` 只是构建标识，不是 SemVer）。
 - [V] **工作区干净**：两仓 `git status` 均无未提交改动。
 
 ### 测试/build 输出（本次交接 run 的真实输出）
 ```
-$ cargo test --bin paddock-api        → 18 passed; 0 failed; 11 ignored
-$ ./gradlew :app:lint                 → BUILD SUCCESSFUL in 2m 43s（67 warnings, 0 errors）
-$ ./gradlew :app:assembleRelease -x lintVital*  → BUILD SUCCESSFUL，APK 01:56:33
-产物验证：classes.dex grep -a 新增文案 6 条命中 / 删除文案 3 条归零
-装机：adb -s 192.168.50.142:5555 install -r → Success
-部署：docker load → compose up -d app → Up；pg 验证迁移列与表存在
+$ cargo test --bin paddock-api                              → 18 passed; 0 failed; 14 ignored
+$ DATABASE_URL=...55433 cargo test --bin paddock-api -- --ignored --test-threads=1
+                                                            → 14 passed; 0 failed
+$ cargo build --bin paddock-api                             → Finished（3 warnings → 修到 2）
+部署：docker build → save|gzip → scp → VPS docker load → .env 改 PADDOCK_IMAGE
+      → sudo docker compose -f docker-compose.vps.yml up -d app → Up
 ```
 
 ## 3. 决策与理由
-- **屏蔽 = 从 `best_laps` 删行，而非在榜单 SQL 加过滤** [V]——积分/排名/金标全部以
-  `best_laps` 为数据源（`score.rs::scored_cte` 单一窗口定义），删行让下游自动一致。
-  否决方案：各查询加 `NOT EXISTS`，否决原因 = 漏一处就是"榜上看不到但积分还在"。
-- **`hidden_missing_laps` 按 `lap_id` 记，不按 (赛道,版本) 维度** [V]——用户定案「仅屏蔽
-  当时已有的」，按维度记会把之后新传的缺失圈误标「已屏蔽」。
-- **冷却剩余由服务端时钟算** [V]——本机时间可改，客户端不推算"上次操作 + 30 天"。
-- **头像冷却检查必须在 S3 写入之前** [V]——先传后拒会换掉 Garage 对象而 `avatar_key`
-  未更新，URL 版本号不变却指向新内容，客户端磁盘缓存会一直显示旧图。
-- **`cooldown_remaining` 对未来时间戳返回 0** [V]——测试抓到的真 bug：时钟回拨会让
-  剩余超过 30 天、用户被锁死。返回 0 还能自我修复。
-- **`personal_best` 与 `hidden` 在 Rust 侧强制互斥** [V]——`personal_best` 按 `lap_ms`
-  相等判定，同维度两条同毫秒的圈会同时命中。
-- **用户名就是登录名** [V]——用户定案；改完用新名字登录，旧名字释放可被注册。
+- **屏蔽范围 = 全部缺失圈，不是每维度获胜圈** [V]——用户定案。否决方案「循环屏蔽直到
+  没有缺失」，否决原因 = 首版就是按「代表项」筛，代表项被移除后接棒者同类，逻辑上必然漏。
+- **`count_missing_candidates` 必须与 `hide_missing` 同源** [V]——预判与执行分叉会产生
+  「说有候选 → 点了说没有」或「只屏蔽了 1/7」。两处都走 `laps::ASSIST_MISSING_SQL`。
+- **重算改为「先 DELETE 再回放」** [V]——某维度屏蔽后可能一条可用圈都不剩，
+  `INSERT ... ON CONFLICT DO UPDATE` 表达不了「行消失」。
+- **存量数据选「回滚 + 用户重点」而非迁移脚本** [V]——用户定案。注意回滚**不能只清标记**：
+  `best_laps` 已被旧逻辑按「排除 7 条」重算过，光清标记会留下「无红标但最佳不是最快圈」，
+  比修复前更错乱。必须连 `best_laps`/`records` 一起回放到屏蔽前。
+- **`is_assist_missing` 保留并 `#[allow(dead_code)]`** [V]——生产路径不再调用它（改走 SQL），
+  但它是 SQL 表达式的**语义锚点**，测试靠它保证两者不分叉。
 
 ## 4. 失败的尝试 — 不要再试
-- [X] **改完文案就构建装机（未先确认）** [V]——用户中断工具调用并质问
-  「你又失忆了？所有的文案、Icon 最起码都要跟我确认」，且因此**看不见**我新加的弹窗文案
-  （设备上还是旧 APK）。规则已固化进全局记忆 `ask-before-designing-ui`（已加重）。
-- [X] **把 UI 文案表格贴在正文里让用户自由回复** [V]——用户明确要求「用 ask 那种选择题
-  形式逐条问我」。必须是 `AskUserQuestion` 选择题，不是长表格。
-- [X] 继承死路（详 `.handoffs/20261020015929-handoff.md` §4 及更早）：
+- [X] **按「每维度获胜圈」筛缺失配置** [V]——次快圈接棒成「最佳」且同样缺失，
+  用户报「只有少部分显示已屏蔽，还有一堆没屏蔽，而且缺失配置的还有显示最佳的」。
+  判据：任何「按每维度取代表项再筛条件」的写法，先问「移除代表项后接棒的那个是否也满足」。
+- [X] **`l.pedal_mode IN ('single','dual')` 直接写进 `NOT NULL` 布尔列** [V]——列为 NULL 时
+  表达式结果也是 **NULL 不是 false**，撞 `best_laps.pedal_linear NOT NULL`，整个事务回滚。
+  派生位一律 `COALESCE(<expr>, false)`。
+- [X] **`sudo docker compose up` 在 `~/paddock` 下裸跑** [V]——报
+  `no configuration file provided: not found`（该目录只有 `docker-compose.vps.yml`）。
+- [X] 继承死路（详 `.handoffs/20261020131933-handoff.md` §4 及更早）：
   `PickVisualMedia` / `createChooser` 单目标直通 / `EXTRA_INITIAL_INTENTS` /
   `ResolveInfo.loadLabel()` / Kotlin 块注释写 `image/*` / `color = Color(...)` 做金色流光 /
   `loadingMore` 写正常路径末尾 / 0/1/2 固定分栏 / VPS 上 `sed` 改 compose /
@@ -72,35 +82,34 @@ $ ./gradlew :app:assembleRelease -x lintVital*  → BUILD SUCCESSFUL，APK 01:56
   编辑层尺寸=控件尺寸 / 变暗层插 index 0 / `coroutineScope{}` 内多源竞速 /
   Remote Preferences `remove()` / 全局挂 `tnum` / `FontFamily.Monospace` /
   用构造快照 `position` 做触摸基准 / `kerbTapWave` 垫底 / 给旧 APK 留回滚副本 /
-  用 `+6` 偏移硬推 NPatch 版本号。
+  用 `+6` 偏移硬推 NPatch 版本号 / 改完文案就构建装机（未先确认）/
+  把 UI 文案表格贴在正文里让用户自由回复。
 
 ## 5. 已知坑
 - ⚠️ **UI 的图标/文案/命名是用户的决策域，必须用 AskUserQuestion 逐条确认** [V]——
-  见全局记忆 `ask-before-designing-ui`。**产品语义问题 ≠ UI 文案确认**，前者问过不等于后者问过。
-  未确认前不构建、不装机、不部署。
-- ⚠️ **隐藏/屏蔽类功能必须穷举所有重算路径** [V]——见 memory
-  `data-filter-must-cover-all-recalc-paths`。本次漏了 `admin::recalc_dims`（三处查询），
-  会让被屏蔽记录被管理端操作复活。
-- ⚠️ **中文文案验证必须直接 grep dex 字节** [V]——`unzip -p | strings | grep` 会假阴性
-  （UTF-8 字节被 `strings` 跳过）。正确：解压 classes.dex 后 `grep -ac "中文"`。
+  见全局记忆 `ask-before-designing-ui`。未确认前不构建、不装机、不部署。
+- ⚠️ **隐藏/屏蔽类功能：路径要全覆盖 + 执行侧范围也要对** [V]——见 memory
+  `data-filter-must-cover-all-recalc-paths`（本会话补了「范围」与「SQL 三值逻辑」两节）。
+- ⚠️ **VPS compose 必须带 `-f docker-compose.vps.yml`，切镜像只改 `.env`** [V]——
+  见 memory `paddock-deploy-chain-local-build` / `paddock-compose-must-match-vps`。
+- ⚠️ **中文文案验证必须直接 grep dex 字节** [V]——`unzip -p | strings | grep` 会假阴性。
 - ⚠️ **`/handoff` 的 push 无需额外授权，且必须做完** [V]（继承）——报告里出现「待 push」= 违规。
 - ⚠️ **选图/选文件必须自绘选择器** [V]（继承）——见 memory `android-file-picker-no-gms`。
 - ⚠️ **miuix `Text` 的 `color` 覆盖 `style.brush`** [V]（继承）——见 memory
   `miuix-text-color-overrides-brush`。
 - ⚠️ **协程在途标志必须 `try/finally` 复位** [V]（继承）——见 memory
   `coroutine-flag-needs-try-finally`。
-- ⚠️ **部署只改 `.env` 的 `PADDOCK_IMAGE`，永不 sed compose** [V]（继承）——见 memory
-  `paddock-compose-must-match-vps`。
-- ⚠️ **设备操作必须事先获许可** [V]（继承）——本会话两次 `adb install` 均获明确指令。
+- ⚠️ **设备操作必须事先获许可** [V]（继承）——本会话未操作任何设备。
 - ⚠️ **名次必须 `row_number()` 非 `rank()`** [V]（继承）——见 memory `rank-row-number-not-rank`。
 - ⚠️ **Compose `maxLines` 与 `overflow` 正交** [V]（继承）——见 memory
   `compose-maxlines-overflow-orthogonal`。
 - ⚠️ **LazyList 分页哨兵值 `?: -1` 参与 `>= total - N` 恒真** [V]（继承）——见 memory
   `lazylist-pagination-sentinel-trap`。
-- ⚠️ **多设备时 adb 必须 `-s`** [V]——`e98a35cb` = 一加平板 2 Pro（OPD2413），
-  `192.168.50.142:5555` = 魅族 20。本会话只装魅族 20。
-- ⚠️ **VPS docker 需 `sudo`** [V]——`docker ps` 直接跑报 permission denied，
-  必须 `sudo docker ...`（SSH 用户不在 docker 组）。
+- ⚠️ **多设备时 adb 必须 `-s`** [V]（继承）——`e98a35cb` = 一加平板 2 Pro（OPD2413），
+  `192.168.50.142:5555` = 魅族 20。
+- ⚠️ **VPS docker 需 `sudo`** [V]——SSH 用户不在 docker 组。
+- ⚠️ **真库测试必须串行 + 临时库** [V]（继承）——见 memory
+  `sql-test-must-run-serial-and-temp-db`。本会话用 `-p 55433` 临时容器，跑完 `docker stop`。
 - ⚠️ **`carModifier.isTiltSteer`(0x1C4) 的判定是反的** [?]（继承）。
 - ⚠️ **本机（MEIZU 20）不是振感类改动的验收环境** [?]（继承）。
 - ⚠️ **`versionName`/`versionCode` 锁不住构建时间** [?]（继承）——看日志环境块的构建指纹。
@@ -119,18 +128,20 @@ $ ./gradlew :app:assembleRelease -x lintVital*  → BUILD SUCCESSFUL，APK 01:56
   13 用户要的 APK 先看 `/sdcard/Download/` 14 未经许可不得操作设备（最高优先级）。
 
 ## 6. 下一步（有序）
-1. **等用户实机验收账号设置页**：走一遍三个流程（入口卡 → 更换头像/修改用户名冷却提示 →
-   屏蔽确认弹窗）。若有账号下无缺失记录，会先看到「您没有可以屏蔽的圈速记录」Toast。
-2. **（待用户决定）VPS 清理**：`~/paddock` 已积累多个历史镜像（`1.0.1-paging`、
-   `1.0.1-driverstats`、`1.0.1-recfix`、`1.0.1-sort`、`1.0.1-account`）+ 备份 `.tar.gz`
-   + 多个 `.env.bak-*`。清理前先确认当前实跑是 `1.0.1-account`。
-3. **（待用户决定）大奖赛页的产品形态**：当前是占位文案。
+1. **（待你决定）车手主页「隐藏已屏蔽记录」开关**：屏蔽后 65 条红标占列表近一半
+   （该用户 139 条圈）。要不要在 `DriverScreen` 的筛选里加开关？还是保持「全部历史可见」？
+2. **（待你决定）VPS 清理**：`~/paddock` 已积累多个历史镜像（`1.0.1-paging`、
+   `1.0.1-driverstats`、`1.0.1-recfix`、`1.0.1-sort`、`1.0.1-account`、`1.0.1-hidefix`）
+   + 备份 `.tar.gz` + 多个 `.env.bak-*` + 本次的 `~/hidefix-backup-*.sql`。
+   清理前先确认当前实跑是 `1.0.1-hidefix`。
+3. **（待你决定）大奖赛页的产品形态**：当前是占位文案。
 4. **（条件式，用户发话才做）发版**：先问版本号 → tag → CI。当前模块
    `1.0.4 Alpha 4`、服务端 `1.0.1` 均未动。
 
 ## 7. 留给用户的开放问题
-- 圈速卡的「间隔 2 字符」是否合适？（上会话遗留，未回答）
+- 圈速卡的「间隔 2 字符」是否合适？（上上会话遗留，未回答）
 - 「全服最快圈数量」显示跨版本累计数。是否需要在界面上标注"含历史版本"？
 - 大奖赛页最终要做什么？当前只有占位。
 - 排序方式是否需要记忆（下次进页面保持上次选择）？
 - **屏蔽后积分可能上涨**（金标成绩顶上会吃加成）。界面上目前不提这件事，是否需要提示？
+- **屏蔽后车手主页列表被红标淹没**（见下一步 1）。
