@@ -83,6 +83,8 @@ hidden_missing_laps (user_id, lap_id, hidden_at,
               PRIMARY KEY(user_id, lap_id))            -- 2026-10-20：屏蔽缺失配置记录
               -- 按 lap_id 记（不是按赛道维度）——屏蔽是快照，只作用于点击当时
               -- 已存在的圈；按维度记会把之后新传的缺失圈也误标成「已屏蔽」。
+              -- 范围 = 该用户**全部**缺失配置的圈（不是每维度获胜圈——那会让
+              -- 次快的缺失圈接棒成「最佳」，见 hide-missing 段落）。
               -- 积分/榜单从 best_laps 删行即自动生效（score.rs 是唯一窗口定义）；
               -- 红标与 recalc_dims 的重算排除都按这张表判定。
 积分: 查询时按 best_laps 实时 rank 计算，或物化到 score 表（首期实时计算即可，
@@ -115,18 +117,28 @@ GET  /v1/me/account             (Bearer) → {avatar_cooldown_secs, username_coo
                                             hidden_missing, has_hidden_candidates}
     账号设置页的全部状态。**冷却剩余秒数由服务端时钟算**（本机时间可被用户改，
     客户端不自行推算"上次操作 + 30 天"）。`has_hidden_candidates` 口径 =
-    该用户榜上（best_laps）获胜圈五维配置有缺失的维度数 > 0。
+    该用户**全部配置缺失的圈数 > 0**（与 `hide-missing` 的选取集合同源——
+    早期算的是「榜上获胜圈缺失的维度数」，会让"获胜圈完整、次快圈缺失"的用户
+    被判成无可屏蔽记录，2026-10-20 修正）。
 PUT  /v1/me/username            (Bearer) {username} → {username, cooldown_secs} | 409
     ⚠️ **用户名就是登录名**（用户定案 2026-10-20）：改完必须用新名字登录，
     旧名字因 UNIQUE 约束被释放、可被他人注册。30 天一次（`users.username_updated_at`）。
     校验复用 `auth::validate_username`（与注册同一套规则）。
-POST /v1/me/hide-missing        (Bearer) → {hidden: 被移出榜单的维度数}
+POST /v1/me/hide-missing        (Bearer) → {hidden: 被屏蔽的圈数}
     | 400「您没有可以屏蔽的圈速记录」| 409「您已经屏蔽过…该操作无法撤销」
     **一次性、不可撤销**（用户定案）。语义 = 这些成绩不存在：
-    ① 把榜上获胜圈配置缺失的每个 (赛道,版本) 维度的**获胜圈 lap_id** 记进
-       `hidden_missing_laps`（快照语义）；② 删对应 `best_laps` 行；
-    ③ 从剩余圈回放重算 best_laps（**排除 hidden_missing_laps**）；
-    ④ 重算受影响赛道的 `records`（全服纪录也要让位）。
+    ① 把该用户**全部**配置缺失的圈的 lap_id 记进 `hidden_missing_laps`
+       （快照语义）；② 对这些圈涉及的每个 (赛道,版本) 维度重算 `best_laps`
+       （先删行，再从剩余圈回放，**排除 hidden_missing_laps**）；
+    ③ 重算受影响赛道的 `records`（全服纪录也要让位）。
+    ⚠️ **范围 = 全部缺失圈，不是「每维度获胜圈」**（2026-10-20 修正）：
+       首版用 `DISTINCT ON (gp_index, version_code)` 只取每维度最快的圈，结果
+       每维度最多屏蔽 1 条；被屏蔽的获胜圈移出 `best_laps` 后，回放会挑**下一条
+       最快的圈**顶上——而它往往同样缺失配置，于是「缺失」与「最佳」同挂一条，
+       用户看到「只有少部分显示已屏蔽，还有一堆没屏蔽，缺失配置的还显示最佳」。
+       实机数据：飞行雪绒 65 条缺失圈只标了 7 条（= 7 个维度的获胜圈）。
+       `GET /v1/me/account` 的 `has_hidden_candidates` 判据同步改为
+       「全部缺失圈数 > 0」，与屏蔽动作的选取集合同源。
     ⚠️ 排除依据必须是 `hidden_missing_laps` 的 lap_id，**不能**用「配置缺失」判据：
        屏蔽是快照——之后旧版模块再上传的缺失圈照常进榜（用户定案），
        拿配置判据当过滤器会把新圈也挡掉。
