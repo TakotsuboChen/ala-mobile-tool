@@ -81,12 +81,18 @@ records      (gp_index, kind: alltime|version, version_code NULL,
               lap_ms, user_id, updated_at)             -- 全服历史/版本最佳（Toast 判定）
 hidden_missing_laps (user_id, lap_id, hidden_at,
               PRIMARY KEY(user_id, lap_id))            -- 2026-10-20：屏蔽缺失配置记录
-              -- 按 lap_id 记（不是按赛道维度）——屏蔽是快照，只作用于点击当时
-              -- 已存在的圈；按维度记会把之后新传的缺失圈也误标成「已屏蔽」。
-              -- 范围 = 该用户**全部**缺失配置的圈（不是每维度获胜圈——那会让
-              -- 次快的缺失圈接棒成「最佳」，见 hide-missing 段落）。
+              -- ⚠️ **纯审计记录**（2026-10-20 二次定案起）：记「谁在哪一刻屏蔽了
+              -- 哪些圈」，**不参与任何判据**。判据已升级为谓词
+              -- `AUTO_HIDDEN_SQL` = `users.hidden_missing_at IS NOT NULL`
+              -- AND 该圈五维任一 NULL。
+              -- 为什么改：首版按 lap_id 记（快照语义），与配置状态完全解耦 ⇒
+              -- 管理端补全配置后红标不消失、圈也回不了榜（实机报障根因）。
+              -- 谓词语义下：补全配置即自动解除，开关打开期间新传的缺失圈自动
+              -- 被屏蔽。范围仍是该用户**全部**缺失配置的圈（不是每维度获胜圈
+              -- ——那会让次快的缺失圈接棒成「最佳」）。
               -- 积分/榜单从 best_laps 删行即自动生效（score.rs 是唯一窗口定义）；
-              -- 红标与 recalc_dims 的重算排除都按这张表判定。
+              -- 红标（driver.rs）、`recalc_dims` 重算排除、`upload_lap` 闸门
+              -- 三处全部走同一个 `laps::AUTO_HIDDEN_SQL`。
 积分: 查询时按 best_laps 实时 rank 计算，或物化到 score 表（首期实时计算即可，
       16 赛道 × 用户量级小，无性能问题）
 ```
@@ -126,11 +132,17 @@ PUT  /v1/me/username            (Bearer) {username} → {username, cooldown_secs
     校验复用 `auth::validate_username`（与注册同一套规则）。
 POST /v1/me/hide-missing        (Bearer) → {hidden: 被屏蔽的圈数}
     | 400「您没有可以屏蔽的圈速记录」| 409「您已经屏蔽过…该操作无法撤销」
-    **一次性、不可撤销**（用户定案）。语义 = 这些成绩不存在：
-    ① 把该用户**全部**配置缺失的圈的 lap_id 记进 `hidden_missing_laps`
-       （快照语义）；② 对这些圈涉及的每个 (赛道,版本) 维度重算 `best_laps`
-       （先删行，再从剩余圈回放，**排除 hidden_missing_laps**）；
-    ③ 重算受影响赛道的 `records`（全服纪录也要让位）。
+    **一次性、不可撤销**（用户定案）。语义 = 配置缺失的成绩不算数：
+    ① **先**落开关 `users.hidden_missing_at`（**必须早于任何重算**——判据依赖它，
+       后写则谓词恒假、一条都排除不掉）；② 把当前全部缺失圈的 lap_id 记进
+       `hidden_missing_laps`（**纯审计**，不参与判据）；③ 对这些圈涉及的每个
+       (赛道,版本) 维度重算 `best_laps`（先删行，再从剩余圈回放，按谓词排除）；
+    ④ 重算受影响赛道的 `records`（全服纪录也要让位）。
+    ⚠️ **判据是谓词不是快照**（2026-10-20 二次定案）：
+       `AUTO_HIDDEN_SQL` = 「开关打开」且「该圈五维任一 NULL」。因此开关效果持续：
+       补全配置 → 自动解除并回榜（管理端编辑保存即生效）；开关打开期间新传的
+       缺失圈 → 自动被屏蔽。首版是快照（只处理点击当时那批），实机报障为
+       「管理端补全配置后红标仍不消失」。
     ⚠️ **范围 = 全部缺失圈，不是「每维度获胜圈」**（2026-10-20 修正）：
        首版用 `DISTINCT ON (gp_index, version_code)` 只取每维度最快的圈，结果
        每维度最多屏蔽 1 条；被屏蔽的获胜圈移出 `best_laps` 后，回放会挑**下一条
@@ -139,11 +151,10 @@ POST /v1/me/hide-missing        (Bearer) → {hidden: 被屏蔽的圈数}
        实机数据：飞行雪绒 65 条缺失圈只标了 7 条（= 7 个维度的获胜圈）。
        `GET /v1/me/account` 的 `has_hidden_candidates` 判据同步改为
        「全部缺失圈数 > 0」，与屏蔽动作的选取集合同源。
-    ⚠️ 排除依据必须是 `hidden_missing_laps` 的 lap_id，**不能**用「配置缺失」判据：
-       屏蔽是快照——之后旧版模块再上传的缺失圈照常进榜（用户定案），
-       拿配置判据当过滤器会把新圈也挡掉。
-    ⚠️ `admin::recalc_dims` 也必须带同样的排除：否则管理端任何一次编辑/删除
-       触发重算，被屏蔽的记录会被拉回榜单，不可撤销的承诺被打破。
+    ⚠️ **三处路径必须共用同一个谓词**，漏一处就是"榜上不见但积分还在"或
+       "屏蔽了又回来"：`driver.rs` 红标、`admin::recalc_dims` 重算、
+       `upload_lap` 的入库闸门（屏蔽时 best_laps 行已删，原 UPDATE 命中 0 行会
+       走 insert 分支，不看判据直接插回榜单）。
 POST /v1/laps                   {gp_index, lap_ms, version_code,
                                  pedal_mode?, tc_mode?, tc_strength?,
                                  abs_mode?, abs_strength?}   (Bearer)
@@ -173,7 +184,10 @@ GET  /v1/driver/{user_id}?gp_index=&version=&assist=zero&best=1&sort=&limit=&off
      version_name / lap_ms / lap_display / personal_best / pedal / tc / abs /
      zero_assist / created（北京时间）/ **hidden**。
      （2026-10-20 加 `hidden`：该圈被本人「屏蔽缺失配置记录」移出了榜单 →
-     客户端显示红色「已屏蔽」标签。与 `personal_best` 互斥——屏蔽即删 best_laps 行。）
+     客户端显示红色「已屏蔽」标签。与 `personal_best` 互斥——屏蔽即删 best_laps 行。
+     ⚠️ 判据是谓词 `AUTO_HIDDEN_SQL`（开关打开 AND 该圈配置缺失），**不是**
+     `hidden_missing_laps` 的 lap_id 匹配——后者是快照语义，补全配置后红标
+     永远不消失，用户实机报障即此。）
      筛选：gp_index 0..15、version=游戏 versionCode、assist=zero（TC 与 ABS 均关）、
      best=1（仅个人最佳，与榜单 best_laps 同源）。404 = 车手不存在。
 
