@@ -167,6 +167,7 @@ Update `OffsetTable.kt` after every IL2CPP dump.
 
 ## Key Code Conventions
 
+- **native 运行时开关必须单一事实源（2026-10-22 定案）**：`install` 期从 config 取初值写进 `g_*_active`，此后运行时回调**只判 `g_*_active`**，`g_config.enable_*` 只作初值来源、运行时永不读。⚠️ 旧实现 `g_x_active || g_config.enable_x` 双判据是**功能永远关不掉**的结构性缺陷：config 在 install 后固化、运行时无写点 ⇒ `0 || true` 恒真 ⇒ 用户关开关必须重启游戏（实机日志实证：`21:23:12 setUnlockSteerAngle false` 后 `21:25:14` 仍在 bypass）。同一形态曾逐字复制在 `steer_limit_hook.c` / `drs_hook.c` / `overtake_hook.c` / `next_lap_hook.c`，四份已一并修复，**不要恢复 `||`**。判据 = 「运行时有没有一个 setter 写得到那个变量」——`pedal_hook.c` 的 TC/ABS 是**正确反例**（`pedal_set_tc_abs` 直接写 `g_config.enable_tc/enable_abs` 本身，config 即唯一权威，勿改）。见 memory `runtime-switch-single-source-of-truth`。
 - Package root: `tools.alamobile.mod`
 - `AlaMobileModule` is the single `XposedModule` subclass and entry point. Register it in `src/main/resources/META-INF/xposed/java_init.list`.
 - Keep the native bridge surface small. Java passes only resolved offsets and feature toggles to `libala-core.so`.
