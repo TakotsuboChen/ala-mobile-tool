@@ -62,8 +62,14 @@ static void *g_state_orig = NULL;
 static void *g_manual_drs_addr = NULL;
 static volatile int g_hooks_installed = 0;
 
-// 运行时开关（Java 配置同步）。与 g_config.enable_auto_drs 二选一为真即启用，
-// 便于 Java 端在不重装 hook 的前提下改开关（同 pedal_set_tc_abs 模式）。
+// 运行时开关（Java 配置同步）。**这是唯一权威**：g_config.enable_auto_drs 只在
+// install 时提供初值，此后运行时永不读取。
+//
+// ⚠️ 旧实现是 `g_auto_active || g_config.enable_auto_drs` 双判据：开着开关启动
+//    游戏 ⇒ install 把 g_config.enable_* 固化为 true，而运行时 setter 只清
+//    g_auto_active ⇒ `0 || true` 恒真 ⇒ **关掉开关不生效，必须重启游戏**
+//    （2026-10-22 实机日志实证，同 steer_limit_hook.c 条目的完整说明）。
+//    同一形态曾逐字复制在 4 个 hook 文件里，已一并修复。**不要恢复 `||`**。
 static volatile int g_auto_active = 0;
 
 // 重入守卫：auto 部署会在 orig 返回后再调 ManualDRSUsage，后者同步回调
@@ -119,7 +125,7 @@ static void proxy_on_drs_state_changed(void *this, int new_state, void *method_i
     // 处理过"；调用之后再读永远是 1，闩锁失效。
     int zone_seen = 0;
     int is_double_drs_era = 0;
-    if (new_state == DRS_STATE_DEPLOYABLE && (g_auto_active || g_config.enable_auto_drs)) {
+    if (new_state == DRS_STATE_DEPLOYABLE && g_auto_active) {
         zone_seen = *(volatile unsigned char *) ((uintptr_t) this + OFF_CARMODIFIER_DRS_ALERT_ZONE) != 0;
         is_double_drs_era = *(volatile int *) ((uintptr_t) this + OFF_CARMODIFIER_CAR_TYPE) == CAR_TYPE_DOUBLE_DRS_ERA;
     }
@@ -133,7 +139,7 @@ static void proxy_on_drs_state_changed(void *this, int new_state, void *method_i
     if (new_state != DRS_STATE_DEPLOYABLE) {
         return; // Active(4)/Idle(1) 等状态变化与自动部署无关
     }
-    if (!g_auto_active && !g_config.enable_auto_drs) {
+    if (!g_auto_active) {
         return;
     }
     if (g_in_proxy) {

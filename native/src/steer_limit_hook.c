@@ -109,12 +109,19 @@ static void *g_set_angle_stub = NULL;
 static void *g_set_angle_orig = NULL;
 static volatile int g_hooks_installed = 0;
 
-// 运行时开关（Java 配置同步）。与 g_config.enable_unlock_steer_angle 二选一
-// 为真即启用（同 next_lap_hook.c / overtake_hook.c 的双判据惯例）。
+// 运行时开关（Java 配置同步）。**这是唯一权威**：g_config.enable_unlock_steer_angle
+// 只在 install 时提供初值，此后运行时永不读取。
+//
+// ⚠️ 旧实现是 `g_unlock_active || g_config.enable_unlock_steer_angle` 双判据：
+//    开着开关启动游戏 ⇒ install 把 g_config.enable_* 固化为 true，而运行时
+//    setter 只清 g_unlock_active ⇒ `0 || true` 恒真 ⇒ **关掉开关不生效，必须
+//    重启游戏**（2026-10-22 实机日志实证：21:23:12 下发 false，21:25:14 仍在打
+//    "speed-based limit bypassed"）。同一形态曾逐字复制在 drs_hook.c /
+//    overtake_hook.c / next_lap_hook.c，四份已一并修复。**不要恢复 `||`**。
 static volatile int g_unlock_active = 0;
 
 static inline int unlock_enabled(void) {
-    return g_unlock_active || g_config.enable_unlock_steer_angle;
+    return g_unlock_active;
 }
 
 // 直接按偏移读写 float 字段。不用 IL2CPP 的 Field 访问器：那需要

@@ -84,12 +84,19 @@ static void *g_invalidate_stub = NULL;
 static void *g_invalidate_orig = NULL;
 static volatile int g_hooks_installed = 0;
 
-// 运行时开关（Java 配置同步）。与 g_config.enable_protect_next_lap 二选一为真
-// 即启用（同 overtake_hook.c 的双判据惯例），Java 端改开关无需重装 hook。
+// 运行时开关（Java 配置同步）。**这是唯一权威**：g_config.enable_protect_next_lap
+// 只在 install 时提供初值，此后运行时永不读取。
+//
+// ⚠️ 旧实现是 `g_protect_active || g_config.enable_protect_next_lap` 双判据：
+//    本功能**默认开**，用户从「开」改「关」时必中招——install 已把 g_config
+//    固化为 true，运行时 setter 只清 g_protect_active ⇒ `0 || true` 恒真 ⇒
+//    **关掉开关不生效，必须重启游戏**（2026-10-22 实机日志实证，同
+//    steer_limit_hook.c 条目的完整说明）。同一形态曾逐字复制在 4 个 hook
+//    文件里，已一并修复。**不要恢复 `||`**。
 static volatile int g_protect_active = 0;
 
 static inline int protect_enabled(void) {
-    return g_protect_active || g_config.enable_protect_next_lap;
+    return g_protect_active;
 }
 
 // odometerHandler::InvalidateLap(float trackPercentage, bool isInPit)

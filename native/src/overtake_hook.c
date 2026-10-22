@@ -58,8 +58,14 @@ static void *g_release_orig = NULL;
 static void *g_disable_otk_addr = NULL;
 static volatile int g_hooks_installed = 0;
 
-// 运行时开关（Java 配置同步）。与 g_config.enable_latch_overtake 二选一为真
-// 即启用（同 drs_hook.c 的双判据惯例），Java 端改开关无需重装 hook。
+// 运行时开关（Java 配置同步）。**这是唯一权威**：g_config.enable_latch_overtake
+// 只在 install 时提供初值，此后运行时永不读取。
+//
+// ⚠️ 旧实现是 `g_latch_active || g_config.enable_latch_overtake` 双判据：开着
+//    开关启动游戏 ⇒ install 把 g_config.enable_* 固化为 true，而运行时 setter
+//    只清 g_latch_active ⇒ `0 || true` 恒真 ⇒ **关掉开关不生效，必须重启游戏**
+//    （2026-10-22 实机日志实证，同 steer_limit_hook.c 条目的完整说明）。
+//    同一形态曾逐字复制在 4 个 hook 文件里，已一并修复。**不要恢复 `||`**。
 static volatile int g_latch_active = 0;
 
 // 「当前锁定态是本模块在**哪个实例**上建立的」—— 只有回调的 this 与之相同，
@@ -71,7 +77,7 @@ static volatile int g_latch_active = 0;
 static void *g_latched_hc = NULL;
 
 static inline int latch_enabled(void) {
-    return g_latch_active || g_config.enable_latch_overtake;
+    return g_latch_active;
 }
 
 static inline int overtake_active(void *hc) {
