@@ -1,81 +1,90 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-10-25T00:28:00+08:00 · Git HEAD: `21dfefa`
+生成时间: 2026-10-25T01:12:00+08:00 · Git HEAD: `74ea465`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: 模块 `main` @ `21dfefa`（已 push）· 服务端未动
-- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `21dfefa`——HEAD 必是本次 handoff 提交，
+- 锚点: 模块 `main` @ `74ea465`（已 push）· 服务端未动（`8a2da78`，10-20）
+- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `74ea465`——HEAD 必是本次 handoff 提交，
   其 parent 才是文档记录的 SHA
 - 待重探的 [?]: §5 中标记的继承项
 - 先读: `app/src/main/kotlin/tools/alamobile/mod/util/NPatchVersionGate.kt`（门控单一事实源）
 
 ## 1. 当前目标
-无进行中的功能切片。本会话完成 **NPatch 版本门控**：游戏进程内要求框架版本与
-管理器版本都精确等于 846，否则零 hook + 循环 Toast；概览页拆成两个并排胶囊。
+无进行中的功能切片。本会话完成 **NPatch 850 适配**：打 Fix 3 共存包（仅改
+versionName 后缀）、模块门控升到 850 + Fix 3、模块发 `1.0.4 Beta 1`，已装机
+实测通过。
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **门控真机生效**：847 测试包装魅族 20 后，`ala_tool.log` 记录
-  `[W/ForceUpdateGate] NPatch version MISMATCH → zero hooks, framework=846,
-  manager=846, required=847, toast loop started`；此后日志彻底停止（10818 行后再无输出），
-  `grep -c "shadowhook|native|overlay|pedal|drs|overtake|slip|kerb"` → **0 命中**；
-  `ala_tool_native.log` mtime 仍停在 10-22 ⇒ ShadowHook 根本没 init。
-- [V] **框架识别可用**：环境块打印 `框架: NPatch 框架=846 / 管理器=846`，
-  两个物理分离的来源都读到且一致（`frameworkVersionCode` 注入值 + PackageManager 查询值）。
-- [V] **846 已改回**：反汇编确认 `const-wide/16 v4, 0x34e`（846）在包、`0x34f`（847）零命中。
-- [V] **双胶囊已装机验收**：用户确认「正常了」——两个并排胶囊都显示正确。
-- [V] **构建**：`./gradlew :app:assembleRelease -x :app:lintVitalAnalyzeRelease
-  -x :app:lintVitalRelease` → BUILD SUCCESSFUL in 2m5s。`:app:lint` → BUILD SUCCESSFUL
-  （67 warnings / 0 errors，均为既有）。
+- [V] **NPatch 850 实测通过**：用户报「测试正常」——Fix 3 包经 NPatch 850 注入
+  自签后，模块功能正常（MEIZU 20 / Android 16）。模块 Alpha 5 装机测试。
+- [V] **Fix 3 = Fix 2 + 仅 versionName**：`unzip -l` 条目数 587 = 587，diff 无差异；
+  `classes.dex` / `classes2.dex` / `resources.arsc` / `libil2cpp.so` /
+  `global-metadata.dat` 五个关键文件 sha256 **逐字节相同**。
+- [V] **Fix 3 产物**：`安装包/Ala Mobile Pro 8.0.6 Fix 3 原版.apk`（629,928,350 B，
+  sha256 `e0e4e953…`，npatch 条目 0）+ `Ala Mobile Pro 8.0.6 Fix 3.apk`
+  （630,816,017 B，md5 `0c82727057d0988603b39776dbeadba2`，npatch 条目 4）。
+- [V] **850 的 npatch 布局变化**：846 是 5 条目（`so/{arm64-v8a,x86_64}/libnpatch.so`），
+  850 是 **4 条目**（扁平 `assets/npatch/libnpatch.so` 551,176 B 单库）。
+  `origin.apk` 629,928,350 B 与推送的裸包**字节数完全相同** ⇒ 只包壳、本体未改。
+- [V] **签名逐代相同**：`b3720382…3a57`（850）与 846 代一致 ⇒ 老用户可覆盖安装。
+- [V] **门控常量**：`SUPPORTED_NPATCH_VERSION_CODE = 850L`、`SUPPORTED_COEX_FIX = 3`、
+  `SUPPORTED_VERSION_NAME/CODE` 未动（8.0.6 / 200150）。
+- [V] **模块产物**：`versionName='1.0.4 Beta 1'` / `versionCode='104210'`；
+  baksmali 反查 `const-wide/16 0x352`（850）3 处、`0x34e`（846）**0 处**；
+  签名 `CN=AlaMobileTool` / `e0bc20a5…`。
+- [V] **装机**：魅族 20 已装 `1.0.4 Beta 1` / `104210`（`install -r` Success）。
+- [V] **构建 + lint**：`assembleRelease` BUILD SUCCESSFUL（2m49s）；
+  `:app:lint` BUILD SUCCESSFUL exit 0（1m56s，67 warnings / 0 errors）。
+- [V] **旧包已清理**：删除 Fix 1/2 四份（约 2.4GB），`安装包/` 只留 Fix 3 两份
+  + 三份历史包（`官方原版.apks` / `Takotsubo 共存版.apk` / `(NPatch打包 + 自签).apk`）。
 - [V] **工作区干净**：`git status --short --branch -uall` → `## main...origin/main`。
-- [V] **版本号未动**：模块 `1.0.4 Alpha 4` / `104140`。
 
 ### 测试/build 输出（本次交接 run 的真实输出）
 ```
-$ ./gradlew :app:lint
-BUILD SUCCESSFUL in 1m 39s
-Lint found 67 warnings, 4 hints (and 2 errors and 14 warnings filtered by baseline lint-baseline.xml)
-
 $ ./gradlew :app:assembleRelease -x :app:lintVitalAnalyzeRelease -x :app:lintVitalRelease
-BUILD SUCCESSFUL in 2m 5s
-50 actionable tasks: 12 executed, 38 up-to-date
+BUILD SUCCESSFUL in 2m 49s
+50 actionable tasks: 20 executed, 30 up-to-date
 
-$ baksmali d classes.dex -o out && grep -rn "0x34e\|0x34f" out/
-out/qi0.smali:1409:    const-wide/16 v16, 0x34e
-out/zd1.smali:87:    const-wide/16 v0, 0x34e
-out/tm1.smali:660:    const-wide/16 v3, 0x34e
-# 0x34f 零命中
+$ ./gradlew :app:lint
+BUILD SUCCESSFUL in 1m 56s
+Lint found 67 warnings, 4 hints (and 2 errors and 14 warnings filtered by lint-baseline.xml)
+
+$ aapt2 dump badging app-release.apk
+versionCode='104210'  versionName='1.0.4 Beta 1'
+
+$ unzip -p <Fix3.apk> assets/npatch/config.json | grep VERSION_CODE
+"VERSION_CODE":850
 ```
 
 ## 3. 决策与理由
-- **门控判据 = 精确等于，不是 `>=`** [V]——用户原话「以后永远精确等于」。
-  否决方案「>= 846 放行」：用户明确否决过「什么大于等于，精确等于还">= 846 才放行"，你管这个叫等于？」
-- **用 `frameworkVersionCode` 不用 `frameworkVersion`** [V]——NPatch 846 上后者
-  硬编码返回 `"v1.0.7"`（上游 `core/build.gradle.kts:250` 未随发版更新），
-  与包内 `config.json` 的 `1.0.9` 都对不上。
-- **游戏进程与模块进程的判据必须分开** [V]——模块 App 是普通 App，永不被 Xposed
-  注入 ⇒ `currentFrameworkKind()` 恒 `UNKNOWN` ⇒ `evaluateNPatchGate` 在模块进程
-  恒返回 Pass。早期复用导致 `GameVersionStatus.NPatchOutdated` 成为**死分支**（实机：
-  门控已生效但胶囊仍绿色「已适配」）。模块进程改用 `evaluateManagerVersionGate`（只看管理器）。
-  见 memory `npatch-version-gate-independent-dimension`。
-- **两个独立胶囊而非一个** [V]——用户定案「只显示 Ala Mobile Pro 的，不显示 NPatch 的」。
-  游戏包版本与 NPatch 版本正交，合成一个会丢失"哪个组件有问题"。见 §4 相关死路。
-- **框架信息走进程级 `System.setProperty`** [V]——用户定案。否决方案「写信箱文件
-  传给模块进程」：用户选了纯查管理器版本，不需要。
-- **装机前必须先问设备** [V]——用户定案设备必须点名，不得从 `adb devices` 推断。
+- **Fix 3 只改 versionName 后缀，不动包内容** [V]——用户定案。因为双精确相等门控
+  要求包形态与框架版本配套，同引擎内升 NPatch 也要发新 Fix 号。
+- **门控升级而非临时放宽** [V]——用户选「改成 Fix 3 + NPatch 850，发模块新版」，
+  否决「临时放宽为兼容旧值」与「先不动模块只测 846」。
+- **版本号 `1.0.4 Beta 1` / `104210`** [V]——用户指定，编码符合规范
+  （A.B.C=104 · 阶段2=Beta · D=1 · 保留0）。
+- **模块自带 ShadowHook，与 NPatch 847 剥离无关** [V]——`libala-core.so` 的
+  `NEEDED` 指向模块 APK 自己的 `libshadowhook.so`（101,880 B）。真风险是
+  bhook（inline hook）与 ShadowHook 的框架共存，实测无冲突。
+  见 memory `npatch-strips-own-shadowhook-not-modules`。
+- **产物判据改用 config.json 的 VERSION_CODE** [V]——条目数随 NPatch 版本变
+  （846=5 / 850=4），不能当指纹。见 memory `npatch-artifact-fingerprint`。
 
 ## 4. 失败的尝试 — 不要再试
-- [X] **门控游戏包内 `assets/npatch/config.json` 的 `lspConfig.VERSION_CODE`** [V]——
-  那是"打包时用了哪个 NPatch"，不是"当前注入的是哪个"；且 cache 模式下游戏进程读不到。
-  用户原话：「我要的是 NPatch 这个 App 的门控……不是门控共存版游戏本体」。
-  整条实现已 revert 重写。
-- [X] **模块进程复用 `evaluateNPatchGate`** [V]——恒返回 Pass，UI 分支永远走不到。
-- [X] **把 NPatch 状态塞进游戏包胶囊的文案里** [V]——用户要的是两个并排胶囊。
-- [X] **文案指向"下载共存版"** [V]——用户两次纠正「没水喝就去买辣条？」。必须指向
-  「到 QQ 群下载最新 NPatch」。
-- [X] **用 hook 强制拦截代替"想起来问"** [V]——用户否决 `guard-adb.py` /
-  `session-redlines.py`，原话「不要这样，就要想起来问」。两脚本已删除、settings.json hooks 段已清空。
-- [X] 继承死路（详 `.handoffs/20261025002748-handoff.md` §4 及更早）：
+- [X] **「assets/npatch/ 条目数 = 5」当已修补指纹** [V]——850 改成 4 条目，
+  实测时一度误判成「修补失败/缺文件」。改用 `config.json` 的 `VERSION_CODE`。
+- [X] **`grep "0x34e"` 判常量是否进包** [V]——命中的是 `0x34e696b7`（32 位哈希），
+  **前缀匹配假阳性**。必须匹配完整指令形态 `const-wide/16 vN, 0x34e`。
+- [X] **后台跑 `cmd | tail -8`** [V]——`tail` 缓冲到进程结束才吐字，输出文件
+  长时间 0 字节，误以为卡住。后台命令直接重定向全量输出。
+- [X] **把「要不要 git commit」拿去 AskUserQuestion** [V]——用户答「/handoff 才
+  提交啊，你神经吗」。全局 CLAUDE.md 已写明提交策略，问它 = 把定好的规则推回用户。
+  见 memory `ask-before-any-approach` 的反面小节。
+- [X] 继承死路（详 `.handoffs/20261025011016-handoff.md` §4 及更早）：
+  门控 `assets/npatch/config.json` 的 `lspConfig.VERSION_CODE`（那是打包时用的版本，
+  不是注入时的）/ 模块进程复用 `evaluateNPatchGate`（恒 Pass）/ NPatch 状态塞进游戏包
+  胶囊文案 / 文案指向"下载共存版" / 用 hook 强制拦截代替"想起来问" /
   `PickVisualMedia` / `createChooser` 单目标直通 / `EXTRA_INITIAL_INTENTS` /
   `ResolveInfo.loadLabel()` / `color = Color(...)` 做金色流光 / `loadingMore` 写正常路径末尾 /
   0/1/2 固定分栏 / VPS 上 `sed` 改 compose / 两个 BlurredBar 共用 backdrop /
@@ -89,38 +98,40 @@ out/tm1.smali:660:    const-wide/16 v3, 0x34e
   `g_*_active || g_config.enable_*` 双判据 / `baksmali` 搜中文（`\uXXXX` 转义假阴性）。
 
 ## 5. 已知坑
-- ⚠️ **NPatch 门控有两条判据不同的路径** [V]——见 CLAUDE.md `NPatchVersionGate.kt`
-  条目与 memory `npatch-version-gate-independent-dimension`。改门控前先确认改的是哪条。
-- ⚠️ **模块进程 UI 显示"已适配"不等于游戏放行** [V]——管理器版本 ≠ 包内框架版本时
-  会误判。游戏内循环 Toast 才是权威提示。
+- ⚠️ **NPatch 门控有两条判据不同的路径** [V]——游戏进程判框架+管理器双 850；
+  模块进程只判管理器。改门控前先确认改的是哪条。见 CLAUDE.md `NPatchVersionGate.kt`
+  条目与 memory `npatch-version-gate-independent-dimension`。
+- ⚠️ **模块进程 UI 显示"已适配"不等于游戏放行** [V]——管理器版本 ≠ 包内框架版本
+  时会误判。游戏内循环 Toast 才是权威提示。
+- ⚠️ **850 起 `assets/npatch/` 是 4 条目扁平布局** [V]——见 memory
+  `npatch-artifact-fingerprint`。判注入版本只认 `config.json` 的 `VERSION_CODE`。
 - ⚠️ **产物实证三链** [V]——见 memory `apk-artifact-verification-chain`。
-  APK 大小相同 ≠ 没变（三次构建都是 11392575 字节但内容确实变了）。
-- ⚠️ **`baksmali` 输出把中文转成 `\uXXXX`** [V]——`grep "NPatch："` 恒零命中，
-  搜 ASCII 前缀或直接 `unzip -p | grep -a`。
+  APK 大小相同 ≠ 没变。
+- ⚠️ **`baksmali` 输出把中文转成 `\uXXXX`** [V]——搜 ASCII 前缀或直接
+  `unzip -p | grep -a`。
 - ⚠️ **native 运行时开关必须单一事实源** [V]（继承）——见 memory
   `runtime-switch-single-source-of-truth`。
 - ⚠️ **隐藏/屏蔽类功能：路径全覆盖 + 范围对 + 判据形态对** [V]（继承）——见 memory
   `data-filter-must-cover-all-recalc-paths`。
 - ⚠️ **UI 的图标/文案/命名是用户的决策域** [V]（继承）——见 memory `ask-before-designing-ui`。
-- ⚠️ **报症状时先消歧** [V]——「不显示」可能是缺一部分而非全没有，见 memory
-  `ask-before-any-approach`。
+- ⚠️ **待决事项必须用 AskUserQuestion；已由明文策略定好的事不许问** [V]——见 memory
+  `ask-before-any-approach`（含本次两处实例）。
+- ⚠️ **报症状时先消歧** [V]——见 memory `ask-before-any-approach` 的消歧小节。
 - ⚠️ **VPS compose 必须带 `-f docker-compose.vps.yml`，切镜像只改 `.env`** [V]（继承）。
-- ⚠️ **中文文案验证必须直接 grep dex 字节** [V]（继承）。
 - ⚠️ **`/handoff` 的 push 无需额外授权，且必须做完** [V]（继承）。
 - ⚠️ **选图/选文件必须自绘选择器** [V]（继承）——见 memory `android-file-picker-no-gms`。
 - ⚠️ **miuix `Text` 的 `color` 覆盖 `style.brush`** [V]（继承）。
 - ⚠️ **协程在途标志必须 `try/finally` 复位** [V]（继承）。
-- ⚠️ **设备操作必须事先获许可** [V]（继承）。
+- ⚠️ **设备操作必须事先获许可** [V]（继承）——见 memory `no-autonomous-device-control`。
 - ⚠️ **名次必须 `row_number()` 非 `rank()`** [V]（继承）。
 - ⚠️ **LazyList 分页哨兵值 `?: -1` 参与 `>= total - N` 恒真** [V]（继承）。
 - ⚠️ **多设备时 adb 必须 `-s`** [V]（继承）——`e98a35cb` = 一加平板 2 Pro（OPD2413），
-  `192.168.50.142:5555` = 魅族 20（Flyme 12.6，Android 16，NPatch 846）。
+  `192.168.50.142:5555` = 魅族 20（Flyme 12.6，Android 16，NPatch 850）。
 - ⚠️ **本机（MEIZU 20）不是振感类改动的验收环境** [?]（继承）。
-- ⚠️ **`versionName`/`versionCode` 锁不住构建时间** [?]（继承）。
+- ⚠️ **`versionName`/`versionCode` 锁不住构建时间** [?]（继承，`EnvInfo` 已修）。
 - ⚠️ **旧版（9/14 前）有「卡加载」bug** [?]（继承）。
-- ⚠️ **改 `SUPPORTED_COEX_FIX` / `SUPPORTED_NPATCH_VERSION_CODE` 都是发版动作** [?]。
 - ⚠️ **`Fallback` 振感路径仍是死代码路径** [?]（继承）。
-- ⚠️ **NPatch 843 起仍有边界：管理器晚于游戏启动时不会自动重连** [?]（继承）。
+- ⚠️ **NPatch 管理器晚于游戏启动时不会自动重连** [?]（继承，843 起仍有边界）。
 - ⚠️ **路肩（primitive）全机型正常，抓地力（连续波形）全机型异常** [?]（继承）。
 - ⚠️ **`carModifier.isTiltSteer`(0x1C4) 的判定是反的** [?]（继承）。
 - ⚠️ **对话纪律** [?]（继承）：1 逐条消化 mid-turn 消息 2 旧快照不当现在时 3 装机前验设备 APK 版本
@@ -130,20 +141,23 @@ out/tm1.smali:660:    const-wide/16 v3, 0x34e
   13 用户要的 APK 先看 `/sdcard/Download/` 14 未经许可不得操作设备（最高优先级）。
 
 ## 6. 下一步（有序）
-1. **（待你决定）发版**：NPatch 门控是**用户可感知的破坏性变更**——所有 NPatch 版本
-   ≠ 846 的用户升级模块后会被拦（零 hook + 循环 Toast）。发版前需先确认用户群里的
-   NPatch 版本分布，或先在群里发通知。**版本号定多少必须问用户**。
-2. **（待你决定）`.claude/skills/coex-apk-builder` 的 NPatch 升版流程实跑一次**：
-   本次只改了文档，没有真的打过一个新 NPatch 版本的包来验证第 7 步。
-3. **（待你决定）车手主页「隐藏已屏蔽记录」开关**：该用户仍有 21 条红标（142 条圈里）。
-4. **（待你决定）VPS 清理**：`~/paddock` 已积累多个历史镜像 + 备份 `.tar.gz`
-   + `.env.bak-*`。清理前先确认当前实跑是 `1.0.1-autohide`。
-5. **（待你决定）大奖赛页的产品形态**：当前是占位文案。
+1. **（待你决定）发版**：`1.0.4 Beta 1` 已构建并装机验证，但**未发布**。发布 = 打 tag
+   + push，CI 自动发 Pre-release（Beta 走 prerelease=true）。⚠️ 发版时机完全由你决定，
+   我不主动提议。
+2. **（待你决定）车手主页「隐藏已屏蔽记录」开关**：服务端已有能力（`8a2da78` 把屏蔽
+   从快照升级为持续生效开关），模块 UI 侧 `grep hideHidden|hide_masked|隐藏已屏蔽`
+   **零命中**，开关未做。
+3. **（待你决定）VPS 清理**：`~/paddock` 已积累多个历史镜像 + 备份 `.tar.gz`
+   + `.env.bak-*`。清理前先确认当前实跑镜像 tag。
+4. **（待你决定）大奖赛页的产品形态**：当前是占位 Toast「开发中，敬请期待！」。
+5. **（待你决定）NPatch 版本号换算表补全**：`docs/NPATCH_CACHE_CRASH_NOTES.md`
+   §14.3 只记录了 847/849/850 的发布说明原文，**未做偏移换算**（缺 850 对应的公开
+   镜像 commitCount）。要补需按 §14 的「核对手法」重新锚定。
 
 ## 7. 留给用户的开放问题
-- **NPatch 门控会拦住所有版本 ≠ 846 的用户**。是否要先在群里通知？还是等他们
-  自己撞到 Toast 再说？Toast 文案已指向「到 QQ 群下载最新 NPatch」。
-- 圈速卡的「间隔 2 字符」是否合适？（三轮前遗留，未回答）
+- **NPatch 门控现在要求 850**。846 及更早的用户升级模块后会被拦（零 hook +
+  循环 Toast，文案指向「到 QQ 群下载最新 NPatch」）。是否要先在群里通知？
+- 圈速卡的「间隔 2 字符」是否合适？（遗留，未回答）
 - 「全服最快圈数量」显示跨版本累计数。是否需要在界面上标注"含历史版本"？
 - 大奖赛页最终要做什么？当前只有占位。
 - 排序方式是否需要记忆（下次进页面保持上次选择）？
