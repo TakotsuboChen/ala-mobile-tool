@@ -627,9 +627,49 @@ grep -c "method public constructor <init>()V" out/top/nkbe/npatch/ShizukuService
 
 `HomeScreen.kt`（265 行，首页计数卡片改并排）、`AboutScreen.kt`（+53，`InfoChip` 显示 `VERSION_NAME`/`VERSION_CODE` + 官网按钮 `https://npatch.nkbe.top`）、`.github/ISSUE_TEMPLATE/*` 重构（新增 `contribution.yml`）、三套 `strings.xml` 各 +3 行（`about_build_number` 等）。
 
-⚠️ **manager 的 UI 改动不进游戏包**：共存版 APK 的 `assets/npatch/` 只有 5 个条目（`config.json` / `loader.bin` / `origin.apk` / `so/{arm64-v8a,x86_64}/libnpatch.so`）。验证"关于页新增版本号显示"这类改动，对象是 **NPatch 管理器 APK**（`dumpsys package top.nkbe.npatch` 看 `versionCode`），不是游戏 APK。
+⚠️ **manager 的 UI 改动不进游戏包**：共存版 APK 的 `assets/npatch/` 在 846 是 5 个条目（`config.json` / `loader.bin` / `origin.apk` / `so/{arm64-v8a,x86_64}/libnpatch.so`）；**850 起改为 4 个条目**（扁平 `assets/npatch/libnpatch.so` 单库，见 §14.3）。验证"关于页新增版本号显示"这类改动，对象是 **NPatch 管理器 APK**（`dumpsys package top.nkbe.npatch` 看 `versionCode`），不是游戏 APK。
 
-### 14.2 实测状态（2026-10-18）[V]
+### 14.3 847 / 849 / 850 的改动（2026-10-25 用户提供发布说明）
+
+⚠️ **本节只记录作者发布说明原文要点，未做偏移换算**——§14 开头明确要求「新增记录必须重新锚定，不要沿用旧偏移硬推」，而这三版对应的公开镜像 `commitCount` 尚未取得。需要换算时按 §14 的「核对手法」重新锚定。
+
+**847 — 签名绕过框架迁移（影响面最大的一版）**
+
+> 我们将签名绕过后端的 PLT/GOT Hook 方案由 爱奇艺的 xHook 全面迁移至 字节跳动的 bhook，同时剥离了 ShadowHook 依赖，使 bhook 得以独立轻量运作。
+> 这次重构旨在显著提升原生层签名绕过的效能与整体稳定性……即使是在压缩后发布的版本，它也小了约 0.5MB。
+> 由于涉及核心 Native 机制的调整，影响范围较广，特在此频道发布测试版。
+
+⚠️ **对本模块的影响评估（2026-10-25 实测前分析）**：
+- **模块自身的 inline hook 不受影响**：`libala-core.so` 的 `NEEDED` 指向 `libshadowhook.so`，而该库是**模块 APK 自己打包的**（101,880 B，`app/build.gradle.kts` 的 `implementation(libs.shadowhook)` + prefab），与框架自带的那份无关。框架剥离 ShadowHook 剥的是它自己的。
+- **真实风险点 = inline hook 框架共存**：xHook 走 PLT/GOT 改写（只改调用跳转表，不碰函数体），bhook 是 **inline hook**（改写函数头指令）。模块的 ShadowHook 也是 inline hook。两者作用于完全不同的函数（签名校验 vs `libil2cpp.so`），理论上不冲突，但 inline hook 框架共存历来是脆弱场景——**这正是 847/850 需要实测的核心原因**。
+
+**849 — 匿名可执行段扫描 + 非标准 XML 解析**
+
+> 規避匿名可執行段掃描，修復了對於非標準XML的解析
+
+（与 §14.1② 的 MagicOS execute-only 页扫描修复同族，方向一致：规避对特殊内存映射的扫描。）
+
+**850 — XResources 父类加载器修复**
+
+> The framework InMemoryDexClassLoader was built with stub_classloader as its parent, which does not define XResources' synthetic super (xposed.dummy.XResourcesSuperClass extending android.content.res.Resources). When a module uses XResources, ART resolves android.content.res.XResources with its super unreachable and records the class as erroneous for the whole process, so resource hooking hard-fails (seen on Android 16).
+> Build the dummy super class loader (already provided by core's BuildDummySuperClassLoader) and install it as the framework loader's parent at construction, falling back to stub_classloader if it cannot be built. Mirrors JingMatrix/LSPatch.
+
+⚠️ 本模块**不使用 XResources**（资源 Hook 未用；UI 是 Compose，overlay 是原生 Canvas View），故该修复对模块无直接收益，但随 850 一并升级。
+
+### 14.4 实测状态（2026-10-25 · NPatch 850 + Fix 3）[V]
+
+| 项 | 值 | 验证方式 |
+|---|---|---|
+| 共存版 APK | `安装包/Ala Mobile Pro 8.0.6 Fix 3.apk`（630,816,017 B，md5 `0c82727057d0988603b39776dbeadba2`） | `unzip -p ... config.json` → `"VERSION_CODE":850` |
+| `assets/npatch/` 布局 | **4 条目**：`config.json` / `libnpatch.so`(551,176 B) / `loader.bin`(464,940 B) / `origin.apk`(629,928,350 B) | `unzip -l`；对比 846 是 5 条目、`so/<abi>/` 分目录 |
+| `origin.apk` | 629,928,350 B，与推送的 Fix 3 裸包**字节数完全相同** | 证明 NPatch 只包壳、游戏本体未改动 |
+| 签名 | 证书 SHA-256 `b3720382…3a57`，与 845/846 代**逐位相同** | 老用户可覆盖安装，不必卸载 |
+| 模块门控 | `SUPPORTED_NPATCH_VERSION_CODE = 850L` + `SUPPORTED_COEX_FIX = 3` | `1.0.4 Beta 1 (104210)` 起 |
+| 用户实机验收 | 用户报「测试正常」 | 用户口述（2026-10-25），MEIZU 20 / Android 16 |
+
+⚠️ **「npatch 条目数 = 5」这个老判据已过期**（846 专属）。改用 `unzip -p <apk> assets/npatch/config.json | grep VERSION_CODE` —— 不依赖目录布局。
+
+### 14.5 实测状态（2026-10-18 · NPatch 846 + Fix 2）[V]
 
 | 项 | 值 | 验证方式 |
 |---|---|---|
