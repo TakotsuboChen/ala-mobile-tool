@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import tools.alamobile.mod.util.GameVersionStatus
+import tools.alamobile.mod.util.NPatchManagerStatus
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -108,3 +109,70 @@ fun VersionCapsule(
         )
     }
 }
+
+/**
+ * NPatch 管理器检测胶囊（概览页第二个胶囊，2026-10-25 用户定案）。
+ *
+ * ## 为什么与 [VersionCapsule] 分开
+ *
+ * 游戏包版本与 NPatch 版本是**两个独立维度**：包可以是 Fix 2 却配着旧 NPatch，
+ * 也可以反过来。合成一个胶囊就丢失了"哪个组件有问题"这个关键信息。
+ *
+ * ## 判据只看管理器版本
+ *
+ * 模块进程读不到框架信息（进程级 property，只有游戏进程写得进去），
+ * 详见 [checkNPatchManagerStatus]。⚠️ 管理器版本 ≠ 游戏包内框架版本时本胶囊
+ * 会显示"已适配"而游戏实际被拦——游戏内循环 Toast 才是权威提示。
+ *
+ * @param status 管理器检测结果；null = 检测中（不显示，避免闪烁）
+ */
+@Composable
+fun NPatchCapsule(
+    status: NPatchManagerStatus?,
+    modifier: Modifier = Modifier,
+) {
+    if (status == null) return
+    val isDark = isSystemInDarkTheme()
+
+    // 配色与 [VersionCapsule] 同族：已适配绿 / 需更新暖黄（"该更新了"不是"出错了"）
+    val greenBg = if (isDark) Color(0xFF1A3825) else Color(0xFFDFFAE4)
+    val yellowBg = if (isDark) Color(0xFF3D3A1A) else Color(0xFFFAF4D6)
+    val textColor = if (isDark) Color.White else MiuixTheme.colorScheme.onSurface
+
+    val (iconVector, text, bg, tint) = when (status) {
+        is NPatchManagerStatus.Adapted ->
+            CapsuleContent(Icons.Rounded.Check, "NPatch：${status.versionCode} 已适配",
+                greenBg, Color(0xFF36D167))
+        is NPatchManagerStatus.Outdated ->
+            CapsuleContent(Icons.Rounded.Update, "NPatch：${status.versionCode} 需更新",
+                yellowBg, Color(0xFFFFB300))
+        NPatchManagerStatus.Missing ->
+            CapsuleContent(Icons.AutoMirrored.Rounded.HelpOutline, "NPatch：未安装",
+                yellowBg, Color(0xFFFFB300))
+    }
+
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(bg)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Icon(
+            imageVector = iconVector,
+            contentDescription = null,
+            modifier = Modifier.size(12.dp),
+            tint = tint
+        )
+        Text(text = text, fontSize = 11.sp, color = textColor)
+    }
+}
+
+/** [NPatchCapsule] 的四个视觉要素打包，避免 when 分支里写四个平行变量。 */
+private data class CapsuleContent(
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val text: String,
+    val bg: Color,
+    val tint: Color,
+)

@@ -82,7 +82,9 @@ import tools.alamobile.mod.update.UpdateInfo
 import tools.alamobile.mod.update.UpdatePreferences
 import tools.alamobile.mod.util.COEXISTENCE_PKG
 import tools.alamobile.mod.util.GameVersionStatus
+import tools.alamobile.mod.util.NPatchManagerStatus
 import tools.alamobile.mod.util.checkGameVersion
+import tools.alamobile.mod.util.checkNPatchManagerStatus
 import tools.alamobile.mod.util.openExternalUrl
 import tools.alamobile.mod.util.MODULE_QQ_GROUP_CODE
 import tools.alamobile.mod.util.MODULE_QQ_GROUP_FALLBACK_URL
@@ -155,6 +157,11 @@ fun OverviewPagerMiuix(
     // null 表示检测中（胶囊不显示，避免闪烁）。
     var coexistenceStatus by remember { mutableStateOf<GameVersionStatus?>(null) }
 
+    // ── NPatch 管理器检测状态（2026-10-25）──
+    // 与游戏包版本**正交**：游戏包 Fix 2 却配着旧 NPatch 是真实存在的组合，
+    // 合成一个胶囊就丢失了"哪个组件有问题"。null 同上（检测中不显示）。
+    var npatchStatus by remember { mutableStateOf<NPatchManagerStatus?>(null) }
+
     // 启动时自动检查更新 + 清理旧 APK
     LaunchedEffect(Unit) {
         // 清理旧版本 APK（用户已安装新版本时）
@@ -163,6 +170,10 @@ fun OverviewPagerMiuix(
         // 游戏版本检测（IO 线程，PackageManager 查询）
         coexistenceStatus = withContext(Dispatchers.IO) {
             checkGameVersion(context, COEXISTENCE_PKG)
+        }
+        // NPatch 管理器检测（独立维度，同 IO 线程）
+        npatchStatus = withContext(Dispatchers.IO) {
+            checkNPatchManagerStatus(context)
         }
 
         // 更新检查不在此处跑：EULA 首次未同意时本 LaunchedEffect 跑完即死，若把
@@ -209,6 +220,8 @@ fun OverviewPagerMiuix(
                         scrollBehavior = scrollBehavior,
                     )
                     // 游戏版本检测胶囊行：叠加在 TopAppBar 之上，位于大标题上方空白处，左端对齐。
+                    // 两个胶囊并排：游戏包 / NPatch 管理器（两个独立维度，各自显示状态）。
+                    // 显示条件 = 任一检测完成（避免闪烁）；单个未完成时 NPatchCapsule 自己 return。
                     // 动态计算 top offset：
                     //   可用空间 = CollapsedHeight(52dp) - 胶囊高度
                     //   topOffset = 状态栏高度 + 可用空间 / 2
@@ -218,7 +231,7 @@ fun OverviewPagerMiuix(
                     //   下滑（fraction > 0）：snapTo(0) 即时隐藏，不给小标题重叠的机会。
                     //   上滑恢复（fraction == 0）：延迟 350ms 等小标题 spring 完全淡出后 animateTo(1)。
                     //     fraction 持续变化时 delay 被反复取消，直到 fraction 停在 0 后 delay 才等完。
-                    if (coexistenceStatus != null) {
+                    if (coexistenceStatus != null || npatchStatus != null) {
                         val fraction = scrollBehavior.state.collapsedFraction
                         val capsuleAlpha = remember { Animatable(1f) }
                         LaunchedEffect(fraction) {
@@ -246,10 +259,13 @@ fun OverviewPagerMiuix(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            VersionCapsule(
-                                label = "Ala Mobile Pro",
-                                status = coexistenceStatus!!
-                            )
+                            coexistenceStatus?.let {
+                                VersionCapsule(
+                                    label = "Ala Mobile Pro",
+                                    status = it
+                                )
+                            }
+                            NPatchCapsule(status = npatchStatus)
                         }
                     }
                 }
