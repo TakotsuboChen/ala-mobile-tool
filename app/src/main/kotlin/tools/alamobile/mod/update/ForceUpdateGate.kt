@@ -64,6 +64,19 @@ object ForceUpdateGate {
      */
     private const val TOAST_TEXT_GAME_COEX =
         "共存版安装包版本不匹配，功能失效，请到 QQ 群下载最新共存版！"
+
+    /**
+     * NPatch 环境不满足要求（2026-10-24，用户定案文案）。
+     *
+     * ⚠️ 指向 **NPatch**，不是共存版：群文件里三件套都有，用户缺的是 NPatch 本身。
+     * 曾经写成"去下载共存版"，用户指出这是「没水喝就去买辣条」——共存版解决不了
+     * "没有/版本不对的 NPatch"这个问题。
+     *
+     * 两个场景（未安装 / 版本不符）共用同一句：用户动作完全相同（去群里下最新
+     * NPatch），没必要让他先分辨自己是哪种。
+     */
+    private const val TOAST_TEXT_NPATCH =
+        "NPatch 版本不匹配，功能失效，请到 QQ 群下载最新 NPatch！"
     private const val TOAST_TEXT_BOTH =
         "共存版与模块版本不匹配，功能失效，请到 QQ 群更新共存版和模块！"
     private const val TOAST_TEXT_NOT_LOGIN =
@@ -98,6 +111,21 @@ object ForceUpdateGate {
      */
     private val notLoggedIn = AtomicBoolean(false)
 
+    /**
+     * NPatch 门控激活（2026-10-24）：非 root 用户的 NPatch 环境不满足要求。
+     *
+     * 命中条件见 [tools.alamobile.mod.util.evaluateNPatchGate]：
+     * - NPatch 环境下**没装管理器**
+     * - NPatch 框架版本 ≠ 846 **或** 管理器版本 ≠ 846（用户定案：两者都要精确等于）
+     *
+     * ⚠️ LSPosed（root）与未知框架**不参与**本判定（fail-open）——root 用户不用
+     * NPatch，没有版本可言。
+     */
+    private val npatchMismatch = AtomicBoolean(false)
+
+    /** NPatch 门控已判定过（幂等闸门，避免 200ms 轮询重推时重复查 PackageManager）。 */
+    private val npatchChecked = AtomicBoolean(false)
+
     private val toastLoopStarted = AtomicBoolean(false)
     private val bgCheckStarted = AtomicBoolean(false)
     private val loginEvalStarted = AtomicBoolean(false)
@@ -117,7 +145,9 @@ object ForceUpdateGate {
      * 未登录激活路径把 verdictDone 一并置位——对 hook 安装路径而言「已判定」即可，
      * 两条路径都不该装 hook。
      */
-    val isActive: Boolean get() = gameMismatch.get() || moduleOutdated.get() || notLoggedIn.get()
+    val isActive: Boolean
+        get() = gameMismatch.get() || npatchMismatch.get() ||
+            moduleOutdated.get() || notLoggedIn.get()
 
     /**
      * 判定是否已完成（游戏版本确认 + 模块判定出结果，或 fail-open 放行）。
@@ -189,6 +219,58 @@ object ForceUpdateGate {
             return
         }
 
+        // ①b NPatch 门控（2026-10-24，用户定案）：非 root 用户的 NPatch 环境必须
+        //     与共存包配套（框架版本 == 846 且管理器版本 == 846）。
+        //     ⚠️ **只对 NPatch 框架生效**——LSPosed（root）与未知框架一律放行
+        //     （root 用户不用 NPatch，没有版本可言；未知框架不误伤）。
+        //     ⚠️ 判据是 `frameworkVersionCode`（框架自报的注入版本），不是
+        //     `frameworkVersion`（846 上它硬编码返回 "v1.0.7"，不可用）。
+        //     ⚠️ 幂等：evaluate 会被 200ms 轮询重推，用独立标记避免重复查包。
+        if (!npatchChecked.compareAndSet(false, true)) {
+            if (npatchMismatch.get()) {
+                verdictDone.set(true)
+                return
+            }
+        } else {
+            when (val verdict = tools.alamobile.mod.util.evaluateNPatchGate(context)) {
+                is tools.alamobile.mod.util.NPatchVerdict.VersionMismatch -> {
+                    npatchMismatch.set(true)
+                    // 框架失配 ⇒ 功能全禁，登录门控退出竞争（更新优先于登录）。
+                    notLoggedIn.set(true)
+                    AlaMobileModule.logX(
+                        android.util.Log.WARN, TAG,
+                        "NPatch version MISMATCH → zero hooks, " +
+                            "framework=${verdict.frameworkCode}, " +
+                            "manager=${verdict.managerCode}, " +
+                            "required=${tools.alamobile.mod.util.SUPPORTED_NPATCH_VERSION_CODE}, " +
+                            "toast loop started"
+                    )
+                    startToastLoop(context)
+                    verdictDone.set(true)
+                    return
+                }
+                tools.alamobile.mod.util.NPatchVerdict.ManagerMissing -> {
+                    npatchMismatch.set(true)
+                    notLoggedIn.set(true)
+                    AlaMobileModule.logX(
+                        android.util.Log.WARN, TAG,
+                        "NPatch manager NOT INSTALLED → zero hooks, " +
+                            "framework=${tools.alamobile.mod.util.currentFrameworkVersionCode()}, " +
+                            "toast loop started"
+                    )
+                    startToastLoop(context)
+                    verdictDone.set(true)
+                    return
+                }
+                tools.alamobile.mod.util.NPatchVerdict.Pass -> {
+                    AlaMobileModule.logX(
+                        android.util.Log.INFO, TAG,
+                        "npatch gate pass: ${tools.alamobile.mod.util.npatchSummary(context)}"
+                    )
+                }
+            }
+        }
+
         // ② 模块落后门控：缓存秒判 + 后台网络检查（fail-open）。缓存未命中时
         //    丢后台线程跑网络检查；登录门控（③）由 15s 主路径经 [evaluateLoginGate]
         //    在后台检查出结果后评估——不在此处串联，避免网络在途时抢跑激活登录门控。
@@ -236,7 +318,9 @@ object ForceUpdateGate {
      */
     fun evaluateLoginGate(context: Context?) {
         if (context == null) return
-        if (gameMismatch.get() || moduleOutdated.get()) return  // 更新优先于登录
+        if (gameMismatch.get() || npatchMismatch.get() || moduleOutdated.get()) {
+            return  // 更新优先于登录
+        }
         if (notLoggedIn.get()) {
             verdictDone.set(true)
             return
@@ -426,6 +510,9 @@ object ForceUpdateGate {
         gameMismatch.get() && moduleOutdated.get() -> TOAST_TEXT_BOTH
         gameMismatch.get() && coexBuildOutdated.get() -> TOAST_TEXT_GAME_COEX
         gameMismatch.get() -> TOAST_TEXT_GAME
+        // NPatch 环境失配：包本身是对的，缺的是配套的 NPatch。排在模块过期之前
+        // ——模块过期可以只更新模块，NPatch 失配必须换 NPatch。
+        npatchMismatch.get() -> TOAST_TEXT_NPATCH
         moduleOutdated.get() -> TOAST_TEXT_MODULE
         notLoggedIn.get() -> TOAST_TEXT_NOT_LOGIN
         else -> TOAST_TEXT_MODULE

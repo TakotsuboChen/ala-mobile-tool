@@ -67,6 +67,13 @@ object EnvInfo {
             // ── 游戏包：版本 + Fix 号（Fix 号决定门控是否放行）──
             sb.append("游戏: ").append(gameVersion(context)).append('\n')
 
+            // ── 框架（2026-10-24 新增）──
+            // 这是 NPatch 门控的判据来源，也是排查"功能不生效"的第一现场：
+            // frameworkName 区分 LSPosed/NPatch，versionCode 决定放不放行。
+            // ⚠️ 不用 frameworkVersion（versionName）——NPatch 846 上它硬编码
+            // 返回 "v1.0.7"，与包内 config.json 的 1.0.9 都对不上。
+            sb.append("框架: ").append(npatchSummary(context)).append('\n')
+
             // ── 设备 ──
             sb.append("厂商: ").append(Build.MANUFACTURER).append('\n')
             sb.append("品牌: ").append(Build.BRAND).append('\n')

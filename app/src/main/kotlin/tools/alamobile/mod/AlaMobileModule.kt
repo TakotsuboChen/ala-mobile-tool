@@ -126,6 +126,23 @@ class AlaMobileModule : XposedModule() {
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         logX(Log.INFO, TAG, "Module loaded in process ${param.processName}")
         markActivated()
+        // ⚠️ **框架识别必须在最早时机记录**（2026-10-24）：`frameworkName` /
+        // `frameworkVersionCode` 由框架在 `attachFramework()` 时注入，而
+        // `onModuleLoaded` 一定在 attach **之后**（NPatch 源码实证：LSPLoader
+        // 的 attach 就在 onModuleLoaded 前一行）。这是游戏进程内唯一能可靠
+        // 区分 LSPosed vs NPatch 的信号——`hasModuleLoadedFlag` 两种框架都会
+        // 置位、manifest appComponentFactory 在 846 已 shim 化、`getApiVersion`
+        // 两框架同值，全部不可用。
+        // 读失败（未 attach / 第三方框架）一律记录为 UNKNOWN ⇒ 门控 fail-open。
+        try {
+            val fwName = frameworkName
+            val fwCode = frameworkVersionCode
+            tools.alamobile.mod.util.recordFramework(fwName, fwCode)
+            logX(Log.INFO, TAG, "framework: name=$fwName versionCode=$fwCode")
+        } catch (e: Throwable) {
+            tools.alamobile.mod.util.recordFramework(null, -1L)
+            logX(Log.WARN, TAG, "framework info unavailable (fail-open): ${e.message}")
+        }
         // ⚠️ 日志初始化必须先于一切门控 return（2026-10-06 修复）：门控激活时
         // 各路径在 Logger.init 之前 return，导致"被拦截"这一最需诊断的场景
         // **零文件日志**（只有 logcat，游戏进程 logcat 极吵，约 1 分钟被冲掉）
