@@ -182,12 +182,19 @@ sed -i '0,/<application/{s|<application|<uses-permission android:name="android.p
 共存版  versionName = "8.0.6 Fix 1"    ← Fix N = 本次打包修订号
 ```
 
-模块的 `VersionGate` 据此判定：共存版要求 `Fix N >= MIN_COEX_FIX`（当前 = 2），
-旧共存包（无后缀 = Fix 0，或 Fix 1）被拦截（零 hook + Toast 提示下载最新共存版）。
-⚠️ **MIN_COEX_FIX 抬到 2 的动因（2026-10-16）**：旧共存包配 NPatch 1.0.8 及更早存在
+模块的 `VersionGate` 据此判定：共存版要求 **`Fix N == SUPPORTED_COEX_FIX`（当前 = 2，逐项严格相等，
+不是 `>=`）**，旧共存包（无后缀 = Fix 0，或 Fix 1）被拦截（零 hook + Toast 提示下载最新共存版）。
+⚠️ **Fix 2 的动因（2026-10-16）**：旧共存包配 NPatch 1.0.8 及更早存在
 "模块经常不生效"（NPatch 缓存未设只读 → Android 14+ 拒绝加载可写 dex，见
-`docs/NPATCH_CACHE_CRASH_NOTES.md` §11）；模块读不到 NPatch 版本，只能靠游戏包版本
-间接逼用户换 NPatch 1.0.9(836) + 重装。**发新 Fix 时记得同步这个「当前 = N」**。
+`docs/NPATCH_CACHE_CRASH_NOTES.md` §11）。**发新 Fix 时记得同步这个「当前 = N」**。
+
+⚠️ **2026-10-24 起模块已能直接读到 NPatch 框架版本**（`frameworkVersionCode`，
+见 `NPatchVersionGate.kt`），NPatch 版本门控不再依赖 Fix 号间接表达：
+- `SUPPORTED_NPATCH_VERSION_CODE`（当前 846）是**独立维度**，与 `SUPPORTED_COEX_FIX` 正交。
+- **升级 NPatch 打包时必须同步改这个常量并随模块发版**，否则用户装新包会被拦。
+- 门控要求框架版本**与管理器版本都精确等于该值**；游戏内命中 = 零 hook + 循环 Toast。
+- ⚠️ 判据用 `frameworkVersionCode`，**不要**用 `frameworkVersion`（NPatch 846 上它硬编码返回
+  `"v1.0.7"`，与包内 `config.json` 的 `1.0.9` 都对不上）。
 
 ```bash
 cd v8.0.X-coex-dec
@@ -567,9 +574,10 @@ md5sum "安装包/Ala Mobile Pro 8.0.X Fix N.apk"   # 与 adb shell md5sum 对�
 4. **对比 manifest**：检查是否有新的 `com.android.stamp.*` / `com.android.vending.*` metadata
 5. **生成新 doNotCompress 列表**：`find v8.0.X-coex-dec/assets -type f`（排除 .dat）
 6. **更新 VersionGate.kt**：改 `SUPPORTED_VERSION_NAME/CODE`（新引擎版本）；同引擎内只改打包时**不动**这两个常量，只走阶段 4.8 的 Fix 后缀
-7. **更新 OffsetTable.kt**：重新跑 Il2CppDumper，提取新偏移量
-8. **制作共存版 APK**：按本 skill 流程
-9. **真机验证**：不跳 Play + 不黑屏 + 模块功能正常
+7. **更新 NPatchVersionGate.kt 的 `SUPPORTED_NPATCH_VERSION_CODE`**：若本次打包换了 NPatch 版本，改这个常量（与 Fix 号正交的独立维度，见阶段 4.8）。改完必须随模块发版，否则用户装新包会被拦
+8. **更新 OffsetTable.kt**：重新跑 Il2CppDumper，提取新偏移量
+9. **制作共存版 APK**：按本 skill 流程
+10. **真机验证**：不跳 Play + 不黑屏 + 模块功能正常
 
 ## 12. 参考样本
 
