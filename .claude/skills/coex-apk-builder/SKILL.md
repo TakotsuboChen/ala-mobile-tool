@@ -190,11 +190,22 @@ sed -i '0,/<application/{s|<application|<uses-permission android:name="android.p
 
 ⚠️ **2026-10-24 起模块已能直接读到 NPatch 框架版本**（`frameworkVersionCode`，
 见 `NPatchVersionGate.kt`），NPatch 版本门控不再依赖 Fix 号间接表达：
-- `SUPPORTED_NPATCH_VERSION_CODE`（当前 846）是**独立维度**，与 `SUPPORTED_COEX_FIX` 正交。
+- `SUPPORTED_NPATCH_VERSION_CODE`（**当前 850**）是**独立维度**，与 `SUPPORTED_COEX_FIX` 正交。
 - **升级 NPatch 打包时必须同步改这个常量并随模块发版**，否则用户装新包会被拦。
 - 门控要求框架版本**与管理器版本都精确等于该值**；游戏内命中 = 零 hook + 循环 Toast。
-- ⚠️ 判据用 `frameworkVersionCode`，**不要**用 `frameworkVersion`（NPatch 846 上它硬编码返回
+- ⚠️ 判据用 `frameworkVersionCode`，**不要**用 `frameworkVersion`（NPatch 846/850 上它硬编码返回
   `"v1.0.7"`，与包内 `config.json` 的 `1.0.9` 都对不上）。
+
+**版本对照（模块门控 ↔ 共存包）**：
+
+| 模块 `SUPPORTED_NPATCH_VERSION_CODE` | 配套共存包 Fix | 时期 |
+|---|---|---|
+| 846 | Fix 2 | 2026-10-18 ~ 2026-10-25 |
+| **850** | **Fix 3** | **2026-10-25 起** |
+
+⚠️ **Fix 3 与 Fix 2 的包内容完全相同**，只改了 `versionName` 后缀（587 条目全等、
+5 个关键文件 sha256 逐字节相同）。动因是 NPatch 升 850 后需要与之配套的包形态标记，
+而非包本身有改动——**同引擎内只升 NPatch 也仍然要发新 Fix 号**，因为门控是双精确相等。
 
 ```bash
 cd v8.0.X-coex-dec
@@ -522,8 +533,12 @@ sed -i '/splits0/d' res/values/public.xml
 例：`Ala Mobile Pro 8.0.6 Fix 1.apk`（NPatch 修补后）/ `Ala Mobile Pro 8.0.6 Fix 1 原版.apk`（裸包）。
 
 - **「原版」= 未修补的裸包**（`assets/npatch/` 段为空，签名 `CN=AlaMobileTool`）——给用户 NPatch 注入用。
-- **无「原版」后缀 = 已 NPatch 修补**（含 5 个 `assets/npatch/` 条目，被 NPatch 重签）。
-- 判别指纹：`unzip -l <apk> | grep -c "assets/npatch/"` → `0` = 原版裸包，`5` = 已修补。
+- **无「原版」后缀 = 已 NPatch 修补**（含 `assets/npatch/` 段，被 NPatch 重签）。
+- 判别指纹（**2026-10-25 修正**）：`unzip -l <apk> | grep -c "assets/npatch/"` → `0` = 原版裸包，`>0` = 已修补。
+  ⚠️ **不要再用「= 5」当判据**：条目数随 NPatch 版本变。846 是 5 条（`so/arm64-v8a/libnpatch.so` + `so/x86_64/libnpatch.so` 双 ABI），
+  **850 改成 4 条**（扁平 `assets/npatch/libnpatch.so` 单库，剥离 ShadowHook 后不再分 ABI 目录）。
+  **稳定判据 = 直接读框架自报版本**：`unzip -p <apk> assets/npatch/config.json | grep -o '"VERSION_CODE":[0-9]*'`
+  —— 不依赖目录布局，且能直接确认「注入的是哪个 NPatch」。
 - `Fix <N>` 与模块门控判据同源（见阶段 4.8）：`Fix 1` 起，同引擎内改动递增；新引擎版本（如 8.0.7）按最新标准打包、无 Fix 后缀。
 
 ### 8.2 归档动作
