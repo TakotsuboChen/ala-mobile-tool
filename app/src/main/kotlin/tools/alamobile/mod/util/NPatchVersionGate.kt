@@ -13,7 +13,7 @@ import androidx.core.content.pm.PackageInfoCompat
  * 模块同时支持两种加载方式，且两者对 NPatch 版本的要求完全不同：
  * - **LSPosed（root）**：不用 NPatch，没有版本可言 ⇒ 必须放行。
  * - **NPatch（非 root，绝大多数用户）**：必须用**与共存包配套的那个版本**
- *   （当前 846），否则模块行为未经验证。
+ *   （当前 850），否则模块行为未经验证。
  *
  * 判不出框架就无法决定拦不拦——这是 NPatch 门控的前置。
  *
@@ -25,10 +25,10 @@ import androidx.core.content.pm.PackageInfoCompat
  * `LSPLoader.java` 的 attach 在 onModuleLoaded 前一行）。
  *
  * - NPatch：`VectorContext.getFrameworkName()` = `BuildConfig.FRAMEWORK_NAME` = `"NPatch"`；
- *   `getFrameworkVersionCode()` = `BuildConfig.VERSION_CODE` = **846**（= git commitCount）
+ *   `getFrameworkVersionCode()` = `BuildConfig.VERSION_CODE` = **850**（= git commitCount）
  * - LSPosed：同一 API 返回 `"LSPosed"` 与它自己的版本号
  *
- * ⚠️ **不要用 `frameworkVersion`（versionName）判版本**：NPatch 846 上它返回
+ * ⚠️ **不要用 `frameworkVersion`（versionName）判版本**：NPatch 846/850 上它返回
  * `"v1.0.7"`（上游 `core/build.gradle.kts` 硬编码未随发版更新），与包内
  * `config.json` 写的 `1.0.9` 都对不上。**只认 `frameworkVersionCode`。**
  *
@@ -49,10 +49,17 @@ import androidx.core.content.pm.PackageInfoCompat
 /**
  * 适配的 NPatch 框架版本（`frameworkVersionCode`）。用户定案：**精确等于**。
  *
- * 846 = NPatch 1.0.9（Fix 2 包配套版本）。发新共存包时若换了 NPatch 版本，
- * 必须同步改这里并随模块发版，否则用户装了新包会被拦。
+ * 850 = NPatch 1.0.9（Fix 3 包配套版本，2026-10-25）。发新共存包时若换了 NPatch
+ * 版本，必须同步改这里并随模块发版，否则用户装了新包会被拦。
+ *
+ * ## 版本沿革
+ * - 846 = NPatch 1.0.9（Fix 2 包配套，2026-10-18 ~ 2026-10-25）
+ * - 850 = NPatch 1.0.9（Fix 3 包配套，2026-10-25 起）——本版把签名绕过从 xHook
+ *   （PLT/GOT 改写）迁移到 bhook（inline hook），并剥离框架自带的 ShadowHook 依赖。
+ *   ⚠️ 模块自身的 inline hook **不受影响**：`libala-core.so` 的 `NEEDED` 指向
+ *   `libshadowhook.so`，而该库是模块 APK 自己打包的，与框架无关。
  */
-const val SUPPORTED_NPATCH_VERSION_CODE = 846L
+const val SUPPORTED_NPATCH_VERSION_CODE = 850L
 
 /** NPatch 管理器包名。Android 11+ 包可见性已在 AndroidManifest `<queries>` 声明。 */
 private const val NPATCH_MANAGER_PKG = "top.nkbe.npatch"
@@ -157,7 +164,7 @@ sealed class NPatchVerdict {
 
     /**
      * 拦：版本不符。`frameworkCode` = 注入时框架版本，`managerCode` = 管理器版本，
-     * 任一不等于 [SUPPORTED_NPATCH_VERSION_CODE] 即命中（用户定案：两者都要 == 846）。
+     * 任一不等于 [SUPPORTED_NPATCH_VERSION_CODE] 即命中（用户定案：两者都要 == 850）。
      */
     data class VersionMismatch(val frameworkCode: Long, val managerCode: Long) : NPatchVerdict()
 }
@@ -168,8 +175,8 @@ sealed class NPatchVerdict {
  * 判据（用户 2026-10-22/24 定案）：
  * 1. 非 NPatch 框架（LSPosed / 未知）→ [NPatchVerdict.Pass]
  * 2. NPatch 且**没装管理器** → [NPatchVerdict.ManagerMissing]（非 root 缺必要组件）
- * 3. NPatch 且 `frameworkVersionCode != 846` **或** 管理器 `versionCode != 846`
- *    → [NPatchVerdict.VersionMismatch]（两者都要精确等于 846）
+ * 3. NPatch 且 `frameworkVersionCode != 850` **或** 管理器 `versionCode != 850`
+ *    → [NPatchVerdict.VersionMismatch]（两者都要精确等于 850）
  * 4. 否则 → [NPatchVerdict.Pass]
  */
 fun evaluateNPatchGate(context: Context?): NPatchVerdict {
@@ -241,7 +248,7 @@ fun evaluateManagerVersionGate(context: Context?): ManagerVerdict {
 }
 
 /**
- * 供日志/UI：`"NPatch 846 / 管理器 846"` 这类一行摘要。
+ * 供日志/UI：`"NPatch 850 / 管理器 850"` 这类一行摘要。
  *
  * 三个值都给出来——排查"为什么被拦"时，能立刻区分是框架版本旧、管理器版本旧、
  * 还是管理器没装。

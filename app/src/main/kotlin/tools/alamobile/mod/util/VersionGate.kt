@@ -58,9 +58,12 @@ const val SUPPORTED_VERSION_CODE = 200150
  *   1.0.8 及更早存在"模块经常不生效"（缓存 APK 未设只读 → Android 14+ 拒绝加载
  *   可写 dex，见 `docs/NPATCH_CACHE_CRASH_NOTES.md` §11）。
  * - **精确相等 = 2**（2026-10-18）：用户定案"版本门控要严格等于，而不是大于等于
- *   放行"。当前适配包 = `Ala Mobile Pro 8.0.6 Fix 2`（NPatch 845）。
+ *   放行"。
+ * - **精确相等 = 3**（2026-10-25）：当前适配包 = `Ala Mobile Pro 8.0.6 Fix 3`
+ *   （NPatch 850）。Fix 3 与 Fix 2 的**包内容完全相同**，只改了 versionName 后缀——
+ *   动因是 NPatch 升到 850 后需要与之配套的包形态标记，而非包本身有改动。
  */
-const val SUPPORTED_COEX_FIX = 2
+const val SUPPORTED_COEX_FIX = 3
 
 // 8.0.4 (200146) 的 offsets 已不再匹配 8.0.6 的 libil2cpp.so。
 // 若需同时支持两个版本，需要按版本号分发不同的 OffsetTable；

@@ -116,7 +116,7 @@ object ForceUpdateGate {
      *
      * 命中条件见 [tools.alamobile.mod.util.evaluateNPatchGate]：
      * - NPatch 环境下**没装管理器**
-     * - NPatch 框架版本 ≠ 846 **或** 管理器版本 ≠ 846（用户定案：两者都要精确等于）
+     * - NPatch 框架版本 ≠ 850 **或** 管理器版本 ≠ 850（用户定案：两者都要精确等于）
      *
      * ⚠️ LSPosed（root）与未知框架**不参与**本判定（fail-open）——root 用户不用
      * NPatch，没有版本可言。
@@ -220,11 +220,11 @@ object ForceUpdateGate {
         }
 
         // ①b NPatch 门控（2026-10-24，用户定案）：非 root 用户的 NPatch 环境必须
-        //     与共存包配套（框架版本 == 846 且管理器版本 == 846）。
+        //     与共存包配套（框架版本 == 850 且管理器版本 == 850）。
         //     ⚠️ **只对 NPatch 框架生效**——LSPosed（root）与未知框架一律放行
         //     （root 用户不用 NPatch，没有版本可言；未知框架不误伤）。
         //     ⚠️ 判据是 `frameworkVersionCode`（框架自报的注入版本），不是
-        //     `frameworkVersion`（846 上它硬编码返回 "v1.0.7"，不可用）。
+        //     `frameworkVersion`（846/850 上它硬编码返回 "v1.0.7"，不可用）。
         //     ⚠️ 幂等：evaluate 会被 200ms 轮询重推，用独立标记避免重复查包。
         if (!npatchChecked.compareAndSet(false, true)) {
             if (npatchMismatch.get()) {
