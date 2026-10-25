@@ -455,7 +455,7 @@ private fun OverviewTab(
                 //    （2026-10-19 用户反馈「间距不对」的根因）：miuix 的小标题规范是
                 //    **上远下近**——卡片自带 `padding(bottom = 12.dp)`，SmallTitle 内边距
                 //    上下各 8dp ⇒ 上方 12+8=20dp、下方 8dp（见 miuix 官方
-                //    `docs/zh_CN/components/smalltitle.md` 的组合示例与 KernelSU 的
+                //    `references/miuix/docs/zh_CN/components/smalltitle.md` 的组合示例与 KernelSU 的
                 //    `AppProfileMiuix.kt`）。若外面再套 `spacedBy(12.dp)`，上下会各加
                 //    12dp 变成 20/20 对称，小标题就"悬浮"在两个卡片正中间了。
                 //    ⇒ 间距一律由各元素自己的 padding 表达。
@@ -1234,7 +1234,7 @@ private const val DRIVER_TAB_GRAND_PRIX = 2
 private const val DRIVER_TAB_COUNT = 3
 
 // ── 排序方式 ──
-// 下标 = 对话框里 spinner 的序号；值 = 服务端 `sort` 参数（见 docs/PADDOCK_PLAN.md）。
+// 下标 = 对话框里 spinner 的序号；值 = 服务端 `sort` 参数（见 docs/design/PADDOCK_PLAN.md）。
 // ⚠️ 默认 0 = 时间降序，与服务端缺省一致：两处若不一致，用户没动过排序也会
 //    在首屏看到与服务端默认不同的次序（客户端传 time_desc 只是显式化了同一件事）。
 private val SORT_LABELS = listOf("时间降序", "时间升序", "圈速降序", "圈速升序")

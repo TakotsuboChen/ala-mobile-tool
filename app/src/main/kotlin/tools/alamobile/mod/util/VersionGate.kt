@@ -56,7 +56,7 @@ const val SUPPORTED_VERSION_CODE = 200150
  * - **最低值 = 1**（2026-10-06）：引入打包修订号维度，拦截无后缀旧共存包（Fix 0）。
  * - **最低值 = 2**（2026-10-16）：强制存量用户升到 Fix 2。动因 = 旧共存包配 NPatch
  *   1.0.8 及更早存在"模块经常不生效"（缓存 APK 未设只读 → Android 14+ 拒绝加载
- *   可写 dex，见 `docs/NPATCH_CACHE_CRASH_NOTES.md` §11）。
+ *   可写 dex，见 `docs/notes/NPATCH_CACHE_CRASH_NOTES.md` §11）。
  * - **精确相等 = 2**（2026-10-18）：用户定案"版本门控要严格等于，而不是大于等于
  *   放行"。
  * - **精确相等 = 3**（2026-10-25）：当前适配包 = `Ala Mobile Pro 8.0.6 Fix 3`

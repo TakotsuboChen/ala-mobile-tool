@@ -43,7 +43,7 @@ import androidx.core.content.pm.PackageInfoCompat
  * - `getApiVersion()` / `getFrameworkProperties()`：两框架同值。
  *
  * 详见 memory `npatch-version-gate-independent-dimension` 与
- * `docs/NPATCH_CACHE_CRASH_NOTES.md`。
+ * `docs/notes/NPATCH_CACHE_CRASH_NOTES.md`。
  */
 
 /**

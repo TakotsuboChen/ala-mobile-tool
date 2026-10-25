@@ -186,7 +186,7 @@ sed -i '0,/<application/{s|<application|<uses-permission android:name="android.p
 不是 `>=`）**，旧共存包（无后缀 = Fix 0，或 Fix 1）被拦截（零 hook + Toast 提示下载最新共存版）。
 ⚠️ **Fix 2 的动因（2026-10-16）**：旧共存包配 NPatch 1.0.8 及更早存在
 "模块经常不生效"（NPatch 缓存未设只读 → Android 14+ 拒绝加载可写 dex，见
-`docs/NPATCH_CACHE_CRASH_NOTES.md` §11）。**发新 Fix 时记得同步这个「当前 = N」**。
+`docs/notes/NPATCH_CACHE_CRASH_NOTES.md` §11）。**发新 Fix 时记得同步这个「当前 = N」**。
 
 ⚠️ **2026-10-24 起模块已能直接读到 NPatch 框架版本**（`frameworkVersionCode`，
 见 `NPatchVersionGate.kt`），NPatch 版本门控不再依赖 Fix 号间接表达：
@@ -506,7 +506,7 @@ sed -i '/splits0/d' res/values/public.xml
 **未设只读**（权限 600）→ Android 16 拒绝 → 崩。⚠️ **清游戏缓存无效**（重建后仍是 600）。
 
 **修复**：升级 **NPatch 到 830+**（维护者已确认修复缓存未设只读）。**不要**让用户"清游戏缓存"
-（那是另一个 bug #147 的处方，对本问题无效）。详见 `docs/NPATCH_CACHE_CRASH_NOTES.md` §11。
+（那是另一个 bug #147 的处方，对本问题无效）。详见 `docs/notes/NPATCH_CACHE_CRASH_NOTES.md` §11。
 
 ## 7. Keystore 信息
 

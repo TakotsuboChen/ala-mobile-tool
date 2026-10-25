@@ -92,13 +92,17 @@ object UpdateChecker {
     }
 
     /**
-     * 全部候选源（2026-09-13 实测于目标设备网络，见 docs/UPDATE_CHECK_MIRRORS.md）：
+     * 全部候选源（2026-09-13 实测于目标设备网络；2026-10-26 复核）：
      * 官方 API + 各镜像站。**全部并发请求，首个成功响应胜出，其余立即丢弃**
      * ——单源最快则总耗时等于该源耗时（实测官方 0.7~1.0s、gh-proxy 0.71s）。
      *
      * ⚠️ 只保留实测返回 200 的源：ghproxy.net/zwy.one/nxnow.top 返回 403
      * （releases API 被镜像站拒绝）、ghfast.top/dgithub.xyz 超时、moeyy/
      * gitmirror/99988866 等域名已失效——它们只会白占并发名额。
+     *
+     * 注：曾有一份镜像实测记录文档，从未落盘（结论已并入本注释，
+     * 2026-10-26 编纂时移除悬空引用）。重新测源时把结果补进这里，
+     * 不要再建单独文档。
      */
     private val sources = listOf(
         "https://api.github.com",

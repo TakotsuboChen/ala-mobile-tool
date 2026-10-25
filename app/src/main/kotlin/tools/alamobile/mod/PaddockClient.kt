@@ -19,7 +19,7 @@ import tools.alamobile.mod.util.Logger
 /**
  * 围场（Paddock）客户端：计时赛有效圈上报 + 登录态维护 + 本地待传队列。
  *
- * 定案映射（docs/PADDOCK_PLAN.md）：
+ * 定案映射（docs/design/PADDOCK_PLAN.md）：
  * - 每有效圈都上传（服务端去重留最佳）；Toast 判定权在服务端响应。
  * - 未登录/弱网时圈进本地待传队列（30 天时效），登录成功后补传。
  * - **任何上传失败都入本地队列,绝不丢圈**（2026-09-10 定案）;本地有队列时游戏
