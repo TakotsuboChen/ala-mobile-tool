@@ -1,5 +1,11 @@
 # TC 档位调节设计（TC Level Design）
 
+> 状态：**活跃** · 最后编纂：2026-10-26
+> 一句话结论：TC 档位 v1.5：强度 mix + 时机 ε 双通道，现行值以 `ModConfig.kt` 为单一事实源。
+
+> 文档规范见 [`docs/README.md`](../README.md)。
+
+
 生成时间: 2026-08-28 · 状态: **v1.5 已实装并实机定档**（2026-08-28，v1.4 四档时机全部生效后同日完成 v1.5 实机手感调优；现行值以 `ModConfig.kt` 为单一事实源，演化史见 §10）
 证据来源: 三路并行调研——游戏侧机制（TECHNICAL_ANALYSIS.md §3 + dump.cs）、模块管线（pedal_hook.c / ModConfig / ConfigReceiver）、行业先例（Tavily 网络调研，来源 URL 见 §7）。
 

@@ -1,5 +1,11 @@
 # LAP_HOOK_NOTES — 计时赛有效圈速监听工程笔记
 
+> 状态：**活跃** · 最后编纂：2026-10-26
+> 一句话结论：计时赛有效圈速监听：hook `odometerHandler.HandleSectorsTimes` 取游戏自己的 `validLap` 位，圈完成在 `order==2` 事件上判定（不是 2→0 回绕），赛道身份走 `LAPscene` 探测链。
+
+> 文档规范见 [`docs/README.md`](../README.md)。
+
+
 > 功能：`native/src/lap_hook.c`（log-only，无 UI）——计时赛会话内把每圈判定
 > 与会话最快有效圈写入日志；16 条赛道自动识别。
 > 生成：2026-08-31 · 证据标注同 HANDOFF 惯例：[V] 实机/dump 实证 · [?] 未裁决。

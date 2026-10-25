@@ -1,5 +1,12 @@
 # 赛道识别表（16 条 GP 赛道）
 
+> 状态：**活跃** · 最后编纂：2026-10-26
+> 一句话结论：16 条 GP 赛道在 BuildSettings 中连续排列（buildIndex 2–17），
+> `gpIndex = buildIndex − 2`；赛道身份必须走 `LAPscene` 探测链，
+> **不能**从 `trackToRace` 取（移动端恒为 `MobileScene`）。
+
+> 文档规范见 [`docs/README.md`](README.md)。
+
 > 生成时间: 2026-08-31 · 适用游戏版本: Ala Mobile 8.0.4 (versionCode 200146)
 > 用途: `lap_hook` 的 `LAPscene` 日志行把 buildIndex/gpIndex/场景名打进日志后，
 > 由此表反查赛道身份；后续 UI（计时赛圈速面板）按此表显示赛道名。
