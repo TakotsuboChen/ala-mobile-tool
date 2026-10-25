@@ -133,6 +133,19 @@ class ConfigReceiver : BroadcastReceiver() {
                 Logger.i(TAG, "ConfigReceiver: setUnlockSteerAngle $enableUnlockSteerAngle")
             }
 
+            // 实时同步「修复 DLC 更新检查超时卡加载」开关——hook 恒装上（见
+            // dlc_guard_hook.c），运行中拨开关立即生效，不需要重装 hook。
+            // ⚠️ 广播里缺该键时**回落默认 true**（不是 false）：本功能默认开，
+            // 旧版本 APK 的广播不带此键，回落 false 会把它意外关掉。
+            val enableFixDlcStuck = incoming.optBoolean(
+                "enable_fix_dlc_stuck",
+                ModConfig.DEFAULT_ENABLE_FIX_DLC_STUCK
+            )
+            if (tools.alamobile.mod.NativeBridge.isAvailable) {
+                tools.alamobile.mod.NativeBridge.setFixDlcStuckSafe(enableFixDlcStuck)
+                Logger.i(TAG, "ConfigReceiver: setFixDlcStuck $enableFixDlcStuck")
+            }
+
             // 实时同步 TC 档位（强度插值 + 时机 ε/minSPD 配对覆写）——游戏运行中改档立即生效。
             // **必须经 tcEffectiveParams 按 tc_mode 派生**：mode=default 时无视
             // 缓存的 strength/timing（记忆值）恒为原厂透传，否则"调回游戏默认"

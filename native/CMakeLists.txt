@@ -32,6 +32,7 @@ add_library(
     src/lap_hook.c
     src/next_lap_hook.c
     src/steer_limit_hook.c
+    src/dlc_guard_hook.c
     src/crash_hook.c
 )
 

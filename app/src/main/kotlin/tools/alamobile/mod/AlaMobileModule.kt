@@ -502,6 +502,11 @@ class AlaMobileModule : XposedModule() {
         val enableUnlock = settings?.enableUnlock ?: true
         // V10 引擎声浪开关：早期路径 ~2s 的开场动画就要用，必须在此派生。
         val enableV10Sound = settings?.enableV10Sound ?: false
+        // 修复 DLC 更新检查超时卡加载：**卡死发生在启动后几秒**，等 15s 延迟块
+        // 才装 hook 时游戏早已卡住，故必须在此派生并走早期路径。
+        // 兜底取默认值 true（配置读不到时也要防卡死——进不去游戏是最坏结果）。
+        val enableFixDlcStuck = settings?.enableFixDlcStuck
+            ?: ModConfig.DEFAULT_ENABLE_FIX_DLC_STUCK
 
         // forceLoad + initUnlock（deferred 后同步执行，ShadowHook 已 init）
         // 启动门控：激活时跳过早期 unlock/intro hooks。登录门控（evaluateLoginGate
@@ -574,6 +579,29 @@ class AlaMobileModule : XposedModule() {
             }
         } else {
             logX(Log.INFO, TAG, "enableV10Sound=false, skipping early intro hooks")
+        }
+
+        // ⚠️ 修复 DLC 更新检查超时卡加载：**必须在早期路径安装**。
+        // 卡死链（反汇编实证，见 native/src/dlc_guard_hook.c）：
+        //   IntroLogoManager.<LoadSequence>d__14.MoveNext 每帧读
+        //   CarsDLCManager.IsSynchronizing，为 true 就不加载主场景；而
+        //   CheckAndUpdateInstalledDLCs 在目录检查阶段 await 的
+        //   Addressables.CheckForCatalogUpdates() 没有超时 ⇒ 弱网下永久挂起。
+        // 这段发生在启动后几秒内，15s 延迟块装 hook 时早已卡住。
+        // hook 恒装上（开关在回调内判），关掉时逐字节等于原版。
+        logX(Log.INFO, TAG, "early dlc-guard path: forceLoad + initDlcGuard (deferred)")
+        try {
+            if (!NativeBridge.isAvailable) {
+                NativeBridge.forceLoad(getAppContext())
+            }
+            if (NativeBridge.isAvailable) {
+                NativeBridge.initDlcGuardSafe(enableFixDlcStuck)
+                logX(Log.INFO, TAG, "Early dlc-guard hooks installed (fix=$enableFixDlcStuck, nativeAvail=${NativeBridge.isAvailable})")
+            } else {
+                logX(Log.ERROR, TAG, "Early dlc-guard: NativeBridge not available after forceLoad")
+            }
+        } catch (e: Throwable) {
+            logX(Log.ERROR, TAG, "Early dlc-guard hooks failed: ${e.message}")
         }
 
         // IntroSoundPlayer 也在早期初始化——开场在 ~2s 触发，轮询要尽快开始。

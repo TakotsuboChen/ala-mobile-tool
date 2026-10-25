@@ -194,6 +194,26 @@ object OffsetTable {
     // 开场 introSound 是直接播放的 AudioSource，必须用这个而非 TweenVolume 版本。
     const val AUDIO_SOURCE_SET_VOLUME_REAL: Long = 0x3252BECL
 
+    // ── 修复 DLC 更新检查超时卡加载（dlc_guard_hook）──
+    // IntroLogoManager.<LoadSequence>d__14.MoveNext() — 启动流程总调度协程。
+    //
+    // 卡死链（全部反汇编实证）：
+    //   本方法 0x1a61af8 `ldrb w9,[x8,#0x39]` 读 CarsDLCManager.IsSynchronizing，
+    //   0x1a61afc `cbz w9,#0x1a61c34` —— 只有它为 false 才继续往下走到
+    //   SceneManager.LoadSceneAsync 加载主场景。而
+    //   CarsDLCManager.CheckAndUpdateInstalledDLCs 在 state 0 置它 = 1 后
+    //   await Addressables.CheckForCatalogUpdates()（RVA 0x310E6A8），
+    //   该 AsyncOperationHandle 无超时 ⇒ CDN 悬着则永久挂起，进度停在 0.1f
+    //  （= "Synchronizing additional content..." 10%）。
+    //
+    // hook 它是因为它同时提供三样东西：① 每帧被 resume（天然时钟）；
+    // ② this+0x28 = <dlcManager>5__2 实例指针；③ 经 ② 读 IsSynchronizing(0x39)
+    // 与 SynchronizationProgress(0x3C)。见 native/src/dlc_guard_hook.c。
+    // ⚠️ 升版必核：① 该方法仍在 state 4/5 等待 DLC；② 字段偏移
+    //   state=0x10 / dlcManager=0x28 / IsSynchronizing=0x39 / progress=0x3C；
+    //   ③ 0.1f 与 0.25f 两个进度常量仍在 CheckAndUpdateInstalledDLCs 内。
+    const val INTRO_LOGO_MANAGER_LOAD_SEQUENCE_MOVE_NEXT: Long = 0x1A61834L
+
     // ── 计时赛有效圈速监听（lap_hook，log-only）──
     // IRDSLevelLoadVariables::Awake()（protected override）— LLV 单例创建入口。
     // hook 捕获实例后读 trackToRace (0xB8, string)=赛道名（16 条 GP 赛道）。

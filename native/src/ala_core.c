@@ -9,6 +9,7 @@
 #include "drs_hook.h"
 #include "overtake_hook.h"
 #include "next_lap_hook.h"
+#include "dlc_guard_hook.h"
 #include "steer_limit_hook.h"
 #include "unlock_hook.h"
 #include "music_hook.h"
@@ -460,6 +461,37 @@ Java_tools_alamobile_mod_NativeBridge_setUnlockSteerAngle(JNIEnv *env, jclass cl
     (void) env;
     (void) clazz;
     steer_limit_set_active((int) active);
+}
+
+// ─ 修复 DLC 更新检查超时卡加载（不动 init() 参数签名，与 initIntro 同模式）──
+// ⚠️ **必须走早期路径（15s 延迟块之前）**：卡死发生在启动后几秒，
+// 等 15s 才装 hook 时游戏早就已经卡住了。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_initDlcGuard(JNIEnv *env, jclass clazz,
+                                                   jboolean enable_fix_dlc_stuck,
+                                                   jlong load_sequence_move_next) {
+    (void) env;
+    (void) clazz;
+
+    dlc_guard_hook_config_t dg_cfg = {
+        .enable_fix_dlc_stuck = (bool) enable_fix_dlc_stuck,
+        .intro_load_sequence_move_next_offset = (uintptr_t) load_sequence_move_next,
+    };
+
+    LOGI("initDlcGuard: fix=%d loadSequenceMoveNext=0x%lx",
+         (int) enable_fix_dlc_stuck, (unsigned long) load_sequence_move_next);
+
+    if (!dlc_guard_install_hooks(&dg_cfg)) {
+        LOGE("Failed to install DLC guard hooks");
+    }
+}
+
+// 运行时开关修复 DLC 更新检查超时卡加载（配置广播到达后调用，不重装 hook）。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_setFixDlcStuck(JNIEnv *env, jclass clazz, jboolean active) {
+    (void) env;
+    (void) clazz;
+    dlc_guard_set_active((int) active);
 }
 
 JNIEXPORT void JNICALL

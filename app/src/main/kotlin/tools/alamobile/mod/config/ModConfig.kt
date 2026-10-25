@@ -65,6 +65,19 @@ object ModConfig {
     // 能打的角度越小）。开启后丢弃 SetMaxSteeringAngle 的入参、改用静态基础
     // 转角，让轮子始终保有 prefab 里的原始最大转向角。默认关。
     const val KEY_ENABLE_UNLOCK_STEER_ANGLE = "enable_unlock_steer_angle"
+    // 修复 DLC 更新检查超时卡加载：游戏启动时 CarsDLCManager 在 state 0 await
+    // Addressables.CheckForCatalogUpdates()，该 AsyncOperationHandle 无超时 ⇒
+    // CDN 不响应（弱网/丢包，非断网）则永久挂起，IsSynchronizing 恒 true，
+    // IntroLogoManager 永远不加载主场景（卡在 "Synchronizing additional
+    // content..." 10%）。开启后模块在卡超过 3 秒时清 IsSynchronizing 让游戏
+    // 继续。默认开。见 native/src/dlc_guard_hook.c。
+    const val KEY_ENABLE_FIX_DLC_STUCK = "enable_fix_dlc_stuck"
+    /**
+     * 「修复 DLC 更新检查超时卡加载」的默认值（public，供早期路径与
+     * ConfigReceiver 兜底使用 —— `Defaults` 是 private object）。
+     * 默认开：卡死是"进不去游戏"级别的故障。
+     */
+    const val DEFAULT_ENABLE_FIX_DLC_STUCK = true
     const val KEY_DISABLE_AUTO_GEAR = "disable_auto_gear"
     const val KEY_ENABLE_MANUAL_SHIFT = "enable_manual_shift"
     const val KEY_ENABLE_UNLOCK = "enable_unlock"
@@ -739,6 +752,11 @@ object ModConfig {
         const val ENABLE_PROTECT_NEXT_LAP = true
         // 解除最大转向角度限制：默认关（改变游戏原生转向手感，由用户主动选择）。
         const val ENABLE_UNLOCK_STEER_ANGLE = false
+        // 修复 DLC 更新检查超时卡加载：默认开（用户定案 2026-10-25）。
+        // 卡死是"进不去游戏"级别的故障，默认开收益远大于代价（弱网下可能
+        // 误判并跳过本次目录检查，下次启动重试即可）。用户仍可在配置页关闭。
+        // ⚠️ 引用外层 public 常量，避免两处默认值漂移。
+        const val ENABLE_FIX_DLC_STUCK = DEFAULT_ENABLE_FIX_DLC_STUCK
         const val DISABLE_AUTO_GEAR = false
         const val ENABLE_MANUAL_SHIFT = false
         const val ENABLE_UNLOCK = false
@@ -873,6 +891,10 @@ object ModConfig {
                     KEY_ENABLE_UNLOCK_STEER_ANGLE,
                     Defaults.ENABLE_UNLOCK_STEER_ANGLE
                 ),
+                enableFixDlcStuck = json.optBoolean(
+                    KEY_ENABLE_FIX_DLC_STUCK,
+                    Defaults.ENABLE_FIX_DLC_STUCK
+                ),
                 disableAutoGear = json.optBoolean(
                     KEY_DISABLE_AUTO_GEAR,
                     Defaults.DISABLE_AUTO_GEAR
@@ -985,6 +1007,7 @@ object ModConfig {
         put(KEY_ENABLE_LATCH_OVERTAKE, settings.enableOvertakeLatch)
         put(KEY_ENABLE_PROTECT_NEXT_LAP, settings.enableProtectNextLap)
         put(KEY_ENABLE_UNLOCK_STEER_ANGLE, settings.enableUnlockSteerAngle)
+        put(KEY_ENABLE_FIX_DLC_STUCK, settings.enableFixDlcStuck)
         put(KEY_DISABLE_AUTO_GEAR, settings.disableAutoGear)
         put(KEY_ENABLE_MANUAL_SHIFT, settings.enableManualShift)
         put(KEY_ENABLE_UNLOCK, settings.enableUnlock)
@@ -1331,6 +1354,7 @@ object ModConfig {
                 enableOvertakeLatch = j.optBoolean(KEY_ENABLE_LATCH_OVERTAKE, Defaults.ENABLE_LATCH_OVERTAKE),
                 enableProtectNextLap = j.optBoolean(KEY_ENABLE_PROTECT_NEXT_LAP, Defaults.ENABLE_PROTECT_NEXT_LAP),
                 enableUnlockSteerAngle = j.optBoolean(KEY_ENABLE_UNLOCK_STEER_ANGLE, Defaults.ENABLE_UNLOCK_STEER_ANGLE),
+                enableFixDlcStuck = j.optBoolean(KEY_ENABLE_FIX_DLC_STUCK, Defaults.ENABLE_FIX_DLC_STUCK),
                 disableAutoGear = j.optBoolean(KEY_DISABLE_AUTO_GEAR, Defaults.DISABLE_AUTO_GEAR),
                 enableManualShift = j.optBoolean(KEY_ENABLE_MANUAL_SHIFT, Defaults.ENABLE_MANUAL_SHIFT),
                 enableUnlock = j.optBoolean(KEY_ENABLE_UNLOCK, Defaults.ENABLE_UNLOCK),
@@ -1563,6 +1587,7 @@ object ModConfig {
             enableOvertakeLatch = Defaults.ENABLE_LATCH_OVERTAKE,
             enableProtectNextLap = Defaults.ENABLE_PROTECT_NEXT_LAP,
             enableUnlockSteerAngle = Defaults.ENABLE_UNLOCK_STEER_ANGLE,
+            enableFixDlcStuck = Defaults.ENABLE_FIX_DLC_STUCK,
             disableAutoGear = Defaults.DISABLE_AUTO_GEAR,
             enableManualShift = Defaults.ENABLE_MANUAL_SHIFT,
             enableUnlock = Defaults.ENABLE_UNLOCK,
@@ -1617,6 +1642,10 @@ object ModConfig {
         // 解除最大转向角度限制（SetMaxSteeringAngle 恒用静态基础转角）。默认关。
         // 带默认值 —— 命名参数部分构造的调用点无需改动即可编译。
         val enableUnlockSteerAngle: Boolean = Defaults.ENABLE_UNLOCK_STEER_ANGLE,
+        // 修复 DLC 更新检查超时卡加载（卡在 "Synchronizing additional content..."
+        // 时超时清 IsSynchronizing 让主场景加载）。默认开。带默认值 ——
+        // 命名参数部分构造的调用点无需改动即可编译。
+        val enableFixDlcStuck: Boolean = Defaults.ENABLE_FIX_DLC_STUCK,
         val disableAutoGear: Boolean,
         val enableManualShift: Boolean,
         val enableUnlock: Boolean,

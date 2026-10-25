@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.Lightbulb
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Flip
 import androidx.compose.material.icons.rounded.LockOpen
+import androidx.compose.material.icons.rounded.CloudSync
 import androidx.compose.material.icons.rounded.PriorityHigh
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Speed
@@ -330,6 +331,26 @@ fun ConfigureNativeFeaturesScreen(
                 },
                 checked = uiState.enableUnlock,
                 onCheckedChange = actions::setEnableUnlock
+            )
+            // 修复 DLC 更新检查超时卡加载：游戏启动时 CarsDLCManager 在目录检查
+            // 阶段 await 的 Addressables.CheckForCatalogUpdates() 没有超时，弱网
+            //（连得上但不回数据）会永久挂起，IsSynchronizing 恒 true ⇒ 永远卡在
+            // "Synchronizing additional content..." 10%。开启后模块检测到卡超过
+            // 3 秒即清该标志，让游戏自己的循环退出并加载主场景。
+            // 默认开 —— 卡死是"进不去游戏"级别，收益远大于代价。
+            SwitchPreference(
+                title = "修复 DLC 更新超时卡加载",
+                summary = "网络异常时避免卡在启动加载界面",
+                startAction = {
+                    Icon(
+                        Icons.Rounded.CloudSync,
+                        modifier = Modifier.padding(end = 6.dp),
+                        contentDescription = null,
+                        tint = colorScheme.onBackground
+                    )
+                },
+                checked = uiState.enableFixDlcStuck,
+                onCheckedChange = actions::setEnableFixDlcStuck
             )
             SwitchPreference(
                 title = "隐藏油门和刹车按键",

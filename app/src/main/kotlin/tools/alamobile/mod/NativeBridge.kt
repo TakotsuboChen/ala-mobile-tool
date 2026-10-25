@@ -330,6 +330,34 @@ object NativeBridge {
     external fun setUnlockSteerAngle(active: Boolean)
 
     /**
+     * 修复 DLC 更新检查超时卡加载 hooks 安装（不动 init() 参数签名，与
+     * [initIntro] 同模式）。
+     *
+     * hook `IntroLogoManager.<LoadSequence>d__14.MoveNext()` —— 启动流程总调度
+     * 协程。它每帧读 `CarsDLCManager.IsSynchronizing`，只要为 true 就不加载主场景；
+     * 而 `CheckAndUpdateInstalledDLCs` 在目录检查阶段 await 的
+     * `Addressables.CheckForCatalogUpdates()` 没有超时，CDN 悬着则永久挂起。
+     *
+     * 模块在"进度停在目录检查阶段超过 3 秒"时把 `IsSynchronizing` 置 0，让游戏
+     * 自己的循环退出、走 `SceneManager.LoadSceneAsync` 加载主场景。
+     * 已核对该字段清掉后协程不会自己置回 1（反汇编见 native/src/dlc_guard_hook.c）。
+     *
+     * ⚠️ **必须走早期路径**：卡死发生在启动后几秒，等 15s 延迟块才装 hook 时
+     * 游戏早已卡住。
+     *
+     * @param loadSequenceMoveNext `IntroLogoManager.<LoadSequence>d__14.MoveNext` 的 RVA
+     */
+    @JvmStatic
+    external fun initDlcGuard(
+        enableFixDlcStuck: Boolean,
+        loadSequenceMoveNext: Long
+    )
+
+    /** 运行时开关修复 DLC 更新检查超时卡加载（配置广播到达后调用，不重装 hook）。 */
+    @JvmStatic
+    external fun setFixDlcStuck(active: Boolean)
+
+    /**
      * 计时赛有效圈速监听 hooks 安装（log-only，无 UI）。
      * - IRDSLevelLoadVariables.Awake：捕获 LLV 单例 → 读 trackToRace 赛道名
      *   （16 条 GP 赛道自动识别）。
@@ -715,6 +743,35 @@ object NativeBridge {
     fun setUnlockSteerAngleSafe(active: Boolean) {
         if (!isAvailable) return
         try { setUnlockSteerAngle(active) } catch (e: Throwable) { Logger.w(TAG, "setUnlockSteerAngle failed", e) }
+    }
+
+    /**
+     * 修复 DLC 更新检查超时卡加载 hooks 安装安全包装。native 不可用 / 加载失败时
+     * 静默降级 —— 等价于功能不生效（游戏照常可能在弱网下卡在启动界面）。
+     *
+     * ⚠️ **必须走早期路径**（`onPackageReady` 的 deferred 块，15s 延迟之前）：
+     * 卡死发生在启动后几秒，等 15s 块才装 hook 时游戏早已卡住。
+     */
+    @JvmStatic
+    fun initDlcGuardSafe(enableFixDlcStuck: Boolean) {
+        if (!isAvailable) return
+        try {
+            initDlcGuard(
+                enableFixDlcStuck = enableFixDlcStuck,
+                loadSequenceMoveNext = OffsetTable.INTRO_LOGO_MANAGER_LOAD_SEQUENCE_MOVE_NEXT
+            )
+        } catch (e: Throwable) {
+            Logger.w(TAG, "initDlcGuard failed", e)
+        }
+    }
+
+    /**
+     * 运行时同步「修复 DLC 更新检查超时卡加载」开关（不重装 hook，同 [setUnlockSteerAngleSafe] 模式）。
+     */
+    @JvmStatic
+    fun setFixDlcStuckSafe(active: Boolean) {
+        if (!isAvailable) return
+        try { setFixDlcStuck(active) } catch (e: Throwable) { Logger.w(TAG, "setFixDlcStuck failed", e) }
     }
 
     /**
