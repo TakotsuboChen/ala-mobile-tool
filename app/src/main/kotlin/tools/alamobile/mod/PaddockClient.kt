@@ -332,9 +332,11 @@ object PaddockClient {
             if (App.xposedService == null && ctx != null) {
                 try { App.bindNpatchRemoteService(ctx) } catch (_: Throwable) {}
             }
-            val services = App.allServices.toList()
+            // liveServices() 而非 allServices.toList()：后者可能含已死 binder，
+            // 对死 binder 写会抛 ServiceException，日志噪音且无实际写入。
+            val services = App.liveServices()
             if (services.isEmpty()) {
-                Logger.log(Log.WARN, TAG, "saveAuth: no service bound, token saved locally only (will flush on service bind)")
+                Logger.log(Log.WARN, TAG, "saveAuth: no live service bound, token saved locally only (will flush on service bind)")
             }
             for (service in services) {
                 try {
@@ -342,7 +344,7 @@ object PaddockClient {
                         .edit()
                         .putString(App.KEY_PADDOCK_TOKEN, token)
                         .apply()
-                    val fw = try { service.frameworkName } catch (_: Throwable) { "?" }
+                    val fw = try { service.frameworkName } catch (_: Throwable) { "dead-binder" }
                     Logger.log(Log.INFO, TAG, "token saved to remote prefs ($fw)")
                 } catch (e: Throwable) {
                     Logger.log(Log.WARN, TAG, "remote token save failed: ${e.message}")
@@ -374,9 +376,9 @@ object PaddockClient {
         //（日志打成功、db 里行还在），putString 却一直可靠（登录写入均成功）。
         // 读侧 loadAuth / remoteTokenReader 全部 takeIf { isNotEmpty() }——空串
         // 天然等于"无 token"，与 remove 等效。
-        val services = App.allServices.toList()
+        val services = App.liveServices()
         if (services.isEmpty()) {
-            Logger.log(Log.WARN, TAG, "clearAuth: no service bound, daemon stores NOT cleared (stale token may persist)!")
+            Logger.log(Log.WARN, TAG, "clearAuth: no live service bound, daemon stores NOT cleared (stale token may persist)!")
         }
         for (service in services) {
             try {
@@ -384,7 +386,7 @@ object PaddockClient {
                     .edit()
                     .putString(App.KEY_PADDOCK_TOKEN, "")
                     .apply()
-                val fw = try { service.frameworkName } catch (_: Throwable) { "?" }
+                val fw = try { service.frameworkName } catch (_: Throwable) { "dead-binder" }
                 Logger.log(Log.INFO, TAG, "token blanked in remote prefs ($fw)")
             } catch (e: Throwable) {
                 Logger.log(Log.WARN, TAG, "remote token blank failed: ${e.message}")

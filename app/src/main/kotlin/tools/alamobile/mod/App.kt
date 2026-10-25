@@ -105,7 +105,7 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
             private set
 
         /**
-         * 全部活着的 service binder（LSPosed + NPatch 可能并存）。
+         * 全部 service binder，**每个框架最多保留一个**（LSPosed 与 NPatch 至多两个）。
          *
          * 背景（2026-09-10 token 残留案）：本机 LSPosed 与 NPatch 管理器同时激活，
          * onServiceBind 的升级逻辑让 [xposedService] 最终只指向 LSPosed——NPatch
@@ -118,8 +118,78 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
          * 写/清 token 必须遍历这里对**每个** service 操作（PaddockClient）；
          * 读侧不用改——读到的 store 只要有任何一个是新的即视为有效登录态，
          * 而写侧全写后任一 store 都不会残留旧值。
+         *
+         * ⚠️ **必须按框架名去重，不能按对象身份**（2026-10-25 实机定案）。
+         *
+         * 实测：每次游戏进程启动，NPatch daemon 会向模块 App 连推 **6 个** binder
+         * （12:14:24 起 6 个、12:15:08 起 6 个，日志 `all=1…14` 单调递增）。
+         * 旧判重 `allServices.none { it === service }` **完全无效**——libxposed 的
+         * `XposedServiceHelper.onBinderReceived` 每次都 `new XposedService(...)`
+         * 包装同一个底层 IBinder，包装对象身份必然不同；而 `XposedService` 没有
+         * 重写 `equals`/`hashCode`，拿不到底层 binder（`asInterface()` 是包级私有）
+         * ⇒ 按对象去重这条路物理上走不通。
+         *
+         * 语义上本就该按框架去重：同一框架的多个 binder 全指向**同一个** store
+         *（NPatch → 管理器的 NPatchRemoteStore；LSPosed → lspd），留一个即可。
+         * 新来的同框架 binder 顶掉旧的（新 binder 必然更新，旧的可能已死）。
+         *
+         * ⚠️ 另需在 [onServiceDied] 里摘除死 binder：旧实现只 add 不 remove，
+         * 死 binder 永久留存。官方 [XposedServiceHelper] 在 `registerListener`
+         * 里就 `it.remove()` 死 binder（见其第 70 行），本列表是它 `mCache`
+         * 之外的另一份副本，清理责任在我们自己。
          */
-        val allServices = mutableListOf<XposedService>()
+        private val allServices = mutableListOf<XposedService>()
+
+        /**
+         * 登记一个 service binder，**同框架顶掉旧的**。
+         *
+         * 返回登记后的同框架 service 数量（正常恒为 1；取不到框架名时按
+         * "未知框架" 分组，可能 >1）。
+         */
+        private fun registerService(service: XposedService, frameworkName: String): Int =
+            synchronized(allServices) {
+                allServices.removeAll { existing ->
+                    try {
+                        existing.frameworkName == frameworkName
+                    } catch (_: Throwable) {
+                        false // 取不到 = 已死，下面统一清理
+                    }
+                }
+                // 顺手清掉探测不通的死 binder（与 onServiceDied 互补：
+                // 包装对象身份不同 ⇒ linkToDeath 可能永远不触发）。
+                allServices.removeAll { existing ->
+                    try {
+                        existing.getApiVersion()
+                        false
+                    } catch (_: Throwable) {
+                        true
+                    }
+                }
+                allServices.add(service)
+                allServices.size
+            }
+
+        /**
+         * 取当前**活着**的 service 快照（每个框架一个）。
+         *
+         * 写配置 / 写清 token 一律走这里，不要直接读 [allServices]——
+         * 后者可能含已死 binder（[onServiceDied] 与写线程之间有竞态窗口）。
+         *
+         * 存活探测用 [XposedService.getApiVersion]：libxposed 的每个 getter 都在
+         * `RemoteException` 时抛 [XposedService.ServiceException]，所以能正常返回
+         * 即说明 binder 活着。不用 `asInterface().asBinder().isBinderAlive`——
+         * `asInterface()` 是包级私有，跨包调不到。
+         */
+        fun liveServices(): List<XposedService> = synchronized(allServices) {
+            allServices.filter { svc ->
+                try {
+                    svc.getApiVersion()
+                    true
+                } catch (_: Throwable) {
+                    false
+                }
+            }
+        }
 
         /**
          * 协程 scope，用于 service 绑定超时兜底（参照 AdClose ServiceManager.scope）。
@@ -283,13 +353,14 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
             when (currentState) {
                 is ConnectionState.Connected -> {
                     val currentName = try { currentState.service.frameworkName } catch (_: Throwable) { "Unknown" }
-                    if (currentName == "LSPosed") {
-                        currentState  // 已有 LSPosed，忽略
-                    } else if (newName == "LSPosed") {
-                        shouldUpdate = true
-                        ConnectionState.Connected(service)  // NPatch→LSPosed 升级
+                    // 唯一"忽略"的情形 = 当前已是 LSPosed、新来的是 NPatch（不能降级）。
+                    // 其余一律换成新 binder：同框架重推时新 binder 必然更新
+                    // （旧的可能已死，见 [allServices] 注释的实机证据）。
+                    if (currentName == "LSPosed" && newName != "LSPosed") {
+                        currentState
                     } else {
-                        currentState  // NPatch→NPatch，忽略
+                        shouldUpdate = true
+                        ConnectionState.Connected(service)
                     }
                 }
                 else -> {
@@ -301,12 +372,11 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
         if (shouldUpdate) {
             xposedService = service
         }
-        // 无论是否"升级覆盖"，每个新 binder 都要记录：token 写/清要遍历全部
-        // service（NPatch store 与 lspd 是两个物理存储，见 allServices 注释）。
-        if (allServices.none { it === service }) {
-            allServices.add(service)
-        }
-        Logger.i(TAG, "App: XposedService bound (framework=$newName, all=${allServices.size})")
+        // 登记 binder：**同框架顶掉旧的**（2026-10-25 实机定案）。NPatch 每次游戏
+        // 进程启动会连推 6 个 binder，而 libxposed 每次都 new 一个包装对象 ⇒
+        // 按对象身份去重无效。详见 [allServices] 注释与 [registerService]。
+        val allCount = registerService(service, newName)
+        Logger.i(TAG, "App: XposedService bound (framework=$newName, all=$allCount)")
         if (shouldUpdate) {
             // service 绑上时把 filesDir 里的最新配置 flush 到 remote prefs。
             //
@@ -382,9 +452,24 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
                 currentState
             }
         }
+        // ⚠️ **无论死活的是不是"当前" service，都要从 allServices 摘除**
+        // （2026-10-25 修复）。旧实现只清 xposedService，死 binder 永久留在
+        // allServices 里。摘除与"是否掉激活"无关：后者只看当前那一个，
+        // 前者是资源清理。
+        //
+        // ⚠️ 按**对象身份**摘除在这里是对的（与 [registerService] 的按框架去重
+        // 不同）：`onServiceDied` 收到的正是当初登记进列表的那个包装对象
+        // （`linkToDeath` 回调捕获的就是它），所以 `===` 能精确命中。
+        val removed = synchronized(allServices) {
+            allServices.removeAll { it === service }
+        }
+        val remaining = synchronized(allServices) { allServices.size }
         if (isDisconnected) {
             xposedService = null
-            Logger.w(TAG, "App: XposedService died")
+            Logger.w(TAG, "App: XposedService died (removed=$removed, remaining=$remaining)")
+        } else {
+            Logger.i(TAG, "App: stale XposedService died (not current; removed=$removed, " +
+                    "remaining=$remaining)")
         }
     }
 }

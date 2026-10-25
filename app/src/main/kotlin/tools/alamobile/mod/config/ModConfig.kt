@@ -1072,12 +1072,18 @@ object ModConfig {
                 // 仍失败才降级"只写信箱/本地"（onServiceBind flush 兜底补写）。
                 try { App.bindNpatchRemoteService(context) } catch (_: Throwable) {}
             }
-            val services = App.allServices.toList()
+            // ⚠️ 用 liveServices() 而非 allServices.toList()（2026-10-25）：后者可能
+            // 含已死 binder（onServiceDied 与写线程有竞态窗口），对死 binder 写会
+            // 抛 ServiceException 走 catch，日志变噪音。见 App.allServices 注释。
+            val services = App.liveServices()
             if (services.isEmpty()) {
-                Logger.w("AlaMobileTool", "No service bound, config written to mailbox/local only")
+                Logger.w("AlaMobileTool", "No live service bound, config written to mailbox/local only")
             }
             for (service in services) {
-                val fw = try { service.frameworkName } catch (_: Throwable) { "?" }
+                // frameworkName 取不到 = binder 已死（libxposed 的 getter 只在
+                // RemoteException 时抛 ServiceException，没有"返回空"分支）。
+                // 兜底文案必须写明这一点，否则日志里的"?"会被误读成"未知框架"。
+                val fw = try { service.frameworkName } catch (_: Throwable) { "dead-binder" }
                 try {
                     service.getRemotePreferences(App.PREF_GROUP)
                         .edit()
