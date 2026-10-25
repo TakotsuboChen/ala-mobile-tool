@@ -539,7 +539,12 @@ object ModConfig {
      * ️ [tcCustom]/[absCustom] 与 strength 分列：`mode=default` 表示游戏默认
      * 透传，此时 strength 只是 UI 记忆值、**不生效**——服务端据此避免把"从未
      * 调过 TC"的用户误判成"关 TC"。
-     * ⚠️ 踏板按**设置**取值，不看控件当前是否被临时隐藏（用户定案：按设置计）。
+     * ⚠️ **踏板维在 native 侧会被按实际使用降级**（2026-10-25 修正，取代旧的
+     * 「按设置计」定案）：Java 这里推的仍是**设置值**，但 `lap_hook.c` 在圈完成
+     * 时比对「本圈模块踏板活跃帧占比」，不足 50% 就把 pedal_mode 改写为 off
+     * （原生按键）。原因：服务端 `score.rs` 的 `pedal_linear` 判的是"这一圈实际
+     * 用了什么输入"，按设置值上报会让「设置选双踏板、实际全程用原生按键」的圈
+     * 白吃 10% 加成。**TC/ABS 两维不受影响**（它们没有"临时不用"的对应物）。
      */
     data class LapAssistConfig(
         val pedalMode: PedalMode,

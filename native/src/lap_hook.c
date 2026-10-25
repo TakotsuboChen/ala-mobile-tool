@@ -144,6 +144,31 @@ static volatile int32_t g_assist_cfg[5] = {0, 0, 0, 0, 0};
 static volatile int32_t g_assist_epoch = 0;
 static volatile int32_t g_assist_boundary_epoch = 0;
 
+// ── 本圈「模块踏板实际使用占比」（2026-10-25）──
+//
+// 背景：`pedal_mode` 上报的是**设置值**，但服务端把它理解成"这一圈实际用了
+// 什么输入方式"（`score.rs`：`pedal_linear = matches!(pedal_mode, "single"|
+// "dual")` → +10% 加成，注释写着"原生按键（'off'）不算线性踏板"）。于是
+// 「设置选了双踏板、但这一圈全程用游戏原生按键」会被白送 10% 加成——排行榜
+// 公平性问题（实机日志 2026-10-24：pedalMode=DUAL + hideGamePedals=false +
+// 跑圈期间零 `pedal[` 事件 → 上传 dual）。
+//
+// 修法：按**物理事实**判定——本圈有多少物理帧里模块真的在向游戏写踏板值。
+// 判定源是 pedal_hook.c 的 `g_throttle_active`/`g_brake_active`（只在 overlay
+// 的 JNI setter 里翻，是"模块正在控踏板"的电平），每物理帧采样累加。
+//
+// 为什么用帧占比而不是"碰过一次就算"：历史日志 212 圈里 99 圈 0%、96 圈
+// ≥90%，中间地带仅 17 圈（且多为换圈间隙手指没松的假象）——双峰分布说明
+// 两种输入方式互斥。阈值 50% 落在最宽的空档（40~50% 为 0 圈），语义也最
+// 直白：「本圈过半时间是模块在控踏板」。
+//
+// 总帧数天然只统计真正在跑圈的时段——物理帧在暂停/结算/读盘时停推，故
+// 无需额外做暂停门控（与 slip_feedback 的停滞看门狗同理）。
+#define PEDAL_USAGE_MIN_PCT 50
+
+static volatile int32_t g_pedal_active_frames = 0;  // 本圈模块控踏板的帧数
+static volatile int32_t g_pedal_total_frames = 0;   // 本圈物理帧总数
+
 static void *g_llv_awake_stub = NULL;
 static void *g_llv_awake_orig = NULL;
 static void *g_handle_sectors_stub = NULL;
@@ -559,6 +584,9 @@ static void proxy_llv_awake(void *this, void *method_info) {
     // 新会话 = 第一圈的起点：配置版本快照。**不重置 epoch 本身**（它是配置的
     // 变更历史计数，与游戏会话无关；Java 推配置时仍会照常递增）。
     g_assist_boundary_epoch = g_assist_epoch;
+    // 踏板使用计数同样归零（新会话 = 第一圈起点）。
+    g_pedal_active_frames = 0;
+    g_pedal_total_frames = 0;
     char track[64];
     il2cpp_string_read_ascii(*(void **) ((uintptr_t) this + OFF_LLV_TRACK_TO_RACE),
                              track, sizeof(track));
@@ -665,6 +693,12 @@ static void proxy_odometer_handle_sectors_times(void *this, int sector_order,
         // 无效圈也推进：下一圈仍然从此刻开始。
         int32_t lap_start_epoch = g_assist_boundary_epoch;
         g_assist_boundary_epoch = g_assist_epoch;
+        // 踏板使用帧数：本圈快照取到局部变量（供下面判定 + 日志用），
+        // 然后立即归零开始计下一圈。**无效圈也必须归零**——本圈统计到此为止。
+        int32_t lap_pedal_active = g_pedal_active_frames;
+        int32_t lap_pedal_total = g_pedal_total_frames;
+        g_pedal_active_frames = 0;
+        g_pedal_total_frames = 0;
         if (valid_lap) {
             float cur_best = g_best_valid_lap;
             if (cur_best <= 0.0f) cur_best = 1.0e9f;  // 0 = 无有效圈
@@ -698,6 +732,32 @@ static void proxy_odometer_handle_sectors_times(void *this, int sector_order,
                 if (consistent) {
                     for (int i = 0; i < 5; i++) {
                         g_upload_assist[i] = g_assist_cfg[i];
+                    }
+                    // ── 踏板维按**实际使用**修正（2026-10-25）──
+                    // 设置值是 single/dual（= 2/3）但本圈模块踏板的活跃帧
+                    // 不足一半 ⇒ 这一圈实际是拿游戏原生按键跑的，必须报
+                    // off（= 1），否则白吃服务端 +10% 线性踏板加成。
+                    // 设置本来就是 off 时无需修正（本来就是 1）。
+                    int32_t cfg_pedal = g_upload_assist[0];
+                    if (cfg_pedal == 2 || cfg_pedal == 3) {
+                        int used_pct = (lap_pedal_total > 0)
+                                ? (int) ((int64_t) lap_pedal_active * 100 / lap_pedal_total)
+                                : 0;
+                        if (used_pct < PEDAL_USAGE_MIN_PCT) {
+                            g_upload_assist[0] = 1;  // off（原生按键）
+                            LOGI("LAPcfg: pedal usage %d/%d frames (%d%%) < %d%% → report off "
+                                 "(cfg=%d, lap %s)",
+                                 lap_pedal_active, lap_pedal_total, used_pct,
+                                 PEDAL_USAGE_MIN_PCT, cfg_pedal, now_buf);
+                        } else {
+                            LOGI("LAPcfg: pedal usage %d/%d frames (%d%%) >= %d%% → report %d "
+                                 "(lap %s)",
+                                 lap_pedal_active, lap_pedal_total, used_pct,
+                                 PEDAL_USAGE_MIN_PCT, cfg_pedal, now_buf);
+                        }
+                    } else {
+                        LOGI("LAPcfg: pedal usage %d/%d frames (cfg=%d = native keys, no correction)",
+                             lap_pedal_active, lap_pedal_total, cfg_pedal);
                     }
                 } else {
                     for (int i = 0; i < 5; i++) g_upload_assist[i] = 0;
@@ -840,6 +900,17 @@ bool lap_poll_upload(lap_upload_t *out) {
 
 void lap_mark_upload_consumed(int32_t lap_seq) {
     if (lap_seq > g_upload_consumed_seq) g_upload_consumed_seq = lap_seq;
+}
+
+// ── 本圈模块踏板使用采样（由 pedal_hook.c 的 proxy_fixed_update 每物理帧调）──
+//
+// 调用点必须在**玩家车白名单分支内**（AI 车的 FixedUpdate 同样会调到这里，
+// 若不加白名单，AI 帧会把分母刷大、把真实占比稀释掉）。
+//
+// 开销：一次自增 + 一次条件自增，50Hz × 1 辆车，可忽略。
+void lap_note_pedal_frame(int pedal_active) {
+    g_pedal_total_frames++;
+    if (pedal_active) g_pedal_active_frames++;
 }
 
 void lap_set_assist_config(int pedal_mode, int tc_mode, int tc_strength,

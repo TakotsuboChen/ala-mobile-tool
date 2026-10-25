@@ -4,6 +4,7 @@
 #include "crash_hook.h"
 #include "slip_feedback.h"
 #include "kerb_haptic.h"
+#include "lap_hook.h"
 #include <dlfcn.h>
 #include <inttypes.h>
 #include <pthread.h>
@@ -380,6 +381,16 @@ static void proxy_fixed_update(void *this) {
         if (is_target_player_car(this)) {
             abs_apply_gear(this);
             abs_diag_log(this);
+            // ★ 本圈模块踏板使用采样（2026-10-25）：每物理帧一次，供
+            // lap_hook 判定"这一圈到底是拿模块踏板跑的、还是拿游戏原生按键
+            // 跑的"。判据 = 模块此刻是否真的在向游戏写踏板值。
+            //
+            // ⚠️ **必须在白名单分支内**：AI 车同样走 FixedUpdate，若在外面
+            // 采样，AI 帧会把分母刷大、把真实占比稀释成 1/8 以下。
+            // ⚠️ 采样点选这里而不是 proxy_car_controller：后者在部分场景
+            // （结算/暂停/进站）可能不推进，而 FixedUpdate 恒 50fps；且圈
+            // 边界（odometer order==2）与它同属主线程，计数天然对齐。
+            lap_note_pedal_frame(g_throttle_active || g_brake_active);
             // ⚠️ 滑移率反馈的采样**不在这里**：它读的是 IRDSWheel 的
             // slipRatio/slipAngle/maxSlip/maxAngle，而这些字段由
             // `multithreadWheelManager.FixedUpdate` → `ComputeWheelPhysics`

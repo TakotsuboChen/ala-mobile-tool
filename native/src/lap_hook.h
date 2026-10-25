@@ -61,6 +61,13 @@ void lap_mark_upload_consumed(int32_t lap_seq);
 void lap_set_assist_config(int pedal_mode, int tc_mode, int tc_strength,
                            int abs_mode, int abs_strength);
 
+// ── 本圈模块踏板使用采样（2026-10-25）──
+// 每物理帧由 pedal_hook.c 的 proxy_fixed_update 在**玩家车白名单分支内**调用。
+// pedal_active = 本帧模块是否正在向游戏写油门/刹车值（pedal_hook 的
+// g_throttle_active / g_brake_active）。圈完成时按活跃帧占比决定 pedal_mode
+// 是否从设置值降级为 off（原生按键），见 lap_hook.c 的 PEDAL_USAGE_MIN_PCT。
+void lap_note_pedal_frame(int pedal_active);
+
 #ifdef __cplusplus
 }
 #endif
