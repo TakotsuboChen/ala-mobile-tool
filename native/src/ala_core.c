@@ -300,6 +300,25 @@ Java_tools_alamobile_mod_NativeBridge_markLapUploadConsumed(JNIEnv *env, jclass 
     lap_mark_upload_consumed((int32_t) lapSeq);
 }
 
+// ── 玩家车身份查询（2026-10-25）──
+// 返回 carModifier.carUniqueID（= CarDefinition.carId）。-1 = 尚未采到
+// （不在赛道内 / 玩家车实例还没建立）。carType 与 carNumber 一并写入 out：
+//   out[0] = carUniqueID  out[1] = carType(0=地效 1=主动空力)  out[2] = carNumber
+// 数据源是 proxy_car_controller 白名单分支里的只读探针，与圈速上传同源。
+JNIEXPORT jint JNICALL
+Java_tools_alamobile_mod_NativeBridge_pollCarIdentity(JNIEnv *env, jclass clazz,
+                                                     jintArray out) {
+    (void) clazz;
+    if (env == NULL || out == NULL) return -1;
+    if ((*env)->GetArrayLength(env, out) < 3) return -1;
+    jint buf[3];
+    buf[0] = (jint) pedal_get_car_unique_id();
+    buf[1] = (jint) pedal_get_car_era();
+    buf[2] = (jint) pedal_get_car_number();
+    (*env)->SetIntArrayRegion(env, out, 0, 3, buf);
+    return buf[0];
+}
+
 // ── 整圈辅助配置推送（模块启动 + ConfigReceiver 收到广播时）──
 // 码 0 = 缺失/未知；非 0 的取值由 Java 依 ModConfig 枚举给出（native 不认识语义，
 // 只做变更检测与透传）。**重复推同一份配置是幂等的**——native 只在真正变化时

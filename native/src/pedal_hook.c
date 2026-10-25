@@ -74,6 +74,26 @@ static volatile int g_abs_rf_intercept_installed = 0;
 static volatile long long g_abs_rf_hits_total = 0;
 static volatile long long g_abs_rf_hits_player = 0;
 
+// ── 玩家车身份探针（2026-10-25，临时诊断）──
+// 目的：验证赛道内能否从玩家车实例稳定读出 `carModifier.carUniqueID`。
+// 该字段 = CarDefinition.carId（资源侧实证：2023 代 0..19、2026 代 20..41，
+// 各车队两台车连号），配合 carType(0x24) 唯一确定 42 台车中的一台，
+// 可作为随圈速上传的车型标识。**真实型号名（W17/RB22…）在游戏内不存在**，
+// 型号只能由模块侧维护 carId→型号 映射表。
+//
+// 路径：IRDSCarControllInput(this) +0x190 → carModifier，读 +0x20 / +0x24。
+// 采样点 = proxy_car_controller 的白名单分支（每物理帧一次，只读不写）。
+// 日志只在**值变化时**打一条 —— 恒打会把 2MB 滚动日志刷满（CLAUDE.md 日志红线）。
+static volatile int g_car_id_probe = -1;   // carUniqueID（-1 = 尚未采到）
+static volatile int g_car_era_probe = -1;  // carType（0=地效 1=主动空力）
+// 上一次已落盘的 carModifier 指针（NULL = 尚未落盘 / 已离开赛道）。
+// 用指针而非 carId 作判据：每次进赛道 carModifier 都是新实例，
+// 同一辆车重进赛道也能重新打一条日志。
+static void *g_car_cm_last_logged = NULL;
+// 2026-10-25 一次性「真名猜测」验证：A526/A526 这类真实型号串若存在，
+// 应能在 carId 41（凯迪拉克）上读到；此处同时记录 carNumber 以便交叉验证。
+static volatile int g_car_number_probe = -1;
+
 static volatile float g_throttle_value = 0.0f;
 static volatile float g_brake_value = 0.0f;
 
@@ -1006,6 +1026,43 @@ static void proxy_car_controller(void *this) {
         // kerb_haptic.h 的反汇编实证）——不发明判据，与游戏路肩音完全同步。
         // 只读，不写任何游戏字段。
         kerb_haptic_tick(this);
+
+        // ★ 玩家车身份探针（2026-10-25）：读 carModifier.carUniqueID。
+        // 只读，不写任何游戏字段。值变化时才落一条日志——每物理帧恒打会把
+        // 2MB 滚动日志在几十秒内刷满，反而丢掉跑圈证据。
+        //
+        // ✅ 实机已验证（2026-10-26，Monza）：this+0x190 即 carModifier，
+        //    读出 carUniqueID=22 / carType=1 / carNumber=22（2026 法拉利），
+        //    与资源侧解析的 carId 完全一致。get_CM() 反汇编
+        //    （0x1a659f4 `ldr x21,[x19,#0x190]`）证明这是裸字段读取、无懒加载。
+        //
+        // ⚠️ **绝不要**在这里做"扫描 this 前 N 字节找候选指针"式的特征探测：
+        //    2026-10-26 实测直接 SIGSEGV（fault_addr 为乱数、pc 落在模块 +0x0）。
+        //    IRDSCarControllInput 里有大量非指针字段（float/bool/int），
+        //    把它们当指针解引用必然崩。只读已知偏移的具名字段。
+        {
+            void *cm = *(void *volatile *) ((uintptr_t) this + 0x190);  // cM
+            if (cm != NULL) {
+                int car_id = *(volatile int *) ((uintptr_t) cm + 0x20);   // carUniqueID
+                int car_era = *(volatile int *) ((uintptr_t) cm + 0x24);  // carType
+                int car_num = *(volatile int *) ((uintptr_t) cm + 0x68);  // carNumber
+                g_car_id_probe = car_id;
+                g_car_era_probe = car_era;
+                g_car_number_probe = car_num;
+                // 判据用 **cM 指针**而非 car_id：每次进赛道/换车 carModifier
+                // 都是新实例，指针变化 ⇒ 重新打一条。用 car_id 判会让"同一辆车
+                // 重进赛道"静默（值没变），恰好丢掉最需要观察的那次。
+                if (cm != g_car_cm_last_logged) {
+                    g_car_cm_last_logged = cm;
+                    LOGI("CARIDprobe cm=%p carUniqueID=%d carType=%d carNumber=%d",
+                         cm, car_id, car_era, car_num);
+                }
+            } else if (g_car_cm_last_logged != NULL) {
+                // 从"有 cM"退化成"无 cM"（退回主菜单/换车中）：记一条，便于对齐。
+                g_car_cm_last_logged = NULL;
+                LOGI("CARIDprobe cM lost (left track / car swap)");
+            }
+        }
     }
 }
 
@@ -1360,6 +1417,21 @@ void pedal_uninstall_hooks(void) {
 
 void *pedal_get_controller(void) {
     return (void *) g_player_controller;
+}
+
+// ── 玩家车身份查询（2026-10-25）──
+// 返回 proxy_car_controller 白名单分支里采到的 carModifier 字段。
+// 只读 volatile 缓存，不碰游戏对象——Java 侧可在任意线程安全轮询。
+int pedal_get_car_unique_id(void) {
+    return g_car_id_probe;
+}
+
+int pedal_get_car_era(void) {
+    return g_car_era_probe;
+}
+
+int pedal_get_car_number(void) {
+    return g_car_number_probe;
 }
 
 void pedal_shift_up(void) {

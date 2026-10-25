@@ -389,6 +389,20 @@ object NativeBridge {
     external fun markLapUploadConsumed(lapSeq: Int)
 
     /**
+     * 玩家车身份查询（2026-10-25）。返回 `carModifier.carUniqueID`
+     * （= `CarDefinition.carId`），-1 = 尚未采到（不在赛道内）。
+     *
+     * `out` 三元素：`[0]` carUniqueID、`[1]` carType（0=地效 1=主动空力）、
+     * `[2]` carNumber（与 carId 恒等，用于交叉校验）。
+     *
+     * 资源侧实证的 carId 区间：2023 地效 `0..19`、2026 主动空力 `20..41`，
+     * 各车队两台车连号。⚠️ 游戏内**不存在**真实型号名（W17/RB22…），
+     * 型号只能由 [CarCatalog] 维护 carId→型号 映射表。
+     */
+    @JvmStatic
+    external fun pollCarIdentity(out: IntArray): Int
+
+    /**
      * 推送当前辅助配置（模块启动 + 配置广播到达时）。native 只在**真正变化**时
      * 递增内部 epoch，故可重复调用；圈中途改过配置的圈会被判"不一致"记缺失。
      *

@@ -129,6 +129,16 @@ void pedal_shift_down(void);
 // Returns the last IRDSCarControllInput instance seen by the hooks.
 void *pedal_get_controller(void);
 
+// ── 玩家车身份查询（2026-10-25）──
+// carUniqueID = carModifier.carUniqueID(0x20) = CarDefinition.carId。
+// 资源侧实证：2023 地效车 0..19、2026 主动空力 20..41，各车队两台车连号。
+// 配合 carType 可唯一确定 42 台车中的一台。**-1 = 尚未采到**（不在赛道内）。
+// ⚠️ 游戏内**不存在**真实型号名（W17/RB22…）——型号只能由 Java 侧维护
+//    carId→型号 映射表。
+int pedal_get_car_unique_id(void);
+int pedal_get_car_era(void);      // 0=GroundEffectEra 1=DoubleDRSEra
+int pedal_get_car_number(void);   // carModifier.carNumber(0x68)，与 carId 恒等
+
 // Enable/disable automatic gear shifting suppression.
 void pedal_set_disable_auto_gear(int disable);
 

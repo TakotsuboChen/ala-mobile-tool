@@ -44,6 +44,9 @@
 #include "lap_hook.h"
 #include "native_log.h"
 #include "crash_hook.h"
+// 本圈车型快照要用 pedal_hook 的探针 getter（proxy_car_controller 每物理帧
+// 刷新的 carModifier 缓存）。圈边界读一次即可，不引入新的采样点。
+#include "pedal_hook.h"
 #include <dlfcn.h>
 #include <elf.h>
 #include <inttypes.h>
@@ -766,6 +769,13 @@ static void proxy_odometer_handle_sectors_times(void *this, int sector_order,
                 }
                 g_upload_gp = g_current_gp_index;
                 g_upload_lap_ms = ms;
+                // ── 本圈车型：圈边界读一次（2026-10-26，验证用）──
+                // 只读 + 打日志，**不参与上传**（上传契约未定，另行处理）。
+                // 读的是 pedal_hook 探针缓存（proxy_car_controller 每物理帧
+                // 刷新），此处取一次快照 = 这一圈用的车。
+                LOGI("LAPcar: carId=%d era=%d (lap %s, track='%s')",
+                     pedal_get_car_unique_id(), pedal_get_car_era(),
+                     now_buf, g_track_name);
                 g_upload_seq++;   // volatile 递增单写者（主线程）——发布序：先写数据后写 seq
             } else {
                 LOGI("LAPup: skip upload (gp_index unknown)");
