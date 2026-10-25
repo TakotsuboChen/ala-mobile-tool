@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.add
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Bolt
@@ -52,6 +53,7 @@ import androidx.compose.material.icons.rounded.RoundedCorner
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.Air
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -83,6 +85,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import tools.alamobile.mod.config.ModConfig
+import tools.alamobile.mod.ui.MarkdownText
 import tools.alamobile.mod.ui.MiscIcon
 import tools.alamobile.mod.ui.NativeFeatureIcon
 import tools.alamobile.mod.ui.OverlayIcon
@@ -315,6 +318,12 @@ fun ConfigureNativeFeaturesScreen(
 ) {
     // ABS 自定义切换警示弹窗：每次从默认切到自定义时弹（不是只弹首次）。
     var showAbsWarnDialog by remember { mutableStateOf(false) }
+    // 解除转向限制警示弹窗：每次从「关」切到「开」时弹（不是只弹首次）。
+    // 语义 = **立即开启 + 仅告知**（用户 2026-10-25 定案）：开关先落库、功能
+    // 已生效，弹窗只是把「为什么会觉得车变得不一样」讲清楚，不给「取消」。
+    // 与 ABS 警示同模式（单按钮「我已了解」），但正文长得多 ⇒ 走 MarkdownText
+    // + 阅读门控（见页面末尾的弹窗实现）。
+    var showSteerUnlockWarnDialog by remember { mutableStateOf(false) }
 
     ConfigureSubPageScaffold("原生特性控制", bottomInnerPadding) {
         Card(modifier = Modifier.fillMaxWidth()) {
@@ -424,7 +433,14 @@ fun ConfigureNativeFeaturesScreen(
                     )
                 },
                 checked = uiState.enableUnlockSteerAngle,
-                onCheckedChange = actions::setEnableUnlockSteerAngle
+                // 从「关」切到「开」时先让开关生效（立即开启），再弹告知弹窗。
+                // 关方向不弹；已经是开的时候重复回调也不弹（`!uiState.…` 拦住）。
+                onCheckedChange = { on ->
+                    if (on && !uiState.enableUnlockSteerAngle) {
+                        showSteerUnlockWarnDialog = true
+                    }
+                    actions.setEnableUnlockSteerAngle(on)
+                }
             )
             // TC 调节：游戏设置没有任何 TC 参数可调（仅手柄生效的
             // 开关且被游戏每帧覆写），模块档位是移动端唯一调节途径。
@@ -653,7 +669,71 @@ fun ConfigureNativeFeaturesScreen(
             }
         }
     )
+
+    // 解除转向限制警示（每次从「关」切到「开」时弹）。**开关已生效**，本弹窗
+    // 只解释驾驶特性的变化，不给「取消」——「取消」会与"已生效"自相矛盾。
+    //
+    // 为什么正文需要滚动 + 阅读门控：全文约 350 字，必然超出 `DialogContentLayout`
+    // 的 2/3 屏硬上限 ⇒ 正文必须 `weight(1f, fill = false)` 成为可让渡空间的一方，
+    // 否则 Column 会把「我已了解」按钮从 40dp 最小高压成十几 dp 的窄条（平板实测
+    // 14.5dp，见 CLAUDE.md 弹窗条目）。门控与 [PaddockGuideDialog] 同模式：
+    // `maxValue == 0`（视口容得下、无需滚动）也算已读。
+    //
+    // 正文用 MarkdownText 而非裸 Text：中间那句「**并非是因为修改了物理特性导致的**」
+    // 是本条提示的落点，必须真正加粗才立得住。
+    val steerWarnScrollState = rememberScrollState()
+    val steerWarnHasRead by remember(steerWarnScrollState) {
+        derivedStateOf {
+            steerWarnScrollState.maxValue == 0 ||
+                steerWarnScrollState.value >= steerWarnScrollState.maxValue
+        }
+    }
+    OverlayDialog(
+        show = showSteerUnlockWarnDialog,
+        title = "⚠️开启后将显著改变驾驶特性",
+        onDismissRequest = { showSteerUnlockWarnDialog = false },
+        onDismissFinished = { },
+        content = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                MarkdownText(
+                    markdown = STEER_UNLOCK_WARN_MARKDOWN,
+                    modifier = Modifier.weight(1f, fill = false),
+                    maxHeightFraction = 0.55f,
+                    textSizeSp = 14f,
+                    scrollState = steerWarnScrollState,
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+                TextButton(
+                    text = if (steerWarnHasRead) "我已了解" else "请先阅读说明",
+                    onClick = { showSteerUnlockWarnDialog = false },
+                    enabled = steerWarnHasRead,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColorsPrimary()
+                )
+            }
+        }
+    )
 }
+
+/**
+ * 「解除最大转向角度限制」开启时的说明正文（Markdown）。
+ *
+ * 结构是三段论：① 现象成因（游戏按车速削减转角上限）→ ② 两种可预期的变化
+ * 及各自的真实原因（低速推头 = 输入角度过大；高速"轨道车" = 原先被压得太小，
+ * **不是改了物理**）→ ③ 两条解法（改操控习惯 / 调低灵敏度）。
+ *
+ * ⚠️ 段落之间必须留空行——[MarkdownText] 的解析器把**连续非空行合并成一段**
+ * （段内以空格拼接），不留空行会整篇糊成一大坨。
+ * ⚠️ 弹窗里不要再加 `##` 标题：OverlayDialog 自带居中粗体标题，正文再出标题
+ * 会出现两级标题打架。
+ */
+private const val STEER_UNLOCK_WARN_MARKDOWN = """由于 Ala Mobile 会随着车速度的增大而大幅削减转向角度上限，因此打开此开关后，无论是低速弯还是高速弯，如果你仍保持原来的操控习惯不变，实际的转向输入会远远大于先前的原生状态。
+
+你可能会注意到低速弯推头与高速弯“轨道车”两种显著变化，其根本原因是解除转向限制之后，你用原来的习惯会不自觉地比之前输入的转向角度大得多，而转向角度过大不仅会导致低速弯推头，而且是低速弯、发卡弯中最典型的人为推头诱因之一。
+
+高速弯则因为原生状态下转向角度被限制得太小，解除限制之后反而能更加充分利用抓地力，**并非是因为修改了物理特性导致的**。
+
+要解决解除限制后的低速弯推头的问题，一种方法是改变操控习惯，人为减小陀螺仪偏转角度，从而使实际输入的转向角度尽可能向原生状态下靠拢。另一种方法是在游戏设置中大幅调低灵敏度，从而在同样的陀螺仪偏转角度下获得与原生状态相似的实际转向角度。"""
 
 // ── 二级页 2：Overlay 控件 ──
 
