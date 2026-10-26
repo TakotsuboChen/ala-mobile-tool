@@ -166,7 +166,7 @@
 
 | 文档 | 状态 | 内容 |
 |---|---|---|
-| [`TECHNICAL_ANALYSIS.md`](TECHNICAL_ANALYSIS.md) | 活跃 | **引擎机制逆向分析主文档**。篇章编号按成篇顺序追加，不预设。已完成：§1 方法论、§2 ABS、§3 TC/ESC、§4 圈速与赛道 |
+| [`TECHNICAL_ANALYSIS.md`](TECHNICAL_ANALYSIS.md) | 活跃 | **引擎机制逆向分析主文档**。篇章编号按成篇顺序追加，不预设。已完成：§1 方法论、§2 ABS、§3 TC/ESC、§4 圈速与赛道（含 §4.5 载油量不影响圈速） |
 | [`TRACK_IDENTIFICATION.md`](TRACK_IDENTIFICATION.md) | 活跃 | 16 条 GP 赛道权威表（buildIndex / 场景名 / GP 名），`TECHNICAL_ANALYSIS` §4 的数据源 |
 
 ### 工程笔记（`notes/`）
@@ -178,6 +178,7 @@
 | [`notes/NPATCH_CACHE_CRASH_NOTES.md`](notes/NPATCH_CACHE_CRASH_NOTES.md) | 活跃 | NPatch 四个症状各异的启动问题（Bug A/B/C/D）判定与处置 |
 | [`notes/CROSS_PROCESS_CHANNELS.md`](notes/CROSS_PROCESS_CHANNELS.md) | 活跃 | 模块进程 → 游戏进程的全部跨进程通道审计与裁决 |
 | [`notes/CAR_IDENTIFICATION.md`](notes/CAR_IDENTIFICATION.md) | 活跃 | **玩家车身份识别**：carId 运行时读取路径、42 台车映射表、真实型号名不存在的证据 |
+| [`notes/CAR_SETUP.md`](notes/CAR_SETUP.md) | 活跃 | **车辆调教读取**：`GlobalVariables.currentCarSetup` 静态字段路径、14 字段偏移与量纲、刹车平衡单字段语义 |
 
 ### 设计契约（`design/`）
 

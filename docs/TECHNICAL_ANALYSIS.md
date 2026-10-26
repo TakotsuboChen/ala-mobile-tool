@@ -1230,7 +1230,68 @@ MelbourneRifatta 1:22.967）[V]。注意游戏侧字段更新滞后于过圈
 终版门禁：`champManager 非 NULL → 按 isTimeAttack 硬判`；
 `champManager == NULL → 模式未知 → 挂起`。三路径实测正确 [V]。
 
-## 4.5 本篇结论
+## 4.5 载油量：计时赛里不构成圈速变量
+
+> 这一节回答一个曾被认为会影响榜单公平性的问题：**载油量是否影响圈速？**
+> 结论：计时赛里玩家改不了油量，且油量不进入车辆物理。两条独立理由，
+> 任一条都足以关闭该议题。
+
+### 4.5.1 油量的来源：按赛道长度硬算，非玩家设置
+
+`AlaCarSetup.fuelLoaded`（`+0x4C`）在 `carModifier.Start` 中被写入，值来自
+`CommonUtilities.ComputeFuelToLoad(raceLengthSetting, raceMode, trackIndex,
+isRace, championshipSession, fuelPerKm)`（RVA `0x179B2E8`）。
+
+`carModifier.Start` 在调用前先算一个合取位 `w21`，再据此选择
+`raceMode` 实参（`0x1764520`–`0x1764588`）：
+
+```asm
+0x1764520: ldr  w10, [x8, #0xc8]      ; GlobalVariables.raceMode
+0x1764524: cmp  w10, #2               ; == 2 ?
+0x1764528: cset w10, eq
+0x176452c: orr  w21, w21, w10         ; w21 |= (raceMode == 2)
+0x1764534: cbz  w21, #0x176456c       ; w21 == 0 → 走 w4 = 5 分支
+0x1764554: mov  w4, #6                ; 否则     → raceMode 实参 = 6
+0x1764578: mov  w4, #5                ; 计时赛   → raceMode 实参 = 5
+```
+
+- **`raceMode == 2` 是游戏自身的计时赛判定**（`0x1764524` 的 `cmp w10,#2`）。
+- 计时赛走 `w4 = 5` 分支，`ComputeFuelToLoad` 内 `w23 = 5` 落进
+  `0x179b394` 路径：读 `GlobalVariables.static_fields + 0x40`
+  （`trackSelStatus` 数组）→ `[trackIndex]` → `scvtf` 转 float → `fmul` 系数
+  ⇒ **油量 = f(赛道长度)**，与玩家设置无关。
+- 「按比赛长度枚举取 3 / 5 / 10 / 15 / 20 升」那条 jump table
+  （`0x179b34c`，常量 `0x40400000`=3.0、`0x40a00000`=5.0、
+  `0x41200000`=10.0、`0x41700000`=15.0、`0x41a00000`=20.0，
+  超范围返回 `0`）只在 `raceMode ∉ {5,6}` 时命中——那是**正赛/生涯**路径。
+
+⇒ 计时赛的油量是**赛道固有属性**，所有跑同一条赛道的人油量相同，
+不构成榜单不公平。[V]
+
+### 4.5.2 油量不进入车辆物理
+
+`IRDSDrivetrain.fuelQty`（`+0x4C`，运行时油量）在整个 `dump.cs` 里
+**只有一处字段声明、零方法引用**（`grep -n "fuelQty" dump.cs` 仅命中
+`12948` 行），与 `carModifier.carUniqueID` 同型的裸字段。
+
+`IRDSDrivetrain` 的字段集全是**传动系**量——`gearRatios`(0x60)、
+`finalDriveRatio`(0x68)、`maxTorque`(0x74)、`rpm`(0xC4)、
+`engineInertia`(0x98)、`slipRatio`(0xCC)、`turboRPM`(0x80) 等，
+**不含任何质量字段**。⇒ 油量变化不改整车质量，自然不改加速/制动/过弯
+性能。[?]
+
+> 置信度说明：`0x4C` 这个偏移在 `.so` 里有 469 个浮点访问点，但多数属
+> 其他类的同名偏移（`find_field_access_f.py` 只按偏移匹配、不区分类）。
+> 要 100% 确认需 hook `IRDSDrivetrain` 的物理更新函数、比对油量满/空时
+> 的加速度曲线。**但 4.5.1 已足够关闭议题，无需再做。**
+
+### 4.5.3 对榜单公平性的意义
+
+圈速榜不需要记录载油量：它不是玩家可调项，也不是跨玩家变量。
+这一点与车型（`carId`，玩家可选、确实影响性能）形成对照——
+**可选的才需要记录，固定的不需要**。
+
+## 4.6 本篇结论
 
 1. 游戏圈速计时的权威出口是 `odometerHandler.HandleSectorsTimes`：一个调用点
    同时提供分段计时、整圈计时与游戏原生有效圈判定，是外部读取圈速的最小接口。
@@ -1257,6 +1318,9 @@ MelbourneRifatta 1:22.967）[V]。注意游戏侧字段更新滞后于过圈
 | `sectorQuality` 精确取值表 | [?] | 实测仅出现 0/2 |
 | 非计时赛会话中 `HandleSectorsTimes` 是否混入 AI 车事件 | [?] | 正赛样本中未见 AI 行，但样本量小；门禁挂起后不影响正确性 |
 | LLV 单例每场景加载重建 Awake | [V] | 单次快速模式加载 4 次 LAPtrack（指针循环复用） |
+| 计时赛油量由 `ComputeFuelToLoad` 按赛道长度算（`raceMode==2` 判定） | [V] | `carModifier.Start` 反汇编 `0x1764520`–`0x1764588` |
+| `IRDSDrivetrain.fuelQty` 无 getter/setter（裸字段） | [V] | `grep -n "fuelQty" dump.cs` 仅字段声明 |
+| 油量不进入车辆质量 ⇒ 不影响性能 | [?] | `IRDSDrivetrain` 字段集无质量字段（推断）；`0x4C` 有 469 个同偏移访问点未逐一归类 |
 
 ## 附录 F：圈速篇关键常数与地址表（8.0.4, 200146）
 
@@ -1265,6 +1329,10 @@ MelbourneRifatta 1:22.967）[V]。注意游戏侧字段更新滞后于过圈
 | `IRDSLevelLoadVariables.Awake` | 0x199DE28 | dump.cs（8.0.0→8.0.4 增量 +0xC2DC） |
 | `odometerHandler.HandleSectorsTimes` | 0x1A0A1C4 | dump.cs（增量 +0xD598） |
 | `CommonUtilities.GetGPIndex` | 0x17952F0 | dump.cs + 反汇编 |
+| `CommonUtilities.ComputeFuelToLoad` | 0x179B2E8 | dump.cs + 反汇编 |
+| `GlobalVariables.raceMode` / `trackSelStatus` / `sV` | 0xC8 / 0x40 / 0xA0 | dump.cs（静态字段） |
+| `settingsValues._gameRaceLength` | 0x40 | dump.cs |
+| `AlaCarSetup.fuelLoaded` / `IRDSDrivetrain.fuelQty` | 0x4C / 0x4C | dump.cs（不同类、同偏移） |
 | `SceneManagerHelper.get_ActiveSceneName` | 0x2AED524 | dump.cs（Photon.Pun） |
 | `SceneManagerHelper.get_ActiveSceneBuildIndex` | 0x2AFB85C | dump.cs |
 | `IRDSLevelLoadVariables.trackToRace` | 0xB8 | dump.cs（实例字段） |
