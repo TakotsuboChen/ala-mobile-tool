@@ -278,6 +278,12 @@ static void *g_f_ismp = NULL;    // GlobalVariables.isMultiplayerMatch
 static void *g_f_champ_data = NULL; // GlobalVariables.championshipData (ChampionshipData*)
 static int g_mode_resolved = 0;  // FieldInfo 解析完成标记（含失败）
 
+// ── 本圈调教（setup）FieldInfo（2026-10-26，验证用）──
+// 与 LAPcar 同构：只读 + 打日志，**不参与上传**（上传契约未定）。
+// 见 docs/notes/CAR_SETUP.md。
+static void *g_f_current_setup = NULL;  // GlobalVariables.currentCarSetup (AlaCarSetup*)
+static int g_setup_resolved = 0;        // 0=未做 1=成功 2=失败（防每圈重扫）
+
 static void *g_m_scene_name = NULL;    // SceneManagerHelper.get_ActiveSceneName
 static void *g_m_scene_idx = NULL;     // SceneManagerHelper.get_ActiveSceneBuildIndex
 static void *g_m_gp_index = NULL;      // CommonUtilities.GetGPIndex(int)
@@ -380,6 +386,109 @@ static void resolve_mode_signals(void) {
 #define OFF_CD_ROUND_NUMBER    0x38   // ChampionshipData.roundNumber (int)
 #define OFF_CD_CURRENT_TRACK   0x48   // ChampionshipData.currentTrack (int)
 #define OFF_CD_FULL_QUALI      0x2B   // ChampionshipData.fullQuali (bool)
+
+// ── AlaCarSetup 字段偏移（dump.cs:35891-35909 + ApplyCurrentSetupPreRun
+//    0x18B05E8 反汇编双向对拍实证，2026-10-26）──
+// 对拍方式：ApplyCurrentSetupPreRun 从 SetupManager 的滑条读值（blr 到
+// Slider.get_value）后逐字段 str 进新建的 AlaCarSetup 实例，读端偏移 →
+// 写端偏移的配对关系与 dump.cs 的字段声明完全一致：
+//   [x21,#0x140]AdvancedBrakeBias → [x20,#0x20]brakeBias
+//   [x21,#0x0F0]AdvancedFrontStiffness → [x20,#0x24]frontSuspensionStiffness
+//   [x21,#0x100]AdvancedFrontRollbar  → [x20,#0x2C]frontSuspensionRollbar
+//   [x21,#0x110]AdvancedFrontCamber   → [x20,#0x34]frontCamber
+//   [x21,#0x120]AdvancedFrontToe      → [x20,#0x3C]frontToe
+//   [x21,#0x130]AdvancedFrontRide     → [x20,#0x44]frontRideHeight
+//   [x21,#0x0E0]AdvancedFrontWingSlider → [x20,#0x18]frontWingAero
+// ⚠️ 存的是 float **原始值**，与 UI 显示值（如「80」「﹣3.5°」）的换算
+//    关系未实测——探针输出的就是原始 float，换算待日志对照后定。
+#define OFF_SETUP_FRONT_WING_AERO          0x18
+#define OFF_SETUP_REAR_WING_AERO           0x1C
+#define OFF_SETUP_BRAKE_BIAS               0x20
+#define OFF_SETUP_FRONT_SUSP_STIFFNESS     0x24
+#define OFF_SETUP_REAR_SUSP_STIFFNESS      0x28
+#define OFF_SETUP_FRONT_SUSP_ROLLBAR       0x2C
+#define OFF_SETUP_REAR_SUSP_ROLLBAR        0x30
+#define OFF_SETUP_FRONT_CAMBER             0x34
+#define OFF_SETUP_REAR_CAMBER              0x38
+#define OFF_SETUP_FRONT_TOE                0x3C
+#define OFF_SETUP_REAR_TOE                 0x40
+#define OFF_SETUP_FRONT_RIDE_HEIGHT        0x44
+#define OFF_SETUP_REAR_RIDE_HEIGHT         0x48
+
+// ── 解析 GlobalVariables.currentCarSetup 的 FieldInfo（一次性；成功/失败
+//    都置位防每圈重扫）。这是**静态字段**（static_fields +0x10），走
+//    il2cpp_field_static_get_value 直接取值，不需要任何实例指针链，也
+//    不需要 hook——与上面 championshipData 同一套机制。
+//    写入时机：ApplyCurrentSetupPreRun（进赛道前），三个调用方全是
+//    「进赛道前」路径（ChampionshipManager.GetToTrackFromSession /
+//    ApplySetupAndGoToTrack / prerunHandler.LoadTrackNow）⇒ 赛道内该
+//    对象稳定不变，圈边界读一次即可。
+static void resolve_setup_field(void) {
+    if (g_setup_resolved) return;
+    if (g_class_from_name == NULL || g_class_get_fields == NULL ||
+        g_field_get_name == NULL || g_field_static_get_value == NULL ||
+        g_domain_get == NULL || g_domain_get_assemblies == NULL ||
+        g_assembly_get_image == NULL) {
+        g_setup_resolved = 2;   // 导出缺失 → 不重试
+        return;
+    }
+    size_t n = 0;
+    void **asms = g_domain_get_assemblies(g_domain_get(), &n);
+    if (asms == NULL) { g_setup_resolved = 2; return; }
+    for (size_t i = 0; i < n; i++) {
+        void *image = g_assembly_get_image(asms[i]);
+        if (image == NULL) continue;
+        void *klass = g_class_from_name(image, "", "GlobalVariables");
+        if (klass == NULL) continue;
+        void *iter = NULL;
+        void *field;
+        while ((field = g_class_get_fields(klass, &iter)) != NULL) {
+            const char *fn = g_field_get_name(field);
+            if (fn == NULL) continue;
+            if (strcmp(fn, "currentCarSetup") == 0) {
+                g_f_current_setup = field;
+                break;
+            }
+        }
+        if (g_f_current_setup != NULL) break;
+    }
+    g_setup_resolved = (g_f_current_setup != NULL) ? 1 : 2;
+    LOGI("lap_hook: GlobalVariables.currentCarSetup resolved: %p (state=%d)",
+         g_f_current_setup, g_setup_resolved);
+}
+
+// ── LAPsetup 诊断行：把本圈调教的 7 项（各前后两值 = 14 个 float）一次打齐。
+//    ⚠️ 打的是 **AlaCarSetup 里的原始 float**，不是 UI 显示值。UI 换算关系
+//    （下压力 80 是 0.8 还是 80.0？外倾角是度还是弧度？）尚未实测，故第一
+//    轮只输出原始值，待日志对照后再定是否换算。
+//    setup 为 NULL（尚未进赛道/该模式不写此字段）时打一行说明，便于区分
+//    「读不到」与「读到了但值不对」。
+static void lapsetup_diag(void *setup, const char *lap_buf) {
+    if (setup == NULL) {
+        LOGI("LAPsetup: currentCarSetup is NULL (lap %s) — field resolved=%d",
+             lap_buf, g_setup_resolved);
+        return;
+    }
+    const uintptr_t base = (uintptr_t) setup;
+    float fw_aero   = *(volatile float *) (base + OFF_SETUP_FRONT_WING_AERO);
+    float rw_aero   = *(volatile float *) (base + OFF_SETUP_REAR_WING_AERO);
+    float ride_f    = *(volatile float *) (base + OFF_SETUP_FRONT_RIDE_HEIGHT);
+    float ride_r    = *(volatile float *) (base + OFF_SETUP_REAR_RIDE_HEIGHT);
+    float brake     = *(volatile float *) (base + OFF_SETUP_BRAKE_BIAS);
+    float stiff_f   = *(volatile float *) (base + OFF_SETUP_FRONT_SUSP_STIFFNESS);
+    float stiff_r   = *(volatile float *) (base + OFF_SETUP_REAR_SUSP_STIFFNESS);
+    float roll_f    = *(volatile float *) (base + OFF_SETUP_FRONT_SUSP_ROLLBAR);
+    float roll_r    = *(volatile float *) (base + OFF_SETUP_REAR_SUSP_ROLLBAR);
+    float camber_f  = *(volatile float *) (base + OFF_SETUP_FRONT_CAMBER);
+    float camber_r  = *(volatile float *) (base + OFF_SETUP_REAR_CAMBER);
+    float toe_f     = *(volatile float *) (base + OFF_SETUP_FRONT_TOE);
+    float toe_r     = *(volatile float *) (base + OFF_SETUP_REAR_TOE);
+    LOGI("LAPsetup: aero=%.3f/%.3f ride=%.3f/%.3f brake=%.3f "
+         "stiff=%.3f/%.3f rollbar=%.3f/%.3f camber=%.3f/%.3f toe=%.3f/%.3f (lap %s)",
+         fw_aero, rw_aero, ride_f, ride_r, brake,
+         stiff_f, stiff_r, roll_f, roll_r, camber_f, camber_r, toe_f, toe_r,
+         lap_buf);
+}
 
 // ── LAPsession 诊断行：把全部候选模式信号一次打齐，供各模式采样表落定
 //    终版 gate 组合（champManager 链在快速模式正赛实测为 NULL，单信号
@@ -776,6 +885,18 @@ static void proxy_odometer_handle_sectors_times(void *this, int sector_order,
                 LOGI("LAPcar: carId=%d era=%d (lap %s, track='%s')",
                      pedal_get_car_unique_id(), pedal_get_car_era(),
                      now_buf, g_track_name);
+                // ── 本圈调教：圈边界读一次（2026-10-26，验证用）──
+                // 只读 + 打日志，**不参与上传**（上传契约未定，另行处理）。
+                // 走静态字段 GlobalVariables.currentCarSetup，零 hook 零副作用。
+                resolve_setup_field();
+                if (g_f_current_setup != NULL) {
+                    void *setup = NULL;
+                    g_field_static_get_value(g_f_current_setup, &setup);
+                    lapsetup_diag(setup, now_buf);
+                } else {
+                    LOGI("LAPsetup: currentCarSetup FieldInfo unavailable (state=%d, lap %s)",
+                         g_setup_resolved, now_buf);
+                }
                 g_upload_seq++;   // volatile 递增单写者（主线程）——发布序：先写数据后写 seq
             } else {
                 LOGI("LAPup: skip upload (gp_index unknown)");
