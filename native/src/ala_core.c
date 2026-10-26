@@ -272,13 +272,17 @@ Java_tools_alamobile_mod_NativeBridge_initLap(JNIEnv *env, jclass clazz,
 // SetIntArrayRegion 一次拷贝比分 9 次调用便宜。
 JNIEXPORT jboolean JNICALL
 Java_tools_alamobile_mod_NativeBridge_pollLapUpload(JNIEnv *env, jclass clazz,
-                                                    jintArray out) {
+                                                    jintArray out, jfloatArray setup_out) {
     (void) clazz;
     if (env == NULL || out == NULL) return JNI_FALSE;
-    if ((*env)->GetArrayLength(env, out) < 9) return JNI_FALSE;
+    // 11 = lapSeq/gp/lapMs/5 辅助码/carId/carEra/hasSetup
+    if ((*env)->GetArrayLength(env, out) < 11) return JNI_FALSE;
+    // 13 = 七项调教 × 前后两值（见 lap_upload_t 的 setup_* 字段）
+    jboolean has_setup_arr = (setup_out != NULL &&
+                              (*env)->GetArrayLength(env, setup_out) >= 13);
     lap_upload_t up;
     if (!lap_poll_upload(&up)) return JNI_FALSE;
-    jint buf[9];
+    jint buf[11];
     buf[0] = (jint) up.lap_seq;
     buf[1] = (jint) up.gp_index;
     buf[2] = (jint) up.lap_ms;
@@ -287,8 +291,29 @@ Java_tools_alamobile_mod_NativeBridge_pollLapUpload(JNIEnv *env, jclass clazz,
     buf[5] = (jint) up.tc_strength;
     buf[6] = (jint) up.abs_mode;
     buf[7] = (jint) up.abs_strength;
-    buf[8] = 0;  // 预留
-    (*env)->SetIntArrayRegion(env, out, 0, 9, buf);
+    buf[8] = (jint) up.car_id;
+    buf[9] = (jint) up.car_era;
+    buf[10] = (jint) up.has_setup;
+    (*env)->SetIntArrayRegion(env, out, 0, 11, buf);
+    // ⚠️ 只有 has_setup 为真时才有必要传浮点数组；缺失时**不动**调用方的
+    //    数组（调用方据 out[10] 判定整组无效，不该读到残留旧值）。
+    if (has_setup_arr && up.has_setup) {
+        jfloat sbuf[13];
+        sbuf[0]  = up.setup_front_wing_aero;
+        sbuf[1]  = up.setup_rear_wing_aero;
+        sbuf[2]  = up.setup_front_ride_height;
+        sbuf[3]  = up.setup_rear_ride_height;
+        sbuf[4]  = up.setup_brake_bias;
+        sbuf[5]  = up.setup_front_stiffness;
+        sbuf[6]  = up.setup_rear_stiffness;
+        sbuf[7]  = up.setup_front_rollbar;
+        sbuf[8]  = up.setup_rear_rollbar;
+        sbuf[9]  = up.setup_front_camber;
+        sbuf[10] = up.setup_rear_camber;
+        sbuf[11] = up.setup_front_toe;
+        sbuf[12] = up.setup_rear_toe;
+        (*env)->SetFloatArrayRegion(env, setup_out, 0, 13, sbuf);
+    }
     return JNI_TRUE;
 }
 

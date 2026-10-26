@@ -97,6 +97,14 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
+import androidx.compose.foundation.rememberScrollState
+
+import androidx.compose.foundation.verticalScroll
+
+import androidx.compose.runtime.saveable.rememberSaveable
+
+import tools.alamobile.mod.util.CarCatalog
+
 
 /**
  * 车手主页（2026-10-19 改版）：资料卡 + 三个底栏页（概览 / 计时赛 / 大奖赛）。
@@ -1058,34 +1066,25 @@ private fun FilterDialog(
  */
 @Composable
 private fun LapRow(e: PaddockClient.DriverLap, rowShape: Shape, showDivider: Boolean = false) {
-    // 详情行的字符间隔宽度：2 个数字的实测宽度。
-    // 用 TextMeasurer 而非写死 dp，是因为 12sp 在用户调过系统字号/字体后会变，
-    // 而"间隔 2 个字符"的语义必须锚在字符上（同 `letterSpacing` 的动机）。
-    // ⚠️ 必须 `toDp()` 换算——`TextLayoutResult.size.width` 是**像素**，
-    //    直接 `.dp` 会把像素数当成 dp 值（在 3x 屏上间隔变成 3 倍）。
-    val measurer = rememberTextMeasurer()
-    val density = LocalDensity.current
-    // ⚠️ 样式必须在 `remember` 之外取：`MiuixTheme.textStyles` 是 @Composable 属性，
-    //    在 remember 的非组合 lambda 里读会编译失败。
-    val detailStyle = MiuixTheme.textStyles.main.copy(fontSize = 12.sp)
-    val charGap = remember(measurer, density, detailStyle) {
-        val w = measurer.measure(
-            text = "00",
-            style = detailStyle,
-            softWrap = false,
-        ).size.width
-        with(density) { w.toDp() }
-    }
-    // 金色流光样式：只对零辅助圈求值（普通圈以 null 传入 → 完全走原样式，零开销）。
-    // ⚠️ 与排行榜同一条红线：**不能再传 `color =`**——miuix Text 的 color 会覆盖
-    //    brush，金光直接消失（见 LeaderboardScreen.goldShimmerStyle 注释）。
-    val goldStyle = if (e.zeroAssist) goldShimmerStyle(MiuixTheme.textStyles.main) else null
+    // 详情弹窗的挂载状态（2026-10-26）。
+    // ⚠️ 双变量模式（mounted + show）：`show` 驱动弹窗的进出动画，
+    //    `mounted` 控制是否留在组合树里。只用一个变量会在关闭时跳过退场动画
+    //    （弹窗瞬间消失）——这是项目里所有 miuix 弹窗的统一约定。
+    var detailMounted by rememberSaveable { mutableStateOf(false) }
+    var detailShow by rememberSaveable { mutableStateOf(false) }
+
     Column(
         // 背景色在**外层**、分隔线在背景之内：若把 divider 放到背景之外，它会落在
         // 页面底色上、与卡片色断开，视觉上像"卡片之间有条缝"而不是"卡片内分行"。
         modifier = Modifier
             .fillMaxWidth()
-            .background(color = colorScheme.surfaceContainer, shape = rowShape),
+            .background(color = colorScheme.surfaceContainer, shape = rowShape)
+            // 整行可点：打开圈速详情弹窗（2026-10-26 用户定案——
+            // 原来卡片上直接铺 3 行参数，改为点击看详情，卡片只留赛道/圈速/时间）。
+            .clickable {
+                detailMounted = true
+                detailShow = true
+            },
     ) {
         // 相邻记录之间的分隔线（首行不画——上方是筛选卡，画了会多出一条无意义的线）。
         // 左右 16dp 缩进 = 正文左缘，让分隔线只横跨内容区、不贴卡片边。
@@ -1100,6 +1099,10 @@ private fun LapRow(e: PaddockClient.DriverLap, rowShape: Shape, showDivider: Boo
                 .padding(horizontal = 16.dp, vertical = 9.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
+            // 金色流光样式：只对零辅助圈求值（普通圈以 null 传入 → 完全走原样式，零开销）。
+            // ⚠️ 与排行榜同一条红线：**不能再传 `color =`**——miuix Text 的 color 会覆盖
+            //    brush，金光直接消失（见 LeaderboardScreen.goldShimmerStyle 注释）。
+            val goldStyle = if (e.zeroAssist) goldShimmerStyle(MiuixTheme.textStyles.main) else null
             // ── 第 1 行：赛道名（+「最佳」）…… 圈速 ──
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -1152,40 +1155,14 @@ private fun LapRow(e: PaddockClient.DriverLap, rowShape: Shape, showDivider: Boo
                     color = if (e.zeroAssist) Color.Unspecified else colorScheme.onBackground,
                 )
             }
-            // ── 第 2 行：时间 / 版本（间隔 2 字符）──
-            // 日期与时分之间再拉开一倍（服务端格式是 `YYYY-MM-DD HH:MM`，恰好一个空格）：
-            // 单空格在 12sp 下只有 3dp 左右，日期和时间糊成一串数字，扫读时分不出来。
-            DetailRow(
-                cells = listOf("时间：${e.created.replace(" ", "  ")}", "版本：${e.versionName}"),
-                gap = charGap,
-            )
-            // ── 第 3 行：踏板 / TC / ABS（间隔 2 字符）──
-            DetailRow(
-                cells = listOf(
-                    "踏板模式：${assistValue(e.pedal)}",
-                    "TC：${assistValue(e.tc)}",
-                    "ABS：${assistValue(e.abs)}",
-                ),
-                gap = charGap,
-            )
-        }
-    }
-}
-
-/**
- * 详情行：单元格之间固定间隔 [gap]，整体铺满卡片宽度。
- *
- * 缺失维**照常渲染为「缺失」**（用户 2026-10-19 定案）——早期实现直接跳过不渲染，
- * 但那样会让"旧记录没报配置"和"配置恰好正常"在视觉上无法区分；显式写出「缺失」
- * 才能让人知道这圈是数据不全，而不是辅助全默认。
- */
-@Composable
-private fun DetailRow(cells: List<String>, gap: Dp) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        cells.forEachIndexed { i, cell ->
-            if (i > 0) Spacer(Modifier.width(gap))
+            // ── 第 2 行：裸时间（2026-10-26 用户定案）──
+            // 去掉了「时间：」前缀与整条第 3 行（踏板/TC/ABS）——这些参数全部
+            // 移进点击后的「圈速详情」弹窗。卡片只留"一眼扫读"的三要素：
+            // 赛道 + 圈速（第 1 行）、时间（第 2 行）。
+            // 日期与时分之间保留双空格：单空格在 12sp 下只有 3dp 左右，
+            // 日期和时间会糊成一串数字。
             Text(
-                text = cell,
+                text = e.created.replace(" ", "  "),
                 fontSize = 12.sp,
                 color = colorScheme.onBackground.copy(alpha = 0.5f),
                 maxLines = 1,
@@ -1193,6 +1170,270 @@ private fun DetailRow(cells: List<String>, gap: Dp) {
             )
         }
     }
+
+    // 圈速详情弹窗（2026-10-26）。挂载在 LapRow 内，由双变量驱动。
+    //
+    // ⚠️ **`onDismissRequest` 与 `onDismissFinished` 必须是两个不同动作**
+    //    （2026-10-26 实机报「退出没有动画」，项目里这是第 N 次踩）：
+    //    - `onDismissRequest`（点窗外/返回键）只翻 `show = false` → 播放退场动画；
+    //    - `onDismissFinished`（动画真正结束）才置 `mounted = false` 卸挂载。
+    //    两者合并成同一个 lambda 会让挂载在动画开始的那一帧就消失，
+    //    退场动画没有播放窗口 ⇒ 弹窗瞬间消失。
+    if (detailMounted) {
+        LapDetailDialog(
+            entry = e,
+            show = detailShow,
+            onDismissRequest = { detailShow = false },
+            onDismissFinished = { detailMounted = false },
+        )
+    }
+}
+
+/**
+ * 圈速详情弹窗（2026-10-26 用户定案）。
+ *
+ * 布局要求：**左侧项目名左对齐、右侧值列左对齐，一列下来很整齐；双值项的
+ * 第二个值也相互左对齐**。因此不能用流式排列（间隔 N 字符那种），必须是
+ * **两列网格**：第一列固定宽度（取最长项目名的实测宽度），第二列起始 x 恒定。
+ * 双值项内部再用两个固定宽度子列（前值 / 后值），保证「65」「58」上下对齐。
+ *
+ * ⚠️ 列宽必须用 `TextMeasurer` 实测，**不能写死 dp**——用户改系统字号/字体后
+ *    12sp 的实际字宽会变，写死会让第二列起始位置错位。
+ * ⚠️ 缺失一律显示「缺失」（用户 2026-10-26 定案：双值项两个值位**各显示一次**
+ *    「缺失」），不要跳过不渲染——那样"旧记录没数据"和"数据恰好正常"无法区分。
+ */
+@Composable
+private fun LapDetailDialog(
+    entry: PaddockClient.DriverLap,
+    show: Boolean,
+    onDismissRequest: () -> Unit,
+    onDismissFinished: () -> Unit,
+) {
+    // 车型展示名：服务端只给 carId+era 整数，这里用 CarCatalog 反查渲染
+    // 「2026 梅赛德斯-AMG W17」。查不到（未知车/缺失）→ null → 显示「缺失」。
+    val carLabel = remember(entry.carId, entry.carEra) {
+        val id = entry.carId ?: return@remember null
+        val car = CarCatalog.byCarId(id) ?: return@remember null
+        // 年代前缀：2023 地效 / 2026 主动空力。用 CarCatalog 的 era 而非
+        // 服务端的 car_era（两者理论上一致，但 CarCatalog 是单一事实源）。
+        val year = when (car.era) {
+            CarCatalog.Era.GROUND_EFFECT -> "2023"
+            CarCatalog.Era.DOUBLE_DRS -> "2026"
+        }
+        val team = car.teamLabel
+        val model = car.realModel
+        if (model != null) "$year $team $model" else "$year $team"
+    }
+
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    // **整个弹窗统一套 `tnum`**（用户 2026-10-26 定案）：项目名、值、标题全部等宽，
+    // 目的是**字符级对齐**——小数点、数字位严格竖直对齐，而不是只让三列左缘对齐。
+    //
+    // ⚠️ 用 `tnum` 而非 `FontFamily.Monospace`：后者是 `GenericFontFamily("monospace")`，
+    //    Compose 走 `Typeface.create("monospace", NORMAL)` 即**按族名运行时查询**，
+    //    ColorOS / Flyme 实测把它重定向到系统 sans（相邻数字 advance 不等，
+    //    见 LeaderboardScreen `TabularDigits` 的长注释）。`tnum` 是字体自带的
+    //    数字变体，不换字体只换数字字形，对 ROM 免疫；不带该特性的字体静默忽略、
+    //    退化为比例数字（不更差）。
+    // ⚠️ 中文标签本来就不是数字，`tnum` 对它们无影响——这不是缺陷，
+    //    中文字形在等宽语境下只需保证标签列定宽即可。
+    val labelStyle = MiuixTheme.textStyles.main.copy(fontSize = 13.sp)
+        .merge(DriverTabularDigits)
+    val valueStyle = MiuixTheme.textStyles.main.copy(fontSize = 13.sp)
+        .merge(DriverTabularDigits)
+    val labelWidth = remember(measurer, density, labelStyle) {
+        // 项目名仍用固定宽度：它必须与值列起始 x 对齐，而项目名长度是有限的
+        // 已知集合（下面这个列表就是全集，改文案时自动跟着变）。
+        val longest = listOf(
+            "踏板模式", "刹车平衡", "悬架刚度", "防倾杆", "底盘高度", "下压力",
+            "外倾角", "前束角", "赛道", "圈速", "时间", "版本", "TC", "ABS", "车型",
+        ).maxByOrNull { measurer.measure(it, labelStyle, softWrap = false).size.width }
+            ?: "踏板模式"
+        with(density) { measurer.measure(longest, labelStyle, softWrap = false).size.width.toDp() }
+    }
+
+    // 数值格式：**原样呈现，去掉尾随零**（用户 2026-10-26 定案）。
+    //
+    // 为什么不做"整数项取整 / 角度项两位小数"的分档处理：
+    // ① 游戏 UI 显示整数是 `fcvtzs`（**向零截断**）的结果
+    //    （`UpdateSlidersStrings` 0x18AD158 `fcvtzs w9,s0`），底层存的是浮点——
+    //    实测刹车平衡调「58」实际是 `58.709`。按整数显示会丢精度。
+    // ② 后续要做「应用调教」功能，回写到游戏时必须是原始 float，
+    //    显示层若截断会让人误以为存的是整数。
+    // ③ 哪些项是连续量程、哪些是整数档位尚未逐项实测，用"原样+去尾零"
+    //    对两类都天然正确，不需要先分类。
+    //
+    // 实现：**按项分档 + 固定位数，不去尾零**（用户 2026-10-26 定案）——
+    // 外倾角 / 前束角 3 位，其余 2 位。
+    //   2 位：`55.3971` → `55.40`；`54.7019` → `54.70`；`50.0` → `50.00`
+    //   3 位：`-0.0326` → `-0.033`；`0.0884` → `0.088`；`-2.8624` → `-2.862`
+    //
+    // ⚠️ **不要加去尾零**：那会让 `54.70` 变 `54.7`、`55.40` 变 `55.4`，
+    //    同一列里位数参差不齐（用户 2026-10-26 报「刹车平衡变 1 位了」）。
+    //    固定位数才能让数字列真正对齐。
+    // ⚠️ 角度项用 3 位是因为量级小（-3.5 ~ 0.3 度）：2 位会把前束角
+    //    `0.0326` 与 `0.0388` 压成 `0.03` / `0.04`，区分度损失 25%。
+    //
+    // ⚠️ 存储仍是原始 float（服务端 `REAL` / Kotlin `Float` 都不截断），
+    //    只有**展示**按此分档。后续「应用调教」回写用原始值，不受影响。
+    // ⚠️ 日志里的 `LAPsetup: aero=%.3f` 是**诊断打印格式**，与这里的展示精度
+    //    无关——看到日志 3 位就以为精度只有 3 位是误读。
+    fun fmt(v: Float?, digits: Int = 2): String =
+        if (v == null) "缺失" else "%.${digits}f".format(v)
+    val s = entry.setup
+
+    // 单值项与双值项统一成同一个结构：左边项目名、右边 1~2 个值位。
+    data class DetailItem(val label: String, val v1: String, val v2: String?)
+
+    val items = listOf(
+        DetailItem("赛道", entry.trackName, null),
+        DetailItem("圈速", entry.lapDisplay, null),
+        DetailItem("时间", entry.created, null),
+        DetailItem("版本", entry.versionName, null),
+        DetailItem("踏板模式", assistValue(entry.pedal), null),
+        DetailItem("TC", assistValue(entry.tc), null),
+        DetailItem("ABS", assistValue(entry.abs), null),
+        DetailItem("车型", carLabel ?: "缺失", null),
+        DetailItem("下压力", fmt(s?.frontWingAero), fmt(s?.rearWingAero)),
+        DetailItem("底盘高度", fmt(s?.frontRideHeight), fmt(s?.rearRideHeight)),
+        // 刹车平衡只有前值字段，后 = 100 − 前（游戏 UI 的 60/40 是派生量）。
+        // ⚠️ 后值是**算出来的**，浮点减法可能带出尾差（100 − 58.709 = 41.291），
+        //    由 fmt 的去尾零统一处理，不要额外取整。
+        DetailItem(
+            "刹车平衡",
+            fmt(s?.brakeBias),
+            s?.let { fmt(100f - it.brakeBias) } ?: "缺失",
+        ),
+        DetailItem("悬架刚度", fmt(s?.frontStiffness), fmt(s?.rearStiffness)),
+        DetailItem("防倾杆", fmt(s?.frontRollbar), fmt(s?.rearRollbar)),
+        DetailItem("外倾角", fmt(s?.frontCamber, 3), fmt(s?.rearCamber, 3)),
+        DetailItem("前束角", fmt(s?.frontToe, 3), fmt(s?.rearToe, 3)),
+    )
+
+    // 双值项的值位宽度：**按本弹窗实际数据实测**，不猜基准串。
+    //
+    // ⚠️ 这里踩过三次坑，最终定案是「实测真实内容」而不是换布局策略：
+    //   ① `width("-100.00")` 猜基准 ⇒ 单值项「赛道」「时间」被截断。
+    //   ② 改 `%.4f` 后最宽值变 9 字符、基准没同步 ⇒ 双值项全被截成 `55.39...`。
+    //   ③ 改 `weight(1f)` 平分 ⇒ 不截断了，但 v1 占半行、v2 被推到最右，
+    //      两个数字隔得太远（2026-10-26 实机反馈）。
+    //   ⇒ 正确做法：**items 是已知的 List，直接量出 v1/v2 的实际最宽值**。
+    //      既不会截断（量的是真实内容），也不会过宽（不含"最坏情况"余量）。
+    //      数据变化时自动跟着变（remember 的 key 含 items）。
+    // 双值项的值位宽度：**只量双值项**（v2 != null 的行）的 v1/v2，不掺单值项。
+    //
+    // ⚠️ 这里踩过四次坑，每次都是"宽度基准"错：
+    //   ① `width("-100.00")` 猜基准 ⇒ 单值项「赛道」「时间」被截断。
+    //   ② 改 `%.4f` 后最宽值变 9 字符、基准没同步 ⇒ 双值项全被截成 `55.39...`。
+    //   ③ 改 `weight(1f)` 平分 ⇒ 不截断但 v1 占半行、v2 被推到最右。
+    //   ④ 量 `items` 全部值 ⇒ **单值项的长文本（赛道名/时间）把 v1 撑宽**，
+    //      双值项两个数字隔得老远（2026-10-26 实机反馈）。
+    //   ⇒ 正确做法：**只量双值项**。单值项走 `weight(1f)` 吃满剩余宽度，
+    //      它的长度与双值项的列宽无关。
+    val valueWidth = remember(measurer, density, valueStyle, items) {
+        val widest = items.filter { it.v2 != null }
+            .flatMap { listOfNotNull(it.v1, it.v2) }
+            .maxByOrNull { measurer.measure(it, valueStyle, softWrap = false).size.width }
+            ?: "0"
+        with(density) { measurer.measure(widest, valueStyle, softWrap = false).size.width.toDp() }
+    }
+
+    OverlayDialog(
+        show = show,
+        // 点窗外/返回键 → 只翻 show（播退场动画），挂载由 onDismissFinished 卸。
+        onDismissRequest = onDismissRequest,
+        onDismissFinished = onDismissFinished,
+        content = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                // 标题居中粗体（项目铁律：标题居中、正文左对齐）。
+                Text(
+                    text = "圈速详情",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    // 标题也套 tnum（整个弹窗统一等宽，用户 2026-10-26 定案）。
+                    style = MiuixTheme.textStyles.main.copy(
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                    ).merge(DriverTabularDigits),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                // 可滚动正文：15 行在小屏/大字号下会超过卡片 2/3 屏上限。
+                // ⚠️ `weight(1f, fill = false)`：让正文成为"可让渡空间"的一方，
+                //    超限时先收缩并滚动，而不是把底部按钮压扁（项目已踩过的坑）。
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    items.forEach { item ->
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            // 项目名：固定宽度 → 所有值列起始 x 恒等（左对齐一列）。
+                            // 与值列之间留 40dp：24dp 时两列仍显拥挤，标签与值
+                            // 读不出明显的分组分隔（2026-10-26 两次实机反馈，12→24→40）。
+                            // ⚠️ 这个间距只影响「标签→值1」，值1→值2 是另一个
+                            //     `Spacer(24.dp)`——两者刻意不等，标签侧要更宽。
+                            Text(
+                                text = item.label,
+                                style = labelStyle,
+                                color = colorScheme.onBackground.copy(alpha = 0.6f),
+                                maxLines = 1,
+                                modifier = Modifier.width(labelWidth + 40.dp),
+                            )
+                            if (item.v2 == null) {
+                                // ── 单值项：吃满剩余宽度 ──
+                                // ⚠️ **不要**给它 `width(valueWidth)`：那是双值项
+                                // 单个值位的固定宽度（按 "-100.00" 量的），单值项的
+                                // 内容（赛道名 / 时间）远宽于此，套上去会被截断
+                                // （2026-10-26 实机：「2026-10-」只显示到日期一半）。
+                                // 单值项没有"第二个值要对齐"的诉求，就该铺满。
+                                Text(
+                                    text = item.v1,
+                                    style = valueStyle,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            } else {
+                                // ── 双值项：两个值位各用**实测最宽值**的宽度 ──
+                                // 对齐由固定宽度保证；间距由 `Spacer(24.dp)` 控制，
+                                // 不再被 weight 平分推远。
+                                Text(
+                                    text = item.v1,
+                                    style = valueStyle,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.width(valueWidth),
+                                )
+                                Spacer(Modifier.width(24.dp))
+                                Text(
+                                    text = item.v2,
+                                    style = valueStyle,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.width(valueWidth),
+                                )
+                            }
+                        }
+                    }
+                }
+                // 关闭按钮（蓝底，与项目其它弹窗一致）。
+                TextButton(
+                    text = "关闭",
+                    // ⚠️ 与 onDismissRequest 同一语义：只翻 show 播退场动画。
+                    onClick = onDismissRequest,
+                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+    )
 }
 
 /**

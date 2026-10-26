@@ -702,18 +702,174 @@ object PaddockClient {
     }
 
     /**
+     * 一圈的**车辆调教**上报载荷（2026-10-26）。
+     *
+     * 全部是 `AlaCarSetup` 里的原始 float，**存的就是 UI 显示值本身**
+     * （下压力 65.0 不是 0.65，外倾角 -3.0 度不是弧度）——实机对拍确认，
+     * 服务端与模块都不做量纲换算，只在展示时格式化。
+     *
+     * ⚠️ `brakeBias` 只有**前**值，后值 = 100 − 前（游戏 UI 的 `60/40` 是派生量）。
+     * ⚠️ 缺失用 [MISSING]（null）表达，**不是**用某个数值当哨兵——浮点值域连续，
+     *    任何哨兵都可能撞上合法调教值。
+     */
+    data class LapSetup(
+        val frontWingAero: Float,
+        val rearWingAero: Float,
+        val frontRideHeight: Float,
+        val rearRideHeight: Float,
+        val brakeBias: Float,
+        val frontStiffness: Float,
+        val rearStiffness: Float,
+        val frontRollbar: Float,
+        val rearRollbar: Float,
+        val frontCamber: Float,
+        val rearCamber: Float,
+        val frontToe: Float,
+        val rearToe: Float,
+    ) {
+        /** 塞进上报体（缺失时不发任何字段，服务端 `#[serde(flatten)]` 天然接住）。 */
+        fun putInto(o: JSONObject) {
+            o.put("setup_front_wing_aero", frontWingAero.toDouble())
+            o.put("setup_rear_wing_aero", rearWingAero.toDouble())
+            o.put("setup_front_ride_height", frontRideHeight.toDouble())
+            o.put("setup_rear_ride_height", rearRideHeight.toDouble())
+            o.put("setup_brake_bias", brakeBias.toDouble())
+            o.put("setup_front_stiffness", frontStiffness.toDouble())
+            o.put("setup_rear_stiffness", rearStiffness.toDouble())
+            o.put("setup_front_rollbar", frontRollbar.toDouble())
+            o.put("setup_rear_rollbar", rearRollbar.toDouble())
+            o.put("setup_front_camber", frontCamber.toDouble())
+            o.put("setup_rear_camber", rearCamber.toDouble())
+            o.put("setup_front_toe", frontToe.toDouble())
+            o.put("setup_rear_toe", rearToe.toDouble())
+        }
+
+        /** 写进待传队列条目（紧凑键，省空间）。 */
+        fun putIntoQueue(o: JSONObject) {
+            o.put("sfw", frontWingAero.toDouble())
+            o.put("srw", rearWingAero.toDouble())
+            o.put("sfr", frontRideHeight.toDouble())
+            o.put("srr", rearRideHeight.toDouble())
+            o.put("sbb", brakeBias.toDouble())
+            o.put("sfs", frontStiffness.toDouble())
+            o.put("srs", rearStiffness.toDouble())
+            o.put("sfrb", frontRollbar.toDouble())
+            o.put("srrb", rearRollbar.toDouble())
+            o.put("sfc", frontCamber.toDouble())
+            o.put("src", rearCamber.toDouble())
+            o.put("sft", frontToe.toDouble())
+            o.put("srt", rearToe.toDouble())
+        }
+
+        companion object {
+            /** 缺失（该圈没读到调教 / 旧数据）→ 不上报任何 setup 字段。 */
+            val MISSING: LapSetup? = null
+
+            /**
+             * native 的 13 个 float → 载荷。`hasSetup == 0` 时返回 null（缺失）。
+             *
+             * ⚠️ 顺序必须与 `NativeBridge.pollLapUpload` 的文档、`ala_core.c` 的
+             *    `sbuf[]`、`lap_hook.c` 的 `US_*` 枚举三处一致——这是唯一的
+             *    跨语言契约点，改一处必须三处同改。
+             */
+            fun fromNative(setupOut: FloatArray, hasSetup: Boolean): LapSetup? {
+                if (!hasSetup || setupOut.size < 13) return null
+                return LapSetup(
+                    frontWingAero = setupOut[0],
+                    rearWingAero = setupOut[1],
+                    frontRideHeight = setupOut[2],
+                    rearRideHeight = setupOut[3],
+                    brakeBias = setupOut[4],
+                    frontStiffness = setupOut[5],
+                    rearStiffness = setupOut[6],
+                    frontRollbar = setupOut[7],
+                    rearRollbar = setupOut[8],
+                    frontCamber = setupOut[9],
+                    rearCamber = setupOut[10],
+                    frontToe = setupOut[11],
+                    rearToe = setupOut[12],
+                )
+            }
+
+            /** 待传队列条目 → 载荷（13 个紧凑键全在才算有值，缺一个就整项缺失）。 */
+            fun fromQueue(o: JSONObject): LapSetup? {
+                val keys = arrayOf(
+                    "sfw", "srw", "sfr", "srr", "sbb", "sfs", "srs",
+                    "sfrb", "srrb", "sfc", "src", "sft", "srt",
+                )
+                if (keys.any { !o.has(it) }) return null
+                fun f(k: String) = o.optDouble(k, 0.0).toFloat()
+                return LapSetup(
+                    frontWingAero = f("sfw"),
+                    rearWingAero = f("srw"),
+                    frontRideHeight = f("sfr"),
+                    rearRideHeight = f("srr"),
+                    brakeBias = f("sbb"),
+                    frontStiffness = f("sfs"),
+                    rearStiffness = f("srs"),
+                    frontRollbar = f("sfrb"),
+                    rearRollbar = f("srrb"),
+                    frontCamber = f("sfc"),
+                    rearCamber = f("src"),
+                    frontToe = f("sft"),
+                    rearToe = f("srt"),
+                )
+            }
+        }
+    }
+
+    /**
+     * 一圈的**车型**上报载荷（2026-10-26）。
+     *
+     * 只报 `carId` + `era` 两个整数，**不报展示名**——服务端存整数、由模块侧
+     * [tools.alamobile.mod.util.CarCatalog] 反查渲染成「2026 梅赛德斯-AMG W17」。
+     * 这样改车队译名只发模块，历史圈自动跟着变；服务端永远不需要认识车型字。
+     */
+    data class LapCar(val carId: Int, val era: Int) {
+        fun putInto(o: JSONObject) {
+            o.put("car_id", carId)
+            o.put("car_era", era)
+        }
+
+        fun putIntoQueue(o: JSONObject) {
+            o.put("cid", carId)
+            o.put("cer", era)
+        }
+
+        companion object {
+            val MISSING: LapCar? = null
+
+            /** native 的 carId/carEra → 载荷。任一为负（= 探针未采到）即缺失。 */
+            fun fromNative(carId: Int, carEra: Int): LapCar? =
+                if (carId < 0 || carEra < 0) null else LapCar(carId, carEra)
+
+            fun fromQueue(o: JSONObject): LapCar? {
+                if (!o.has("cid") || !o.has("cer")) return null
+                return fromNative(o.optInt("cid", -1), o.optInt("cer", -1))
+            }
+        }
+    }
+
+    /**
      * 上传一条有效圈。返回 Toast 文案(可为 null=无提示):成功=服务端四条件文案,
      * 失败(200 以外任何情况)=TOAST_LAP_QUEUED,且必定已入本地待传队列——
      * 入队与提示严格一一对应,绝不静默丢圈。阻塞 IO,工作线程调用。
      *
-     * [assist] 随圈走：**入队时也要带上**——"先跑圈后登录"的补传路径若不存配置，
-     * 那一圈会白白变成"缺失"（0 分加成），正是用户最在意的丢分场景。
+     * [assist] / [car] / [setup] 随圈走：**入队时也要带上**——"先跑圈后登录"的
+     * 补传路径若不存这些，那一圈会白白变成"缺失"（0 分加成 / 弹窗全是缺失），
+     * 正是用户最在意的丢分场景。
      */
-    fun uploadLap(gpIndex: Int, lapMs: Int, assist: LapAssist = LapAssist.MISSING): String? {
+    fun uploadLap(
+        gpIndex: Int,
+        lapMs: Int,
+        assist: LapAssist = LapAssist.MISSING,
+        car: LapCar? = LapCar.MISSING,
+        setup: LapSetup? = LapSetup.MISSING,
+    ): String? {
         lastUploadAt = System.currentTimeMillis()
         val token = authToken
         if (token == null) {
-            enqueue(gpIndex, lapMs, assist)
+            enqueue(gpIndex, lapMs, assist, car, setup)
             Logger.log(
                 Log.WARN, TAG,
                 "uploadLap: no token, queued locally (gp=$gpIndex, ${pendingCount()} pending)"
@@ -726,6 +882,8 @@ object PaddockClient {
                 .put("version_code", versionCode)
                 .put("lap_ms", lapMs)
             assist.putInto(body)
+            car?.putInto(body)
+            setup?.putInto(body)
             val (code, resp) = postJson("$serverBase/v1/laps", body, token)
             when {
                 code == 200 -> {
@@ -742,7 +900,7 @@ object PaddockClient {
                     // 宁可先存后判;是否继续重试交给 [drainQueue] 的 [isRetryableStatus]
                     // (永久 4xx 会在下一轮补传中被丢弃,不会长期占队头挡后面的好圈)。
                     // 入队与 TOAST_LAP_QUEUED 严格一一对应——提示「已保存在本地」永不说假话。
-                    enqueue(gpIndex, lapMs, assist)
+                    enqueue(gpIndex, lapMs, assist, car, setup)
                     if (isRetryableStatus(code)) {
                         Logger.log(Log.WARN, TAG, "upload failed (retryable $code), queued: ${errText(code, resp)}")
                     } else {
@@ -752,13 +910,13 @@ object PaddockClient {
                 }
             }
         } catch (e: IOException) {
-            enqueue(gpIndex, lapMs, assist)
+            enqueue(gpIndex, lapMs, assist, car, setup)
             TOAST_LAP_QUEUED
         } catch (e: Throwable) {
             // 兜底:非 IO 的意外异常(JSON 解析崩等)同样入队,绝不静默丢圈。
             // 这是「偶尔没见补传、成绩丢了」的另一处漏点——改前此处既不入队也不提示,
             // 圈直接蒸发(唯一的痕迹只有一行 WARN 日志)。
-            enqueue(gpIndex, lapMs, assist)
+            enqueue(gpIndex, lapMs, assist, car, setup)
             Logger.log(Log.WARN, TAG, "uploadLap failed (unexpected), queued: ${e.message}")
             TOAST_LAP_QUEUED
         }
@@ -788,13 +946,21 @@ object PaddockClient {
 
     private fun queueFile(): File = File(getDir(), QUEUE_FILE)
 
-    /** 入队（去重：同 gp+lapMs+当日 不重复入队）。满了丢最旧。
+    /**
+     * 入队（去重：同 gp+lapMs+当日 不重复入队）。满了丢最旧。
      *
-     * [assist] 一并存进条目——补传时要用它重建上报体。**漏存 = 补传的圈丢配置**
-     * （用户最在意的"跑了圈没加成分"场景），故 [LapAssist] 的队列键名由它自己管。
+     * [assist] / [car] / [setup] 一并存进条目——补传时要用它们重建上报体。
+     * **漏存 = 补传的圈丢配置/车型/调教**（用户最在意的"跑了圈没加成分"场景），
+     * 故各载荷类的队列键名由它自己管。
      */
     @Synchronized
-    private fun enqueue(gpIndex: Int, lapMs: Int, assist: LapAssist = LapAssist.MISSING) {
+    private fun enqueue(
+        gpIndex: Int,
+        lapMs: Int,
+        assist: LapAssist = LapAssist.MISSING,
+        car: LapCar? = LapCar.MISSING,
+        setup: LapSetup? = LapSetup.MISSING,
+    ) {
         try {
             val arr = readQueue()
             // 简单去重：完全相同的 (gp, ms) 且 60s 内已入队 → 跳过
@@ -807,6 +973,8 @@ object PaddockClient {
             }
             val item = JSONObject().put("gp", gpIndex).put("ms", lapMs).put("t", now)
             assist.putIntoQueue(item)
+            car?.putIntoQueue(item)
+            setup?.putIntoQueue(item)
             arr.put(item)
             while (arr.length() > QUEUE_MAX) arr.remove(0)
             queueFile().writeText(arr.toString())
@@ -859,8 +1027,11 @@ object PaddockClient {
                     .put("gp_index", it.optInt("gp"))
                     .put("version_code", versionCode)
                     .put("lap_ms", it.optInt("ms"))
-                // 队列里存的辅助配置一并回传（旧队列条目无这些键 → 全缺失，行为同旧版）
+                // 队列里存的辅助配置 / 车型 / 调教一并回传
+                // （旧队列条目无这些键 → 全缺失，行为同旧版）
                 LapAssist.fromQueue(it).putInto(body)
+                LapCar.fromQueue(it)?.putInto(body)
+                LapSetup.fromQueue(it)?.putInto(body)
                 postJson("$serverBase/v1/laps", body, token).first
             } catch (e: Throwable) {
                 -1  // 网络异常：保留待下次补传
@@ -1096,6 +1267,20 @@ object PaddockClient {
         val zeroAssist: Boolean,
         /** 上传时间（服务端格式化为北京时间 `YYYY-MM-DD HH:MM`） */
         val created: String,
+        /**
+         * 本圈车型（2026-10-26）。null = 缺失（旧记录 / 该圈未采到）。
+         * 服务端只存 `carId`+`era` 整数，展示名由 [CarCatalog] 反查——
+         * 改车队译名只发模块，历史圈自动跟着变。
+         */
+        val carId: Int? = null,
+        val carEra: Int? = null,
+        /**
+         * 本圈调教（2026-10-26）。null = 整项缺失（该圈没读到 / 旧记录）。
+         *
+         * ⚠️ 只有**全 13 个字段都在**才算有值——服务端可能因为旧客户端只传了
+         * 部分字段，半套调教比"缺失"更容易误导（看起来有数据但其实不全）。
+         */
+        val setup: LapSetup? = null,
     )
 
     /**
@@ -1135,6 +1320,47 @@ object PaddockClient {
         /** 失败文案（404 = 车手不存在）；ok=true 时为空 */
         val error: String = "",
     )
+
+    /**
+     * `/v1/driver` 单条 entry → 调教载荷。
+     *
+     * ⚠️ **结构是嵌套对象**：服务端返回 `"setup": { "front_wing_aero": 65.0, ... }`
+     * （键名**不带** `setup_` 前缀），整组缺失时是 `"setup": null`。
+     * 早期实现错在顶层找 `setup_front_wing_aero`——`has()` 恒假 ⇒ 永远返回 null
+     * ⇒ 弹窗 13 项全显示「缺失」（2026-10-26 实机报障的根因）。
+     *
+     * **13 个键必须全部存在且非 null** 才返回非 null：半套调教比"缺失"更误导
+     * （看起来有数据，实际是旧客户端只传了几个字段）。
+     */
+    private fun parseSetup(e: JSONObject): LapSetup? {
+        val o = e.optJSONObject("setup") ?: return null
+        val keys = arrayOf(
+            "front_wing_aero", "rear_wing_aero",
+            "front_ride_height", "rear_ride_height",
+            "brake_bias",
+            "front_stiffness", "rear_stiffness",
+            "front_rollbar", "rear_rollbar",
+            "front_camber", "rear_camber",
+            "front_toe", "rear_toe",
+        )
+        if (keys.any { !o.has(it) || o.isNull(it) }) return null
+        fun f(k: String) = o.optDouble(k, 0.0).toFloat()
+        return LapSetup(
+            frontWingAero = f("front_wing_aero"),
+            rearWingAero = f("rear_wing_aero"),
+            frontRideHeight = f("front_ride_height"),
+            rearRideHeight = f("rear_ride_height"),
+            brakeBias = f("brake_bias"),
+            frontStiffness = f("front_stiffness"),
+            rearStiffness = f("rear_stiffness"),
+            frontRollbar = f("front_rollbar"),
+            rearRollbar = f("rear_rollbar"),
+            frontCamber = f("front_camber"),
+            rearCamber = f("rear_camber"),
+            frontToe = f("front_toe"),
+            rearToe = f("rear_toe"),
+        )
+    }
 
     /**
      * GET /v1/driver/{user_id} —— 车手主页（公开端点，无需 token）。阻塞 IO。
@@ -1212,6 +1438,12 @@ object PaddockClient {
                     abs = e.optString("abs"),
                     zeroAssist = e.optBoolean("zero_assist"),
                     created = e.optString("created"),
+                    // 车型：服务端对缺失返回 JSON null（不是 0）——必须显式判，
+                    // 否则 carId=0（合法值，2023 梅赛德斯）会被当成"缺失"。
+                    carId = if (e.isNull("car_id")) null else e.optInt("car_id"),
+                    carEra = if (e.isNull("car_era")) null else e.optInt("car_era"),
+                    // 调教：13 个键**全部存在**才算有值（半套调教比缺失更误导）。
+                    setup = parseSetup(e),
                 )
             }
             DriverPage(

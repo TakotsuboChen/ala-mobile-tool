@@ -128,6 +128,32 @@ static volatile int32_t g_upload_consumed_seq = 0;  // Java 已消费到的 seq
 // 只在 order==2 事件内写入，与 lap_ms 同批发布。
 static volatile int32_t g_upload_assist[5] = {0, 0, 0, 0, 0};
 
+// ── 本圈车型 + 调教快照（2026-10-26）──
+// 与 g_upload_assist 同批：圈边界写入，随后 g_upload_seq++ 发布。
+// 车型走 pedal_hook 的探针 getter（proxy_car_controller 每物理帧刷新缓存），
+// 调教走静态字段 GlobalVariables.currentCarSetup（零 hook）。
+//
+// ⚠️ 与辅助配置的 epoch 一致性检测**无关**：车型在赛道内不会变（换车要退场），
+//    调教对象在赛道内稳定（唯一写入点 ApplyCurrentSetupPreRun 全在"进赛道前"
+//    路径）——两者天然是"整圈一致"的，不需要快照比对。
+// ⚠️ 缺失用独立标志（has_setup / car_id < 0）表达，不用"数值等于哨兵"——
+//    浮点值域连续，任何数值哨兵都可能撞上合法值。
+static volatile int32_t g_upload_car_id = -1;
+static volatile int32_t g_upload_car_era = -1;
+static volatile int32_t g_upload_has_setup = 0;
+// 顺序与 lap_upload_t 的 setup_* 字段一一对应（见下 enum）。
+enum {
+    US_FRONT_WING = 0, US_REAR_WING,
+    US_FRONT_RIDE, US_REAR_RIDE,
+    US_BRAKE_BIAS,
+    US_FRONT_STIFF, US_REAR_STIFF,
+    US_FRONT_ROLLBAR, US_REAR_ROLLBAR,
+    US_FRONT_CAMBER, US_REAR_CAMBER,
+    US_FRONT_TOE, US_REAR_TOE,
+    US_COUNT
+};
+static volatile float g_upload_setup[US_COUNT] = {0};
+
 // ── 整圈辅助配置一致性检测（epoch 快照法）──
 //
 // 目标：判断"这一整圈里玩家的踏板/TC/ABS 配置有没有变过"。配置是离散枚举
@@ -276,12 +302,16 @@ static void *g_f_gf = NULL;      // GlobalVariables.isGrandFestival
 static void *g_f_israce = NULL;  // GlobalVariables.isRace
 static void *g_f_ismp = NULL;    // GlobalVariables.isMultiplayerMatch
 static void *g_f_champ_data = NULL; // GlobalVariables.championshipData (ChampionshipData*)
+static void *g_f_race_mode = NULL;   // GlobalVariables.raceMode (int, 0xC8)
 static int g_mode_resolved = 0;  // FieldInfo 解析完成标记（含失败）
 
 // ── 本圈调教（setup）FieldInfo（2026-10-26，验证用）──
 // 与 LAPcar 同构：只读 + 打日志，**不参与上传**（上传契约未定）。
 // 见 docs/notes/CAR_SETUP.md。
 static void *g_f_current_setup = NULL;  // GlobalVariables.currentCarSetup (AlaCarSetup*)
+// 本次圈边界采到的 carModifier.currentBrakeBiasFront（诊断一致性校验用）。
+// < 0 = 本次没采到（无 carModifier），跳过校验。
+static float g_diag_live_brake_bias = -1.0f;
 static int g_setup_resolved = 0;        // 0=未做 1=成功 2=失败（防每圈重扫）
 
 static void *g_m_scene_name = NULL;    // SceneManagerHelper.get_ActiveSceneName
@@ -368,11 +398,13 @@ static void resolve_mode_signals(void) {
                     else if (strcmp(fn, "isRace") == 0) g_f_israce = field;
                     else if (strcmp(fn, "isMultiplayerMatch") == 0) g_f_ismp = field;
                     else if (strcmp(fn, "championshipData") == 0) g_f_champ_data = field;
+                    else if (strcmp(fn, "raceMode") == 0) g_f_race_mode = field;
                     if (g_f_gf != NULL && g_f_israce != NULL &&
-                        g_f_ismp != NULL && g_f_champ_data != NULL) break;
+                        g_f_ismp != NULL && g_f_champ_data != NULL &&
+                        g_f_race_mode != NULL) break;
                 }
-                LOGI("lap_hook: GlobalVariables fields resolved: gf=%p israce=%p ismp=%p champData=%p",
-                     g_f_gf, g_f_israce, g_f_ismp, g_f_champ_data);
+                LOGI("lap_hook: GlobalVariables fields resolved: gf=%p israce=%p ismp=%p champData=%p raceMode=%p",
+                     g_f_gf, g_f_israce, g_f_ismp, g_f_champ_data, g_f_race_mode);
             }
         }
     }
@@ -386,6 +418,10 @@ static void resolve_mode_signals(void) {
 #define OFF_CD_ROUND_NUMBER    0x38   // ChampionshipData.roundNumber (int)
 #define OFF_CD_CURRENT_TRACK   0x48   // ChampionshipData.currentTrack (int)
 #define OFF_CD_FULL_QUALI      0x2B   // ChampionshipData.fullQuali (bool)
+// ChampionshipData.currentCarSetup (AlaCarSetup*, dump.cs `// 0x68`)。
+// `ApplyCurrentSetupPreRun` 在 simpleRace=false（= raceMode==3 或
+// ChampionshipManager 的两个调用方）时写这里，**不写** GlobalVariables+0x10。
+#define OFF_CD_CURRENT_SETUP   0x68
 
 // ── AlaCarSetup 字段偏移（dump.cs:35891-35909 + ApplyCurrentSetupPreRun
 //    0x18B05E8 反汇编双向对拍实证，2026-10-26）──
@@ -414,6 +450,12 @@ static void resolve_mode_signals(void) {
 #define OFF_SETUP_REAR_TOE                 0x40
 #define OFF_SETUP_FRONT_RIDE_HEIGHT        0x44
 #define OFF_SETUP_REAR_RIDE_HEIGHT         0x48
+
+// ── carModifier 上「实际生效」的派生字段（诊断用，2026-10-26）──
+// `HandleCarSetup` 把 setup.brakeBias(+0x20) 写进这里
+// （0x1762d14 `ldr s0,[x20,#0x20]` → `str s0,[x19,#0x3d4]`），
+// 用它和 currentCarSetup.brakeBias 对比即可判定后者是不是真正生效的源。
+#define OFF_CM_CURRENT_BRAKE_BIAS          0x3D4
 
 // ── 解析 GlobalVariables.currentCarSetup 的 FieldInfo（一次性；成功/失败
 //    都置位防每圈重扫）。这是**静态字段**（static_fields +0x10），走
@@ -457,37 +499,142 @@ static void resolve_setup_field(void) {
          g_f_current_setup, g_setup_resolved);
 }
 
-// ── LAPsetup 诊断行：把本圈调教的 7 项（各前后两值 = 14 个 float）一次打齐。
-//    ⚠️ 打的是 **AlaCarSetup 里的原始 float**，不是 UI 显示值。UI 换算关系
-//    （下压力 80 是 0.8 还是 80.0？外倾角是度还是弧度？）尚未实测，故第一
-//    轮只输出原始值，待日志对照后再定是否换算。
-//    setup 为 NULL（尚未进赛道/该模式不写此字段）时打一行说明，便于区分
-//    「读不到」与「读到了但值不对」。
-static void lapsetup_diag(void *setup, const char *lap_buf) {
+// ── LAPsetup / LAPcar 快照：读一次、写上传快照、打诊断行（2026-10-26）──
+// 圈边界调用。两件事合一：① 把车型 + 14 个 setup float 写进 g_upload_* 快照
+// （供 Java 轮询上传）；② 打日志供实机对拍。
+//
+// ⚠️ 打的是 **AlaCarSetup 里的原始 float**，且**存的就是 UI 显示值本身**
+//    （下压力 65.0 不是 0.65，外倾角 -3.0 度不是弧度）——实机 2026-10-26
+//    Monza 对拍确认。服务端与模块都不做量纲换算，只在展示时格式化。
+// ⚠️ setup 为 NULL（尚未进赛道 / 该模式不写此字段）时 has_setup 记 0，
+//    打一行说明便于区分「读不到」与「读到了但值不对」。
+static void lap_snapshot_car_setup(const char *lap_buf) {
+    // ── 车型 ──
+    // 探针未采到时 getter 返回 -1 ⇒ 原样上报为缺失（服务端存 NULL）。
+    g_upload_car_id = (int32_t) pedal_get_car_unique_id();
+    g_upload_car_era = (int32_t) pedal_get_car_era();
+    LOGI("LAPcar: carId=%d era=%d (lap %s, track='%s')",
+         g_upload_car_id, g_upload_car_era, lap_buf, g_track_name);
+
+    // ── 一致性校验：读到的 setup 是否等于车上实际生效的值（2026-10-26 定案后保留）──
+    //
+    // 为什么保留：这条探针抓出过一次**静默错误**——`currentCarSetup` 一直有输出，
+    // 但输出的是 `AlaCarSetup..ctor` 的默认常量（从未被填充）。"有日志" ≠ "读对了"，
+    // 只有和车上实际生效值对拍才能发现。升版后若 `ApplyCurrentSetupPreRun` 的
+    // 分叉逻辑变化，这里会立刻告警。
+    //
+    // `carModifier.HandleCarSetup` 把 setup.brakeBias(+0x20) 直写
+    // `currentBrakeBiasFront`(0x3D4)（`0x1762d14 ldr s0,[x20,#0x20]; str s0,[x19,#0x3d4]`）
+    // ⇒ 两者必须相等。不等 = 读错了源。
+    //
+    // ⚠️ 只在**不一致**时打日志：正常情况下零输出，不会稀释 2MB 滚动日志。
+    void *cm = pedal_get_car_modifier();
+    if (cm != NULL) {
+        float live_brake_bias = *(volatile float *) ((uintptr_t) cm + OFF_CM_CURRENT_BRAKE_BIAS);
+        // 读到的 brake 在下面填充，这里先记下指针供末尾比对。
+        g_diag_live_brake_bias = live_brake_bias;
+    } else {
+        g_diag_live_brake_bias = -1.0f;   // 无 carModifier = 跳过校验
+    }
+
+    // ── 调教 ──
+    //
+    // ⚠️ **两个存储位置，按 raceMode 选**（2026-10-26 实机定案）：
+    //   `ApplyCurrentSetupPreRun(simpleRace)` 在 `0x18b089c: tbz w19,#0` 分叉：
+    //     simpleRace = true  → `GlobalVariables + 0x10`（str x20,[x0,#0x10]!）
+    //     simpleRace = false → `ChampionshipData + 0x68`（str x20,[x0,#0x68]!）
+    //   而唯一传 true 的调用方是 `prerunHandler.LoadTrackNow`，它算的是
+    //   `simpleRace = (raceMode != 3)`；另两个调用方（ChampionshipManager 的
+    //   GetToTrackFromSession / ApplySetupAndGoToTrack）硬传 false。
+    //
+    // ⇒ **`raceMode == 3` 时写的是 `ChampionshipData+0x68`，
+    //    `GlobalVariables.currentCarSetup` 根本不会被写**，它保持
+    //   `AlaCarSetup..ctor` 的默认常量（65/58/60/50/50/50/50/-3/-1.5/-0.05/0.15/40/40）。
+    //
+    // 实机证据（2026-10-26 14:38，Monza，raceMode=3）：
+    //   `currentBrakeBiasFront=50.000`（carModifier 上实际生效值，来自 HandleCarSetup）
+    //   vs `currentCarSetup.brake=60.000`（默认构造值）——两者不同，证明读错了源。
+    //
+    // 策略：**先读 `ChampionshipData+0x68`，为空再回落 `GlobalVariables+0x10`**。
+    // 不按 raceMode 硬分支，是因为 raceMode 的取值语义在不同上下文不一致
+    // （见 CLAUDE.md 里 `raceMode==2` 那条），用"哪份非空"作判据更稳。
+    resolve_setup_field();
+    void *setup = NULL;
+    const char *setup_src = "none";
+    // ① 冠军赛/raceMode==3 路径
+    if (g_f_champ_data != NULL) {
+        void *champ = NULL;
+        g_field_static_get_value(g_f_champ_data, &champ);
+        if (champ != NULL) {
+            void *cd_setup = *(void *volatile *) ((uintptr_t) champ + OFF_CD_CURRENT_SETUP);
+            if (cd_setup != NULL) {
+                setup = cd_setup;
+                setup_src = "championshipData+0x68";
+            }
+        }
+    }
+    // ② 回落：非冠军赛路径
+    if (setup == NULL && g_f_current_setup != NULL) {
+        g_field_static_get_value(g_f_current_setup, &setup);
+        if (setup != NULL) setup_src = "globalVariables+0x10";
+    }
     if (setup == NULL) {
-        LOGI("LAPsetup: currentCarSetup is NULL (lap %s) — field resolved=%d",
-             lap_buf, g_setup_resolved);
+        g_upload_has_setup = 0;
+        LOGI("LAPsetup: no setup object (global=%p resolved=%d, champData=%p, lap %s)",
+             g_f_current_setup, g_setup_resolved, g_f_champ_data, lap_buf);
         return;
     }
+    LOGI("LAPsetup: reading from %s (lap %s)", setup_src, lap_buf);
     const uintptr_t base = (uintptr_t) setup;
-    float fw_aero   = *(volatile float *) (base + OFF_SETUP_FRONT_WING_AERO);
-    float rw_aero   = *(volatile float *) (base + OFF_SETUP_REAR_WING_AERO);
-    float ride_f    = *(volatile float *) (base + OFF_SETUP_FRONT_RIDE_HEIGHT);
-    float ride_r    = *(volatile float *) (base + OFF_SETUP_REAR_RIDE_HEIGHT);
-    float brake     = *(volatile float *) (base + OFF_SETUP_BRAKE_BIAS);
-    float stiff_f   = *(volatile float *) (base + OFF_SETUP_FRONT_SUSP_STIFFNESS);
-    float stiff_r   = *(volatile float *) (base + OFF_SETUP_REAR_SUSP_STIFFNESS);
-    float roll_f    = *(volatile float *) (base + OFF_SETUP_FRONT_SUSP_ROLLBAR);
-    float roll_r    = *(volatile float *) (base + OFF_SETUP_REAR_SUSP_ROLLBAR);
-    float camber_f  = *(volatile float *) (base + OFF_SETUP_FRONT_CAMBER);
-    float camber_r  = *(volatile float *) (base + OFF_SETUP_REAR_CAMBER);
-    float toe_f     = *(volatile float *) (base + OFF_SETUP_FRONT_TOE);
-    float toe_r     = *(volatile float *) (base + OFF_SETUP_REAR_TOE);
+    float fw_aero  = *(volatile float *) (base + OFF_SETUP_FRONT_WING_AERO);
+    float rw_aero  = *(volatile float *) (base + OFF_SETUP_REAR_WING_AERO);
+    float ride_f   = *(volatile float *) (base + OFF_SETUP_FRONT_RIDE_HEIGHT);
+    float ride_r   = *(volatile float *) (base + OFF_SETUP_REAR_RIDE_HEIGHT);
+    float brake    = *(volatile float *) (base + OFF_SETUP_BRAKE_BIAS);
+    float stiff_f  = *(volatile float *) (base + OFF_SETUP_FRONT_SUSP_STIFFNESS);
+    float stiff_r  = *(volatile float *) (base + OFF_SETUP_REAR_SUSP_STIFFNESS);
+    float roll_f   = *(volatile float *) (base + OFF_SETUP_FRONT_SUSP_ROLLBAR);
+    float roll_r   = *(volatile float *) (base + OFF_SETUP_REAR_SUSP_ROLLBAR);
+    float camber_f = *(volatile float *) (base + OFF_SETUP_FRONT_CAMBER);
+    float camber_r = *(volatile float *) (base + OFF_SETUP_REAR_CAMBER);
+    float toe_f    = *(volatile float *) (base + OFF_SETUP_FRONT_TOE);
+    float toe_r    = *(volatile float *) (base + OFF_SETUP_REAR_TOE);
+
+    // 写上传快照（顺序必须与 US_* 枚举一致）。
+    g_upload_setup[US_FRONT_WING]    = fw_aero;
+    g_upload_setup[US_REAR_WING]     = rw_aero;
+    g_upload_setup[US_FRONT_RIDE]    = ride_f;
+    g_upload_setup[US_REAR_RIDE]     = ride_r;
+    g_upload_setup[US_BRAKE_BIAS]    = brake;
+    g_upload_setup[US_FRONT_STIFF]   = stiff_f;
+    g_upload_setup[US_REAR_STIFF]    = stiff_r;
+    g_upload_setup[US_FRONT_ROLLBAR] = roll_f;
+    g_upload_setup[US_REAR_ROLLBAR]  = roll_r;
+    g_upload_setup[US_FRONT_CAMBER]  = camber_f;
+    g_upload_setup[US_REAR_CAMBER]   = camber_r;
+    g_upload_setup[US_FRONT_TOE]     = toe_f;
+    g_upload_setup[US_REAR_TOE]      = toe_r;
+    g_upload_has_setup = 1;
+
     LOGI("LAPsetup: aero=%.3f/%.3f ride=%.3f/%.3f brake=%.3f "
          "stiff=%.3f/%.3f rollbar=%.3f/%.3f camber=%.3f/%.3f toe=%.3f/%.3f (lap %s)",
          fw_aero, rw_aero, ride_f, ride_r, brake,
          stiff_f, stiff_r, roll_f, roll_r, camber_f, camber_r, toe_f, toe_r,
          lap_buf);
+
+    // ── 一致性校验（只在不等时告警，正常零输出）──
+    // 读到的 brake 必须等于 carModifier 上实际生效的 currentBrakeBiasFront。
+    // 不等 ⇒ 又读错了源（例如游戏升版改了 ApplyCurrentSetupPreRun 的分叉）。
+    if (g_diag_live_brake_bias >= 0.0f) {
+        float diff = brake - g_diag_live_brake_bias;
+        if (diff < 0.01f && diff > -0.01f) {
+            /* 一致，静默 */
+        } else {
+            LOGW("LAPsetup: MISMATCH brake=%.3f vs carModifier=%.3f (src=%s, lap %s) "
+                 "— 读到的调教与车上实际生效值不符，检查 ApplyCurrentSetupPreRun 分叉",
+                 brake, g_diag_live_brake_bias, setup_src, lap_buf);
+        }
+    }
 }
 
 // ── LAPsession 诊断行：把全部候选模式信号一次打齐，供各模式采样表落定
@@ -878,25 +1025,11 @@ static void proxy_odometer_handle_sectors_times(void *this, int sector_order,
                 }
                 g_upload_gp = g_current_gp_index;
                 g_upload_lap_ms = ms;
-                // ── 本圈车型：圈边界读一次（2026-10-26，验证用）──
-                // 只读 + 打日志，**不参与上传**（上传契约未定，另行处理）。
-                // 读的是 pedal_hook 探针缓存（proxy_car_controller 每物理帧
-                // 刷新），此处取一次快照 = 这一圈用的车。
-                LOGI("LAPcar: carId=%d era=%d (lap %s, track='%s')",
-                     pedal_get_car_unique_id(), pedal_get_car_era(),
-                     now_buf, g_track_name);
-                // ── 本圈调教：圈边界读一次（2026-10-26，验证用）──
-                // 只读 + 打日志，**不参与上传**（上传契约未定，另行处理）。
-                // 走静态字段 GlobalVariables.currentCarSetup，零 hook 零副作用。
-                resolve_setup_field();
-                if (g_f_current_setup != NULL) {
-                    void *setup = NULL;
-                    g_field_static_get_value(g_f_current_setup, &setup);
-                    lapsetup_diag(setup, now_buf);
-                } else {
-                    LOGI("LAPsetup: currentCarSetup FieldInfo unavailable (state=%d, lap %s)",
-                         g_setup_resolved, now_buf);
-                }
+                // ── 本圈车型 + 调教：圈边界读一次（2026-10-26）──
+                // 读到的值写进 g_upload_* 快照，由紧随其后的 g_upload_seq++
+                // 发布（数据先写、序号后写 = 读侧看到新 seq 时数据已就绪）。
+                // 车型走 pedal_hook 探针缓存；调教走静态字段 currentCarSetup。
+                lap_snapshot_car_setup(now_buf);
                 g_upload_seq++;   // volatile 递增单写者（主线程）——发布序：先写数据后写 seq
             } else {
                 LOGI("LAPup: skip upload (gp_index unknown)");
@@ -1026,6 +1159,23 @@ bool lap_poll_upload(lap_upload_t *out) {
     out->tc_strength = g_upload_assist[2];
     out->abs_mode = g_upload_assist[3];
     out->abs_strength = g_upload_assist[4];
+    // 车型 + 调教快照（与上面同批发布，读侧看到新 seq 时已就绪）。
+    out->car_id = g_upload_car_id;
+    out->car_era = g_upload_car_era;
+    out->has_setup = g_upload_has_setup;
+    out->setup_front_wing_aero   = g_upload_setup[US_FRONT_WING];
+    out->setup_rear_wing_aero    = g_upload_setup[US_REAR_WING];
+    out->setup_front_ride_height = g_upload_setup[US_FRONT_RIDE];
+    out->setup_rear_ride_height  = g_upload_setup[US_REAR_RIDE];
+    out->setup_brake_bias        = g_upload_setup[US_BRAKE_BIAS];
+    out->setup_front_stiffness   = g_upload_setup[US_FRONT_STIFF];
+    out->setup_rear_stiffness    = g_upload_setup[US_REAR_STIFF];
+    out->setup_front_rollbar     = g_upload_setup[US_FRONT_ROLLBAR];
+    out->setup_rear_rollbar      = g_upload_setup[US_REAR_ROLLBAR];
+    out->setup_front_camber      = g_upload_setup[US_FRONT_CAMBER];
+    out->setup_rear_camber       = g_upload_setup[US_REAR_CAMBER];
+    out->setup_front_toe         = g_upload_setup[US_FRONT_TOE];
+    out->setup_rear_toe          = g_upload_setup[US_REAR_TOE];
     return true;
 }
 

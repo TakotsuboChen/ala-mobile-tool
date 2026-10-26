@@ -1,10 +1,53 @@
 # 车辆调教（setup）读取
 
-> 状态：**活跃** · 最后编纂：2026-10-26
-> 一句话结论：赛道内读调教**不需要任何 hook** —— 走静态字段
-> `GlobalVariables.currentCarSetup`（static_fields +0x10），
-> `il2cpp_field_static_get_value` 直接取值；`AlaCarSetup` 里存的
-> **就是 UI 显示值本身**（下压力 65、外倾角 -3.0 度），无需换算。
+> 状态：**活跃** · 最后编纂：2026-10-26（当日二次编纂：修正读取源）
+> 一句话结论：赛道内读调教**不需要任何 hook**，但有**两个存储位置**——
+> `raceMode == 3` 时游戏写 `ChampionshipData+0x68`，**不写**
+> `GlobalVariables+0x10`。读错源会静默拿到 `AlaCarSetup..ctor` 的默认常量。
+> `AlaCarSetup` 存的是**原始连续浮点**（13 项全部如此），游戏 UI 只是截断显示；
+> 量纲与 UI 一致无需换算，但**精度必须保留**。
+
+---
+
+## 0. ⚠️ 先读这条：读错源会静默失败（2026-10-26 实机定案）
+
+**现象**：`LAPsetup` 一直有输出、值看起来"正常"（65/58/60/50…），但玩家实际
+设的是 100/100。**没有任何报错，日志行完整，格式正确**。
+
+**根因**：`ApplyCurrentSetupPreRun` 内部按 `simpleRace` 参数分叉：
+
+```asm
+0x18b0898: ldr  x0, [x0, #0xb8]      ; GlobalVariables 的 static_fields
+0x18b089c: tbz  w19, #0, #0x18b08a8  ; simpleRace 的 bit0 == 0 时【跳转】
+0x18b08a0: str  x20, [x0, #0x10]!    ; simpleRace=true  → GlobalVariables+0x10
+0x18b08a8: ldr  x0, [x0]             ; → championshipData
+0x18b08b0: str  x20, [x0, #0x68]!    ; simpleRace=false → ChampionshipData+0x68
+```
+
+`tbz w19,#0,target` = **bit0 为 0 时跳转**。所以 `simpleRace=false` 走
+`ChampionshipData+0x68`，**`GlobalVariables+0x10` 完全不被写**——它保持
+`AlaCarSetup..ctor` 的默认常量。
+
+**谁传 false**：`ChampionshipManager.GetToTrackFromSession`(0x173070c
+`mov w1, wzr`) 与 `ApplySetupAndGoToTrack`(0x173182c) **硬传 false**；
+只有 `prerunHandler.LoadTrackNow` 传 `simpleRace = (raceMode != 3)`
+（`0x1a22e60 cmp w8,#3; cset w1, ne`）。
+
+⇒ **实机计时赛 `raceMode == 3`**（2026-10-26 14:38 实机日志
+`LAPsetup-diag: raceMode=3`），因此走的是 `ChampionshipData+0x68`。
+
+**怎么发现的（三方对拍，这个方法要记住）**：
+
+1. `AlaCarSetup..ctor`(0x1873AFC) 从 `.rodata` 载入默认常量——
+   逐字节读出来是 `65,58,60,50 / 50,50,50,-3 / -1.5,-0.05,0.15,40 / 40,110`，
+   与读到的 14 个值**完全相同** ⇒ 读到的是一个从未被填充的默认构造对象。
+2. `carModifier.currentBrakeBiasFront`(0x3D4) 是 `HandleCarSetup` 从
+   setup.brakeBias 直写的实际生效值（`0x1762d14 ldr s0,[x20,#0x20];
+   str s0,[x19,#0x3d4]`）⇒ 实测 `50.000` ≠ 读到的 `60.000`。
+3. 补打 `raceMode` ⇒ `3`，反查分叉逻辑即定位。
+
+**教训**：上一版文档写"计时赛走前者（实机已验）"是**错结论**。那次验证只
+确认了"日志行存在"，没比对数值。**"有输出" ≠ "读对了"**。
 
 ---
 
@@ -12,33 +55,58 @@
 
 ### 1.1 读取路径 [V]
 
+**两个存储位置，先读 `ChampionshipData+0x68`，为空再回落 `GlobalVariables+0x10`**：
+
 ```
-GlobalVariables.currentCarSetup      (静态字段，static_fields +0x10)
-  └─ AlaCarSetup*
+① ChampionshipData + 0x68            (raceMode==3 / 冠军赛路径，先读)
+   └─ AlaCarSetup*
+② GlobalVariables + 0x10             (回落：非冠军赛路径)
+   └─ AlaCarSetup*
 ```
 
-**零 hook、零实例指针链**。用 `il2cpp_field_static_get_value` 取值，
-与项目里既有的 `GlobalVariables.isGrandFestival` / `isRace` /
-`championshipData` 读取是同一套机制（见 `lap_hook.c` 的
-`resolve_mode_signals`）。
+⚠️ **不要按 `raceMode` 硬分支**——该字段的取值语义在不同上下文不一致
+（`ComputeFuelToLoad` 里 `raceMode==2` 是计时赛判定，而实际跑圈时是 3）。
+用"哪份非空"作判据更稳，也天然覆盖冠军赛。
+
+**零 hook、零实例指针链**。`GlobalVariables` 用 `il2cpp_field_static_get_value`
+取值；`ChampionshipData` 同样经静态字段取指针后按 `+0x68` 读实例字段。
+与项目里既有的 `isGrandFestival` / `championshipData` 读取是同一套机制（见
+`lap_hook.c` 的 `resolve_mode_signals`）。
+
+**常驻一致性校验**：`lap_snapshot_car_setup` 每圈对拍
+`读到的 brakeBias` vs `carModifier.currentBrakeBiasFront`，**只在不等时
+打 `LAPsetup: MISMATCH`**。正常零输出。这条是防止将来升版重蹈覆辙的唯一
+自动护栏——见 §0。
 
 ### 1.2 字段偏移与量纲 [V]
 
 | UI 显示项 | 字段 | 偏移 | 量纲 | 实测样例 |
 |---|---|---|---:|---|
-| 下压力（前/后） | `frontWingAero` / `rearWingAero` | 0x18 / 0x1C | 0–100 档 | `65.000 / 58.000` |
-| 底盘高度（前/后） | `frontRideHeight` / `rearRideHeight` | 0x44 / 0x48 | 整数档 | `40.000 / 40.000` |
-| **刹车平衡（前）** | `brakeBias` | 0x20 | 0–100 | `60.000`（后 = 40） |
-| 悬架刚度（前/后） | `frontSuspensionStiffness` / `rearSuspensionStiffness` | 0x24 / 0x28 | 0–100 | `50.000 / 50.000` |
-| 防倾杆（前/后） | `frontSuspensionRollbar` / `rearSuspensionRollbar` | 0x2C / 0x30 | 0–100 | `50.000 / 50.000` |
-| 外倾角（前/后） | `frontCamber` / `rearCamber` | 0x34 / 0x38 | **度**（可为负） | `-3.000 / -1.500` |
-| 前束角（前/后） | `frontToe` / `rearToe` | 0x3C / 0x40 | **度**（可为负） | `-0.050 / 0.150` |
+| 下压力（前/后） | `frontWingAero` / `rearWingAero` | 0x18 / 0x1C | 0–100 连续 | `55.397 / 37.331` |
+| 底盘高度（前/后） | `frontRideHeight` / `rearRideHeight` | 0x44 / 0x48 | 连续 | `36.854 / 37.616` |
+| **刹车平衡（前）** | `brakeBias` | 0x20 | 0–100 连续 | `54.702`（后 = 45.298） |
+| 悬架刚度（前/后） | `frontSuspensionStiffness` / `rearSuspensionStiffness` | 0x24 / 0x28 | 0–100 连续 | `64.193 / 25.165` |
+| 防倾杆（前/后） | `frontSuspensionRollbar` / `rearSuspensionRollbar` | 0x2C / 0x30 | 0–100 连续 | `31.566 / 31.457` |
+| 外倾角（前/后） | `frontCamber` / `rearCamber` | 0x34 / 0x38 | **度**（可为负） | `-2.862 / -1.565` |
+| 前束角（前/后） | `frontToe` / `rearToe` | 0x3C / 0x40 | **度**（可为负） | `-0.033 / 0.088` |
 | （未探针）载油量 | `fuelLoaded` | 0x4C | — | — |
 | （未探针）简单模式选择 | `selectedSimples` | 0x10 | int[] | — |
 
-⚠️ **`AlaCarSetup` 存的就是 UI 显示值本身，不需要任何换算** [V]——
-这是本次调查最实用的结论：下压力存 `65.0` 而不是 `0.65`，外倾角存
-`-3.0`（度）而不是弧度。实机读数与量纲自洽，无缩放迹象。
+⚠️ **13 项全部是连续浮点，没有一个是「整数档位」** [V]（2026-10-26 实机定案）——
+实机一次全项非整数读数（`aero=55.397/37.331 ride=36.854/37.616 brake=54.702
+stiff=64.193/25.165 rollbar=31.566/31.457 camber=-2.862/-1.565
+toe=-0.033/0.088`，Monza 1:15.443，用户确认与游戏内设定一致）。
+
+⚠️ **"UI 显示整数"是显示层截断，不是存储精度**：`UpdateSlidersStrings`
+（`0x18AD0C8`）读滑条值后 `fcvtzs w9, s0`（**向零截断**，非四舍五入）再转字符串
+⇒ 调「58」实际存 `58.709`，UI 显示 `58`。
+
+⇒ **展示层必须原样呈现原始 float（去尾随零），禁止按「整数项取整 / 角度项两位
+小数」分档**：那套分档基于"值是整数"的错误假设，会丢精度。后续「应用调教」
+功能要回写原始值，显示截断会让人误以为存的是整数。实现见 `DriverScreen.fmt()`。
+
+⚠️ **量纲不需要换算**（下压力存 `55.397` 不是 `0.554`，外倾角存 `-2.862` 度
+不是弧度）——这一条仍然成立，只是"等于 UI 显示值"的说法不准确。
 
 ### 1.3 ⚠️ 刹车平衡是「单字段」，不是前后两个 [V]
 
@@ -67,10 +135,12 @@ UI 上显示成 `60 / 40` 是**派生的前后分配**，不是两个独立字�
 ⇒ 赛道内该对象**稳定不变**，圈边界读一次即可，无需每帧采样。
 
 ⚠️ **存在两条写入路径**（`ApplyCurrentSetupPreRun` 内 `tbz w19, #0` 分叉）：
-- 非冠军赛：`GlobalVariables.static_fields + 0x10` ← 本模块读取的就是这条
-- 冠军赛：`ChampionshipData + 0x68`（`0x18B08A8` 起 `ldr x0,[x0]; str x20,[x0,#0x68]`）
+- `simpleRace = true`：`GlobalVariables.static_fields + 0x10`
+- `simpleRace = false`：`ChampionshipData + 0x68`
 
-计时赛走前者（实机已验）；冠军赛若读不到，需补 `ChampionshipData+0x68` 兜底。
+**实机计时赛 `raceMode == 3` ⇒ 走 `ChampionshipData+0x68`**（2026-10-26 定案，
+详见 §0）。本模块因此**先读 ChampionshipData、再回落 GlobalVariables**。
+旧文档写的"计时赛走前者（实机已验）"已被证伪。
 
 ### 1.5 实机验证记录 [V]
 
@@ -242,13 +312,52 @@ toe       = frontToe / rearToe                    前束角（度）
 - [?] **`selectedSimples`（0x10，int[]）语义**：UI 的「简单模式」调教
   选择索引（前翼/后翼/底盘高度各一档）。未探针，未解析。
   依赖：对照 UI 简单模式界面逐档实测。
-- [?] **上传契约未定**：与 `carId` 同状态 —— 已能取到，但服务端字段名、
-  精度（外倾角保留几位小数）、是否按调教统计均未决策。
-  **当前代码不参与上传**。改契约要同时动 `docs/design/PADDOCK_PLAN.md`
-  与两侧代码。
 - [?] **负前束/正前束的 UI 表述**：实测 `toe=-0.050/0.150`，前为负、
   后为正。UI 上是否显示为 `-0.05°` / `+0.15°` 或带「内八/外八」字样，
   未核对。
+- [?] **冠军赛路径的上传表现**：同第一条。若冠军赛走 `ChampionshipData+0x68`，
+  当前实现会整组 `has_setup = 0`（弹窗显示「缺失」），而不是崩溃或报错。
+  依赖：跑一场冠军赛看圈速详情弹窗。
+
+---
+
+## 5a. 上传链路（2026-10-26 已接通）
+
+调教与车型**已接入围场上传**，不再是"只打日志"。
+
+**数据流**：`lap_snapshot_car_setup()`（`lap_hook.c`，圈边界调用）读一次 →
+写 `g_upload_car_id/car_era/has_setup/g_upload_setup[13]` → `g_upload_seq++`
+发布 → Java 1Hz `pollLapUpload(IntArray(11), FloatArray(13))` 取走 →
+`PaddockClient.uploadLap(..., car, setup)` 上报。
+
+**跨语言契约点（改一处必须三处同改）**：
+1. `lap_hook.c` 的 `US_*` 枚举（写入顺序）
+2. `ala_core.c` 的 `sbuf[13]`（JNI 搬运顺序）
+3. `PaddockClient.LapSetup.fromNative`（读取顺序）
+
+**缺失语义**：
+- 车型用 `car_id < 0`（探针未采到，getter 返回 -1）
+- 调教用**独立标志** `has_setup`，不用数值哨兵——浮点值域连续，任何哨兵都可能撞上合法调教值
+- 服务端 `score::CarSetupConfig::normalized` 再兜一层：车型越界（不在 0..41 / era 不在 0..1）→ 两列都 NULL；调教缺任一字段 → 整组 NULL
+
+**存储形态（用户 2026-10-26 定案）**：
+- **车型只存整数** `car_id` + `car_era`，展示名由模块侧 `CarCatalog` 反查。
+  改车队译名只发模块、历史圈自动跟着变，服务端永不认识车型字。
+- **调教存原始连续浮点**（13 项全部如此），服务端零换算。
+  ⚠️ 早先写的「存的就是 UI 显示值本身」不准确：UI 显示是 `fcvtzs` 截断的结果，
+  存储精度远高于显示（调「58」实存 `58.709`）。见 §1.2。
+- **`setup_brake_bias` 只存前值**，后 = 100 − 前（UI 的 `60/40` 是派生量）。
+
+**展示格式（用户 2026-10-26 定案，当日二次修订）**：**原样呈现原始值、去尾随零**
+（`58.709` → `58.709`，`50.0` → `50`，`-3.5` → `-3.5`）。
+实现 = `DriverScreen.fmt()`：`%.4f` 后 `trimEnd('0').trimEnd('.')`。
+⚠️ **不要改回「整数项取整 / 角度项两位小数」**——那套分档基于"值是整数"的
+错误假设（2026-10-26 实测 13 项全为连续浮点），会丢精度，且后续「应用调教」
+功能需要原始值回写。
+
+**真库测试**：`paddock-api/src/car_setup_sql_tests.rs`（5 项，`#[ignore]`，
+需 `DATABASE_URL`）——覆盖 15 个新列、全字段往返、半套归一化、车型越界、
+旧客户端零改动兼容。这些**编译期全都发现不了**（sqlx 用运行时 `query` 而非宏）。
 
 ---
 

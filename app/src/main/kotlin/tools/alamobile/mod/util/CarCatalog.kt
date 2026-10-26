@@ -150,11 +150,13 @@ object CarCatalog {
      *
      * ⚠️ **措辞由用户 2026-10-26 逐条给定，不得擅自改写**：
      * 特别是 `赛牛（红牛二队）` 与 `阿尔法托利（红牛二队）` 的括号写法、
-     * `梅赛德斯 AMG` 的 AMG 后缀，都是用户确认过的表述，不要"优化"成别的名字。
+     * `梅赛德斯-AMG` 的连字符，都是用户确认过的表述，不要"优化"成别的名字。
+     *
+     * 2026-10-26 变更：`梅赛德斯 AMG` → `梅赛德斯-AMG`（用户定案，连字符）。
      */
     private val REAL_TEAM_NAMES: Map<String, String> = mapOf(
         // 2026 主动空力
-        "mercedes" to "梅赛德斯 AMG",
+        "mercedes" to "梅赛德斯-AMG",
         "redbull" to "红牛",
         "ferrari" to "法拉利",
         "mclaren" to "迈凯伦",

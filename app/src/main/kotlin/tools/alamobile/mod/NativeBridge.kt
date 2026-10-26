@@ -373,16 +373,26 @@ object NativeBridge {
 
     /**
      * 围场上传通道（S2）：轮询取走 order==2 有效圈事件（单槽，见 lap_hook.c）。
-     * 有未消费事件返回 true，out 至少 9 元素，填充：
+     * 有未消费事件返回 true，out 至少 11 元素、setupOut 至少 13 元素，填充：
      * ```
      * [0] lapSeq（去重，单调递增）   [1] gpIndex∈[0,15]   [2] lapMs
      * [3] pedalMode  [4] tcMode  [5] tcStrength  [6] absMode  [7] absStrength
+     * [8] carId（-1=缺失）  [9] carEra（0=地效 1=主动空力，-1=缺失）
+     * [10] hasSetup（1=setupOut 有效，0=整组无效）
      * ```
      * 索引 3..7 是**整圈辅助配置码**（0 = 缺失）。非 0 表示该圈全程配置未变过，
-     * 可安全作为成绩属性上报。消费成功后调 [markLapUploadConsumed]。
+     * 可安全作为成绩属性上报。
+     *
+     * `setupOut` 的 13 个 float 顺序：前翼下压力 / 后翼下压力 / 前底盘高度 /
+     * 后底盘高度 / 刹车平衡（**前**值）/ 前悬架刚度 / 后悬架刚度 / 前防倾杆 /
+     * 后防倾杆 / 前外倾角 / 后外倾角 / 前束角 / 后束角。
+     * ⚠️ `out[10] == 0` 时 `setupOut` 内容**无意义**（native 不写它，可能是上一次
+     * 事件残留的旧值）——必须先判 hasSetup 再用。
+     *
+     * 消费成功后调 [markLapUploadConsumed]。
      */
     @JvmStatic
-    external fun pollLapUpload(out: IntArray): Boolean
+    external fun pollLapUpload(out: IntArray, setupOut: FloatArray): Boolean
 
     /** native 单槽消费确认（与 [pollLapUpload] 配对）。 */
     @JvmStatic

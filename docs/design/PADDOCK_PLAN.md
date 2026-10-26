@@ -163,7 +163,15 @@ POST /v1/me/hide-missing        (Bearer) → {hidden: 被屏蔽的圈数}
        走 insert 分支，不看判据直接插回榜单）。
 POST /v1/laps                   {gp_index, lap_ms, version_code,
                                  pedal_mode?, tc_mode?, tc_strength?,
-                                 abs_mode?, abs_strength?}   (Bearer)
+                                 abs_mode?, abs_strength?,
+                                 car_id?, car_era?,
+                                 setup_front_wing_aero?, setup_rear_wing_aero?,
+                                 setup_front_ride_height?, setup_rear_ride_height?,
+                                 setup_brake_bias?,
+                                 setup_front_stiffness?, setup_rear_stiffness?,
+                                 setup_front_rollbar?, setup_rear_rollbar?,
+                                 setup_front_camber?, setup_rear_camber?,
+                                 setup_front_toe?, setup_rear_toe?}   (Bearer)
                                                     → {personal: bool, server: bool,
                                                        toast: null|{level, track}}
     （2026-09-18 加辅助配置五维：全部可选，缺省 = 缺失（旧模块零改动即天然缺失）。
@@ -171,6 +179,15 @@ POST /v1/laps                   {gp_index, lap_ms, version_code,
      tc/abs_strength=off|weak|medium|strong|stock。未知值被服务端归一化为缺失——
      宁可记缺失也不丢圈。⚠️ 客户端只报原始值，派生规则（关/低/线性）在服务端
      `score.rs`，改规则不必发模块版本。）
+    （2026-10-26 加车型 + 车辆调教，全部可选、flatten 接入，旧客户端零改动：
+     **车型只报整数** `car_id`(0..41) + `car_era`(0=地效/1=主动空力)，服务端
+     存整数、**不存展示名**——「2026 梅赛德斯-AMG W17」由模块侧 `CarCatalog`
+     反查渲染，改车队译名只发模块、历史圈自动跟着变。
+     **调教存的是 UI 显示值本身**（下压力 65.0 不是 0.65，外倾角 -3.0 度不是
+     弧度），服务端不做换算。整组**全有或全无**：13 个字段缺任一 → 整组落
+     null（半套调教比缺失更误导），由 `score::CarSetupConfig::normalized` 强制。
+     ⚠️ `setup_brake_bias` 只有**前**值，后 = 100 − 前——游戏 UI 的 `60 / 40`
+     是派生量，**不要加 rear 列**（会出现两个真值源）。）
 GET  /v1/leaderboard/points?version=&limit=&offset=   → 积分总榜/版本榜（分页）
      条目含 points / best_count / zero_count / gold（金标由服务端判定）
      响应含 total（该榜总条数，客户端据此判断是否还有下一页）
@@ -194,6 +211,8 @@ GET  /v1/driver/{user_id}?gp_index=&version=&assist=zero&best=1&sort=&limit=&off
      ⚠️ 判据是谓词 `AUTO_HIDDEN_SQL`（开关打开 AND 该圈配置缺失），**不是**
      `hidden_missing_laps` 的 lap_id 匹配——后者是快照语义，补全配置后红标
      永远不消失，用户实机报障即此。）
+     （2026-10-26 加 `car_id` / `car_era` / `setup`：车型给整数、展示名客户端
+     反查；`setup` 是 13 个 float 的对象，**整组全有或全无**，全 null = 缺失。）
      筛选：gp_index 0..15、version=游戏 versionCode、assist=zero（TC 与 ABS 均关）、
      best=1（仅个人最佳，与榜单 best_laps 同源）。404 = 车手不存在。
 

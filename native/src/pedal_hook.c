@@ -90,6 +90,11 @@ static volatile int g_car_era_probe = -1;  // carType（0=地效 1=主动空力�
 // 用指针而非 carId 作判据：每次进赛道 carModifier 都是新实例，
 // 同一辆车重进赛道也能重新打一条日志。
 static void *g_car_cm_last_logged = NULL;
+// 最近一次采到的 carModifier 指针（2026-10-26）。与上面的 `g_car_cm_last_logged`
+// **刻意分开**：那个只用于日志判重（会在离开赛道时清 NULL），这个是纯读侧缓存，
+// 供 lap_hook 的诊断探针对比「实际生效的调教」与 `GlobalVariables.currentCarSetup`。
+// ⚠️ 只在 proxy_car_controller 白名单分支里写（玩家车），AI 车不污染。
+static void *g_car_cm_cache = NULL;
 // 2026-10-25 一次性「真名猜测」验证：A526/A526 这类真实型号串若存在，
 // 应能在 carId 41（凯迪拉克）上读到；此处同时记录 carNumber 以便交叉验证。
 static volatile int g_car_number_probe = -1;
@@ -1049,6 +1054,7 @@ static void proxy_car_controller(void *this) {
                 g_car_id_probe = car_id;
                 g_car_era_probe = car_era;
                 g_car_number_probe = car_num;
+                g_car_cm_cache = cm;
                 // 判据用 **cM 指针**而非 car_id：每次进赛道/换车 carModifier
                 // 都是新实例，指针变化 ⇒ 重新打一条。用 car_id 判会让"同一辆车
                 // 重进赛道"静默（值没变），恰好丢掉最需要观察的那次。
@@ -1432,6 +1438,14 @@ int pedal_get_car_era(void) {
 
 int pedal_get_car_number(void) {
     return g_car_number_probe;
+}
+
+// 玩家车 carModifier 指针（2026-10-26，诊断用）。
+// NULL = 尚未采到（不在赛道内 / 玩家车未建立）。只读缓存，任意线程安全。
+// ⚠️ 调用方只许**读**该对象上已知偏移的字段——绝不要解引用未知偏移
+//    （2026-10-26 实测扫描 this 前 N 字节直接 SIGSEGV）。
+void *pedal_get_car_modifier(void) {
+    return g_car_cm_cache;
 }
 
 void pedal_shift_up(void) {

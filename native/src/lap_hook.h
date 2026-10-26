@@ -32,6 +32,37 @@ typedef struct {
     int32_t tc_strength;  ///< 1=off 2=weak 3=medium 4=strong 5=stock
     int32_t abs_mode;     ///< 1=default 2=custom
     int32_t abs_strength; ///< 1=off 2=weak 3=medium 4=strong 5=stock
+
+    // ── 本圈车型（2026-10-26）──
+    // carId = carModifier.carUniqueID（= CarDefinition.carId）；era = carType
+    // （0=GroundEffectEra 地效 / 1=DoubleDRSEra 主动空力）。
+    // **-1 = 缺失**（探针尚未采到，例如不在赛道内/玩家车未建立）。
+    // 服务端只存这两个整数，展示名由 Java 侧 CarCatalog 反查——改译名不必发服务端。
+    int32_t car_id;
+    int32_t car_era;
+
+    // ── 本圈调教（2026-10-26）──
+    // 直接来自 `GlobalVariables.currentCarSetup`（静态字段，零 hook）的原始
+    // float。**存的就是 UI 显示值本身**（下压力 65.0 不是 0.65，外倾角 -3.0
+    // 度不是弧度）——实机 2026-10-26 Monza 对拍确认，服务端与模块都不做换算。
+    //
+    // 用 `has_setup` 而非"14 个 NaN 判缺失"：整项缺失是**一个**语义事实
+    // （静态字段解析失败 / 该模式不写此字段），用一个标志表达比逐个判 NaN 可靠。
+    // has_setup = 0 时全部 14 个值无意义，接收方必须忽略它们。
+    int32_t has_setup;
+    float setup_front_wing_aero;   ///< 前翼下压力
+    float setup_rear_wing_aero;    ///< 后翼下压力
+    float setup_front_ride_height; ///< 前底盘高度
+    float setup_rear_ride_height;  ///< 后底盘高度
+    float setup_brake_bias;        ///< 刹车平衡**前**值；后值 = 100 − 前（UI 的 60/40 是派生量）
+    float setup_front_stiffness;   ///< 前悬架刚度
+    float setup_rear_stiffness;    ///< 后悬架刚度
+    float setup_front_rollbar;     ///< 前防倾杆
+    float setup_rear_rollbar;      ///< 后防倾杆
+    float setup_front_camber;      ///< 前外倾角（度）
+    float setup_rear_camber;       ///< 后外倾角（度）
+    float setup_front_toe;         ///< 前束角（度）
+    float setup_rear_toe;          ///< 后束角（度）
 } lap_upload_t;
 
 bool lap_install_hooks(const lap_hook_config_t *config);

@@ -139,6 +139,10 @@ int pedal_get_car_unique_id(void);
 int pedal_get_car_era(void);      // 0=GroundEffectEra 1=DoubleDRSEra
 int pedal_get_car_number(void);   // carModifier.carNumber(0x68)，与 carId 恒等
 
+// 玩家车 carModifier 指针（2026-10-26，诊断用）。NULL = 尚未采到。
+// 只读缓存，任意线程安全。调用方只许读已知偏移的具名字段。
+void *pedal_get_car_modifier(void);
+
 // Enable/disable automatic gear shifting suppression.
 void pedal_set_disable_auto_gear(int disable);
 
