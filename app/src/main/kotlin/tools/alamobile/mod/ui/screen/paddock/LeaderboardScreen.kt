@@ -42,6 +42,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -66,6 +67,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import tools.alamobile.mod.PaddockClient
 import tools.alamobile.mod.ui.navigation3.LocalNavigator
 import tools.alamobile.mod.ui.navigation3.Route
@@ -136,7 +138,13 @@ fun LeaderboardScreen() {
     // 伸缩动画并行，不排队）→ 淡出完成后换 visibleBoard 数据源 → 新行经 animateItem 淡入。
     // 关键：旧行渐隐必须用显式 alpha（而非 animateItem 的移除淡出）——移除发生在换源帧，
     // 那一刻筛选卡伸缩刚结束，移除+插入同帧竞争布局就是"闪一下"的来源。
-    var visibleBoard by remember { mutableStateOf(0 to 0) }  // (tabIndex, track) 实际显示的榜单
+    //
+    // ⚠️ 2026-10-28 从 `Pair(tab, track)` 扩成 `Triple(tab, track, version)`：
+    //    赛道榜点行要按「该行所属的赛道+版本」二次请求圈速详情，
+    //    若点击时现读 `selectedTrack/selectedVersion`，在 150ms 淡出窗口内
+    //    点到的旧行会被拿去查**新**筛选条件下的圈（名次对不上）。
+    //    版本与行同源后，点击用的永远是这一行真正属于的那一组条件。
+    var visibleBoard by remember { mutableStateOf(Triple(0, 0, 0)) }  // (tabIndex, track, version) 实际显示的榜单
     var switchSeq by remember { mutableIntStateOf(0) }       // 切换序号，驱动淡出→换数据协程
     val boardAlpha = remember { Animatable(1f) }
     // 下拉刷新序号：自增迫使数据协程重跑（LaunchedEffect key 含它，相同筛选条件也能重拉）
@@ -148,10 +156,27 @@ fun LeaderboardScreen() {
     var filterEpoch by remember { mutableIntStateOf(0) }
     val listState = rememberLazyListState()
 
+    // ── 圈速详情弹窗（2026-10-28）──
+    // 赛道榜的行只有榜单摘要（TrackEntry：用户名/圈速/金标），完整记录（时间/踏板/
+    // TC/ABS/车型/13 项调教）在 laps 全量表里、best_laps 读模型没有 ⇒ 点击时二次请求
+    // `/v1/driver?best=1&sort=lap_asc&limit=1` 取那一条（用户 2026-10-28 定案：服务端零改动）。
+    var detailMounted by remember { mutableStateOf(false) }
+    var detailShow by remember { mutableStateOf(false) }
+    var detailUserId by remember { mutableStateOf("") }
+    var detailEntry by remember { mutableStateOf<PaddockClient.DriverLap?>(null) }
+    var detailLoading by remember { mutableStateOf(false) }
+    // 「查看主页」先关弹窗、退场动画结束再跳转（用户 2026-10-28 定案）——
+    // 直接 push 会让弹窗与页面转场动画重叠。这个变量记住"本次关闭是为了跳转"。
+    var detailNavUserId by remember { mutableStateOf<String?>(null) }
+    // 请求代次：关掉弹窗立刻点另一行时，前一次的响应可能后到并把内容写到新弹窗上。
+    // 只靠 `detailMounted` 判不出来（重新打开后它又是 true），必须用递增序号。
+    var detailSeq by remember { mutableIntStateOf(0) }
+    val detailScope = rememberCoroutineScope()
+
     LaunchedEffect(switchSeq) {
         if (switchSeq == 0) return@LaunchedEffect
         boardAlpha.animateTo(0f, tween(BOARD_FADE_OUT_MILLIS.toInt()))
-        visibleBoard = tabIndex to selectedTrack
+        visibleBoard = Triple(tabIndex, selectedTrack, selectedVersion)
         boardAlpha.snapTo(1f)  // 新行由 animateItem fadeIn 从 0 起；显式 alpha 复位为 1
     }
 
@@ -173,7 +198,7 @@ fun LeaderboardScreen() {
         isRefreshing = false  // 数据到位 → 收起下拉指示器
         // 无在途切换（首次加载）→ 直接显示；有在途切换 → 等淡出协程换源
         if (switchSeq == 0) {
-            visibleBoard = tabIndex to selectedTrack
+            visibleBoard = Triple(tabIndex, selectedTrack, selectedVersion)
             boardAlpha.snapTo(1f)
         }
         // 筛选变更后把列表滚回顶部（否则新条件的第 1 页会从上次的滚动位置开始）
@@ -345,7 +370,7 @@ fun LeaderboardScreen() {
                 // 渲染数据 = visibleBoard（淡出完成后才切换），不是当前筛选条件——
                 // 这保证"旧内容淡出完成 → 新内容才淡入"的两阶段观感。
                 // 行出现/消失用 Modifier.animateItem()（框架在首帧前定初始 alpha，无抢先帧闪现）。
-                val (visTab, visTrack) = visibleBoard
+                val (visTab, visTrack, visVersion) = visibleBoard
                 val showRows = everLoaded && enterSettled
                 if (!showRows) {
                     item(key = "loading") {
@@ -416,8 +441,47 @@ fun LeaderboardScreen() {
                             // 逐行判定：不要求是全服第一（用户定案：鼓励提升技术，
                             // 即使不在榜首也有含金量）。
                             gold = e.gold,
+                            // 点行 → 打开该圈的「圈速详情」弹窗（2026-10-28 用户定案）。
+                            // 与积分榜不同：赛道榜点行不再直接跳车手主页，改为看详情，
+                            // 主页入口移进弹窗的蓝色「查看主页」按钮。
+                            // 条件用 `visibleBoard` 的 (visTrack, visVersion) 而非
+                            // `selectedTrack/selectedVersion`：点到的可能是正在淡出的旧行，
+                            // 现读筛选条件会拿新条件去查旧行（见 visibleBoard 的注释）。
                             onClick = e.userId.takeIf { it.isNotEmpty() }?.let { uid ->
-                                { navigator.push(Route.Driver(uid)) }
+                                {
+                                    detailUserId = uid
+                                    detailEntry = null
+                                    detailLoading = true
+                                    detailNavUserId = null
+                                    detailMounted = true
+                                    detailShow = true
+                                    detailSeq++
+                                    val mySeq = detailSeq
+                                    // 版本参数：0=全部版本 → null；否则映射成 versionCode。
+                                    // 与榜单请求同源，保证查到的是"这一行"那圈。
+                                    val ver = if (visVersion == 0) null
+                                    else VERSION_CODES.getOrNull(visVersion - 1)
+                                    detailScope.launch {
+                                        val page = withContext(Dispatchers.IO) {
+                                            PaddockClient.fetchDriverPage(
+                                                userId = uid,
+                                                gpIndex = visTrack,
+                                                version = ver,
+                                                // best=1 + lap_asc：该车手在该赛道该版本的最快圈，
+                                                // 与赛道榜 `DISTINCT ON (user_id) ORDER BY lap_ms ASC`
+                                                // 是同一条（服务端 driver.rs 的 best 分支按 lap_ms 相等判）。
+                                                bestOnly = true,
+                                                sort = "lap_asc",
+                                                limit = 1,
+                                            )
+                                        }
+                                        // 弹窗可能已被关掉、或用户又点了别的行 →
+                                        // 代次不符即丢弃，不把旧结果写到新弹窗上。
+                                        if (!detailMounted || mySeq != detailSeq) return@launch
+                                        detailLoading = false
+                                        detailEntry = page.entries.firstOrNull()
+                                    }
+                                }
                             },
                             modifier = Modifier.animateItem(
                                 fadeInSpec = tween(250),
@@ -447,6 +511,37 @@ fun LeaderboardScreen() {
             }
             }
         }
+    }
+
+    // ── 圈速详情弹窗（2026-10-28）──
+    // 挂在 Scaffold **之后**（与 DriverScreen 的 LapRow 内挂载同一模式）：弹窗是独立
+    // 浮层，不参与页面布局。双变量驱动进出动画，两个回调语义必须分开：
+    //   - `onDismissRequest`（点窗外/返回键/「关闭」按钮）只翻 show=false → 播放退场动画；
+    //   - `onDismissFinished`（动画真正结束）才卸挂载，并在「查看主页」路径上补跳转。
+    if (detailMounted) {
+        LapDetailDialog(
+            entry = detailEntry,
+            show = detailShow,
+            onDismissRequest = { detailShow = false },
+            onDismissFinished = {
+                detailMounted = false
+                // 若这次关闭来自「查看主页」→ 退场动画播完再跳，避免弹窗与页面转场重叠。
+                detailNavUserId?.let { uid ->
+                    detailNavUserId = null
+                    navigator.push(Route.Driver(uid))
+                }
+            },
+            // 加载中 → 「加载中…」；请求回来了但没有记录（服务端没这条 / 网络失败）
+            // → 「加载失败」。两种态都不影响底部按钮（「查看主页」不依赖详情数据）。
+            pendingText = if (detailLoading) "加载中…" else "加载失败",
+            onSecondary = detailUserId.takeIf { it.isNotEmpty() }?.let { uid ->
+                {
+                    // 只置标记 + 关弹窗；真正的 push 在 onDismissFinished 里做。
+                    detailNavUserId = uid
+                    detailShow = false
+                }
+            },
+        )
     }
 }
 

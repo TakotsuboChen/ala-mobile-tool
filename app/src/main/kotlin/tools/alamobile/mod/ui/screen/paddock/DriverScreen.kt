@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -1201,14 +1202,124 @@ private fun LapRow(e: PaddockClient.DriverLap, rowShape: Shape, showDivider: Boo
  *    12sp 的实际字宽会变，写死会让第二列起始位置错位。
  * ⚠️ 缺失一律显示「缺失」（用户 2026-10-26 定案：双值项两个值位**各显示一次**
  *    「缺失」），不要跳过不渲染——那样"旧记录没数据"和"数据恰好正常"无法区分。
+ *
+ * ## 两处复用（2026-10-28）
+ *
+ * 本弹窗同时被**车手主页**（`LapRow`）与**计时赛排行榜·赛道榜**（`LeaderboardScreen`）
+ * 使用。两处差异只有两点，都用参数表达，**不要复制第二份布局**：
+ * - 赛道榜的行只有榜单摘要（`TrackEntry`），完整记录要点击时二次请求
+ *   `/v1/driver?best=1&sort=lap_asc&limit=1` 才能拿到 ⇒ 数据未就绪时 `entry == null`，
+ *   正文区显示 [pendingText]（「加载中…」/「加载失败」）。
+ * - 赛道榜底部要「关闭 + 查看主页」双按钮 ⇒ 传 [onSecondary]；车手主页传 null，
+ *   保持原来的单按钮「关闭」（用户 2026-10-28 定案：车手主页不跟着改）。
  */
 @Composable
-private fun LapDetailDialog(
-    entry: PaddockClient.DriverLap,
+internal fun LapDetailDialog(
+    /**
+     * 圈速记录。**null = 数据未就绪**（赛道榜二次请求在途/失败），
+     * 此时正文区显示 [pendingText]，标题与底部按钮照常渲染。
+     */
+    entry: PaddockClient.DriverLap?,
     show: Boolean,
     onDismissRequest: () -> Unit,
     onDismissFinished: () -> Unit,
+    /** `entry == null` 时正文区的提示文案。null → 「加载失败」。 */
+    pendingText: String? = null,
+    /**
+     * 右侧第二个按钮（蓝色）的点击回调。**null = 不渲染第二按钮**，
+     * 底部保持单按钮「关闭」铺满（车手主页的既有形态）。
+     */
+    onSecondary: (() -> Unit)? = null,
+    secondaryLabel: String = "查看主页",
 ) {
+    OverlayDialog(
+        show = show,
+        // 点窗外/返回键 → 只翻 show（播退场动画），挂载由 onDismissFinished 卸。
+        onDismissRequest = onDismissRequest,
+        onDismissFinished = onDismissFinished,
+        content = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                // 标题居中粗体（项目铁律：标题居中、正文左对齐）。
+                Text(
+                    text = "圈速详情",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    // 标题也套 tnum（整个弹窗统一等宽，用户 2026-10-26 定案）。
+                    style = MiuixTheme.textStyles.main.copy(
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                    ).merge(DriverTabularDigits),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (entry != null) {
+                    LapDetailBody(entry)
+                } else {
+                    // 数据未就绪：正文区给一行提示，标题与按钮照常——
+                    // 用户点下去立刻有反馈（不是"点了没动静等 500ms"），
+                    // 且「查看主页」不依赖详情数据，加载期间也可点。
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            // 与正文同款 `weight(1f, fill = false)`：内容短时按内容收拢，
+                            // 不把弹窗撑成固定高度（见下方正文的注释）。
+                            .weight(1f, fill = false)
+                            .padding(vertical = 28.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = pendingText ?: "加载失败",
+                            fontSize = 14.sp,
+                            color = colorScheme.onBackground.copy(alpha = 0.5f),
+                        )
+                    }
+                }
+                // ── 底部按钮 ──
+                // 单按钮（车手主页）：蓝底「关闭」铺满，与项目其它弹窗一致。
+                // 双按钮（赛道榜）：左灰「关闭」+ 右蓝「查看主页」，各占一半。
+                if (onSecondary == null) {
+                    TextButton(
+                        text = "关闭",
+                        // ⚠️ 与 onDismissRequest 同一语义：只翻 show 播退场动画。
+                        onClick = onDismissRequest,
+                        colors = ButtonDefaults.textButtonColorsPrimary(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        // 左侧「关闭」不传 colors → 走 miuix 默认次要色（灰）。
+                        TextButton(
+                            text = "关闭",
+                            onClick = onDismissRequest,
+                            modifier = Modifier.weight(1f),
+                        )
+                        // 20dp 间隔 = 项目其它双按钮弹窗的既有取值（PaddockPagerMiuix）。
+                        Spacer(Modifier.width(20.dp))
+                        TextButton(
+                            text = secondaryLabel,
+                            onClick = onSecondary,
+                            colors = ButtonDefaults.textButtonColorsPrimary(),
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+        },
+    )
+}
+
+/**
+ * 圈速详情的**正文**（两列网格 15 行），从 [LapDetailDialog] 抽出。
+ *
+ * ⚠️ **必须独立成 composable，不能在 `LapDetailDialog` 里写 `if (entry == null)`**：
+ *    下方三处 `remember`（车型反查 / 项目名最宽 / 值位最宽）都依赖 `entry`，
+ *    Compose 要求 remember 的调用次数在重组间稳定——条件调用会直接抛运行时异常。
+ */
+@Composable
+private fun ColumnScope.LapDetailBody(entry: PaddockClient.DriverLap) {
     // 车型展示名：服务端只给 carId+era 整数，这里用 CarCatalog 反查渲染
     // 「2026 梅赛德斯-AMG W17」。查不到（未知车/缺失）→ null → 显示「缺失」。
     val carLabel = remember(entry.carId, entry.carEra) {
@@ -1342,103 +1453,70 @@ private fun LapDetailDialog(
         with(density) { measurer.measure(widest, valueStyle, softWrap = false).size.width.toDp() }
     }
 
-    OverlayDialog(
-        show = show,
-        // 点窗外/返回键 → 只翻 show（播退场动画），挂载由 onDismissFinished 卸。
-        onDismissRequest = onDismissRequest,
-        onDismissFinished = onDismissFinished,
-        content = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                // 标题居中粗体（项目铁律：标题居中、正文左对齐）。
+    // 可滚动正文：15 行在小屏/大字号下会超过卡片 2/3 屏上限。
+    // ⚠️ `weight(1f, fill = false)`：让正文成为"可让渡空间"的一方，
+    //    超限时先收缩并滚动，而不是把底部按钮压扁（项目已踩过的坑）。
+    // 外层 `ColumnScope` 提供 weight——本函数是 `ColumnScope` 扩展，见签名。
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .weight(1f, fill = false)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        items.forEach { item ->
+            Row(modifier = Modifier.fillMaxWidth()) {
+                // 项目名：固定宽度 → 所有值列起始 x 恒等（左对齐一列）。
+                // 与值列之间留 40dp：24dp 时两列仍显拥挤，标签与值
+                // 读不出明显的分组分隔（2026-10-26 两次实机反馈，12→24→40）。
+                // ⚠️ 这个间距只影响「标签→值1」，值1→值2 是另一个
+                //     `Spacer(32.dp)`——两者刻意不等，标签侧要更宽。
                 Text(
-                    text = "圈速详情",
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                    // 标题也套 tnum（整个弹窗统一等宽，用户 2026-10-26 定案）。
-                    style = MiuixTheme.textStyles.main.copy(
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                    ).merge(DriverTabularDigits),
-                    modifier = Modifier.fillMaxWidth(),
+                    text = item.label,
+                    style = labelStyle,
+                    color = colorScheme.onBackground.copy(alpha = 0.6f),
+                    maxLines = 1,
+                    modifier = Modifier.width(labelWidth + 40.dp),
                 )
-                // 可滚动正文：15 行在小屏/大字号下会超过卡片 2/3 屏上限。
-                // ⚠️ `weight(1f, fill = false)`：让正文成为"可让渡空间"的一方，
-                //    超限时先收缩并滚动，而不是把底部按钮压扁（项目已踩过的坑）。
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f, fill = false)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    items.forEach { item ->
-                        Row(modifier = Modifier.fillMaxWidth()) {
-                            // 项目名：固定宽度 → 所有值列起始 x 恒等（左对齐一列）。
-                            // 与值列之间留 40dp：24dp 时两列仍显拥挤，标签与值
-                            // 读不出明显的分组分隔（2026-10-26 两次实机反馈，12→24→40）。
-                            // ⚠️ 这个间距只影响「标签→值1」，值1→值2 是另一个
-                            //     `Spacer(24.dp)`——两者刻意不等，标签侧要更宽。
-                            Text(
-                                text = item.label,
-                                style = labelStyle,
-                                color = colorScheme.onBackground.copy(alpha = 0.6f),
-                                maxLines = 1,
-                                modifier = Modifier.width(labelWidth + 40.dp),
-                            )
-                            if (item.v2 == null) {
-                                // ── 单值项：吃满剩余宽度 ──
-                                // ⚠️ **不要**给它 `width(valueWidth)`：那是双值项
-                                // 单个值位的固定宽度（按 "-100.00" 量的），单值项的
-                                // 内容（赛道名 / 时间）远宽于此，套上去会被截断
-                                // （2026-10-26 实机：「2026-10-」只显示到日期一半）。
-                                // 单值项没有"第二个值要对齐"的诉求，就该铺满。
-                                Text(
-                                    text = item.v1,
-                                    style = valueStyle,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f),
-                                )
-                            } else {
-                                // ── 双值项：两个值位各用**实测最宽值**的宽度 ──
-                                // 对齐由固定宽度保证；间距由 `Spacer(32.dp)` 控制，
-                                // 不再被 weight 平分推远。
-                                // ⚠️ 32dp 是用户 2026-10-27 定案（原 24dp 略挤），
-                                //    刻意只加 8dp：再宽两个数字就散成两列、读不成一组。
-                                Text(
-                                    text = item.v1,
-                                    style = valueStyle,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.width(valueWidth),
-                                )
-                                Spacer(Modifier.width(32.dp))
-                                Text(
-                                    text = item.v2,
-                                    style = valueStyle,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.width(valueWidth),
-                                )
-                            }
-                        }
-                    }
+                if (item.v2 == null) {
+                    // ── 单值项：吃满剩余宽度 ──
+                    // ⚠️ **不要**给它 `width(valueWidth)`：那是双值项
+                    // 单个值位的固定宽度（按双值项实测最宽值量的），单值项的
+                    // 内容（赛道名 / 时间）远宽于此，套上去会被截断
+                    // （2026-10-26 实机：「2026-10-」只显示到日期一半）。
+                    // 单值项没有"第二个值要对齐"的诉求，就该铺满。
+                    Text(
+                        text = item.v1,
+                        style = valueStyle,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else {
+                    // ── 双值项：两个值位各用**实测最宽值**的宽度 ──
+                    // 对齐由固定宽度保证；间距由 `Spacer(32.dp)` 控制，
+                    // 不再被 weight 平分推远。
+                    // ⚠️ 32dp 是用户 2026-10-27 定案（原 24dp 略挤），
+                    //    刻意只加 8dp：再宽两个数字就散成两列、读不成一组。
+                    Text(
+                        text = item.v1,
+                        style = valueStyle,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.width(valueWidth),
+                    )
+                    Spacer(Modifier.width(32.dp))
+                    Text(
+                        text = item.v2,
+                        style = valueStyle,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.width(valueWidth),
+                    )
                 }
-                // 关闭按钮（蓝底，与项目其它弹窗一致）。
-                TextButton(
-                    text = "关闭",
-                    // ⚠️ 与 onDismissRequest 同一语义：只翻 show 播退场动画。
-                    onClick = onDismissRequest,
-                    colors = ButtonDefaults.textButtonColorsPrimary(),
-                    modifier = Modifier.fillMaxWidth(),
-                )
             }
-        },
-    )
+        }
+    }
 }
 
 /**
