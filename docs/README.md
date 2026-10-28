@@ -184,7 +184,7 @@
 
 | 文档 | 状态 | 内容 |
 |---|---|---|
-| [`design/PADDOCK_PLAN.md`](design/PADDOCK_PLAN.md) | 活跃 | 围场私服契约源：API 形状、积分公式、赛道显示名 |
+| [`design/PADDOCK_PLAN.md`](design/PADDOCK_PLAN.md) | 活跃 | 围场私服契约源：API 形状、积分公式、赛道显示名、圈速详情取数路径 |
 | [`design/ABS_LEVEL_DESIGN.md`](design/ABS_LEVEL_DESIGN.md) | 活跃 | ABS 档位调节设计（v2） |
 | [`design/TC_LEVEL_DESIGN.md`](design/TC_LEVEL_DESIGN.md) | 活跃 | TC 档位调节设计 |
 

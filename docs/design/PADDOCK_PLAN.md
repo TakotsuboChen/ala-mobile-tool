@@ -194,6 +194,18 @@ GET  /v1/leaderboard/points?version=&limit=&offset=   → 积分总榜/版本榜
 GET  /v1/leaderboard/track/{gp_index}?version=&limit=&offset= → 赛道榜（分页）
      条目含 gold（该车手个人最快圈是否零辅助 → 整行金色流光）+ rank（**全局名次**，非页内序号）
      响应含 total
+     **圈速详情的取数路径（2026-10-28 定案：服务端零改动）**：
+     赛道榜行只有榜单摘要，完整记录（created / pedal / tc / abs / car_id / setup）
+     在 `laps` 全量表里，`best_laps` 读模型没有 ⇒ 客户端点击时**二次请求**
+     `GET /v1/driver/{uid}?gp_index={visTrack}&version={visVersion}&best=1&sort=lap_asc&limit=1`
+     取那一条。两处同源：赛道榜是 `DISTINCT ON (b.user_id) ORDER BY lap_ms ASC`，
+     driver 的 `best=1` 分支按 `best_laps.lap_ms` 相等判，取到的必然是同一圈。
+     ⚠️ **筛选条件必须用 `visibleBoard` 的 (track, version)，不能用 `selectedTrack/selectedVersion`**：
+     榜单切换有 150ms 显式淡出窗口，这期间点到的仍是旧行，现读筛选条件会拿新条件
+     去查旧行 ⇒ 版本/赛道对不上的圈速，且**不报错**。
+     ⚠️ 否决「服务端扩展榜单端点 JOIN laps 一并下发」：响应体约 ×3（30 行 × 15 字段）、
+     要同步本契约并重新部署 VPS，换来的只是省一次 200~500ms 往返。
+     见 memory `lap-detail-via-driver-endpoint`。
 GET  /v1/me                      (Bearer) → {user_id, username, reg_seq, has_avatar, avatar_url, total_points}
     （2026-09-01 实现：模块重进后恢复登录态展示；total_points=计时赛总积分，与积分总榜同口径
      （v39 起=各版本独立计分累加，无成绩=0）；401=token 失效→模块自动登出；
