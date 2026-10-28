@@ -1,7 +1,7 @@
 # 跨进程数据通道调研（模块进程 → 游戏进程）
 
-> 状态：**活跃** · 最后编纂：2026-10-26
-> 一句话结论：模块进程 → 游戏进程的跨进程通道裁决：`Android/media` 跨包文件是唯一在三重约束下仍可达的通道，Remote Preferences 的 `remove()` 在 LSPosed 与 NPatch 两侧都不生效。
+> 状态：**活跃** · 最后编纂：2026-10-28
+> 一句话结论：模块进程 → 游戏进程的跨进程通道裁决：`Android/media` 跨包文件是唯一在三重约束下仍可达的通道，Remote Preferences 的 `remove()` 在 LSPosed 与 NPatch 两侧都不生效。**`saved_at` 只代表「最后一次全量配置写入」——局部写（position）刷新它会让陈旧配置赢得仲裁（§10a）。**
 
 > 文档规范见 [`docs/README.md`](../README.md)。
 
@@ -193,6 +193,68 @@
 | B5 | 门控激活时 15s 主路径跳过，`PaddockUploader` 不启动 → 误锁后无自愈循环 | `AlaMobileModule.kt:510-514` | 误锁后必须重启游戏 |
 | B6 | `ConfigProvider.pushGameLog`/`readGameLog` + `PUSH/READ_GAME_LOG_METHOD` **零调用方**（死代码）；`ModConfig.withPositionDefaults` 死代码 | `ConfigProvider.kt:47-79`；`ModConfig.kt:969-975` | 无功能影响，清理项 |
 | B7 | `LogReceiver` 分片推送用 `FLAG_INCLUDE_STOPPED` 拉模块进程，被 ColorOS 拦 → 分片丢；导出只判空 3s 窗口，不重试 | `LogReceiver.kt:78-114` | 日志导出偶尔不全 |
+| B8 | `saveOverlayPosition` 刷新整份文件的 `saved_at`（只改 position 一个 key）→ 拖一下屏幕就让陈旧本地文件伪造出"最新"，赢下四源仲裁后盖掉权威配置 | `ModConfig.kt` `saveOverlayPosition` | ✅ **2026-10-28 已修**（删刷新 + 读取侧 ts 上限钳制，见 §10a） |
+
+### 10a. B8 详述：`saved_at` 的语义边界（2026-10-28 定案）
+
+**一句话结论**：`saved_at` 只代表「**最后一次全量配置写入**的时间」。任何只改单个
+key 的写入路径都不得刷新它——用整份文件的新鲜度信号表达一次局部改动，等于伪造新鲜度。
+
+**症状**：用户报「解除转向限制一直是开着的，进游戏要重新关-开一下才生效」。看起来像
+该功能坏了，实际是该开关**根本没被正确读到**，而其余十余项配置都正常。
+
+**因果链**（[V] 实机日志，vivo V2405A / 1.0.4 Beta 3）：
+
+```
+10-27 22:06:21  用户在配置页改配置 → 模块写 mailbox/provider/remote（saved_at=1793109981016）
+10-27 23:14:18  启动 → winner=ConfigProvider（local=1792895520139 更旧）→ initSteerLimit unlock=true ✅
+10-27 23:17:57  用户拖了一下工具按钮/踏板 → saveOverlayPosition 把 local 的 saved_at 刷成 1793114277759
+10-28 15:53:06  启动 → winner=local file（local 最新）→ initSteerLimit unlock=false ❌
+10-28 15:56:03  用户手动关-开一次 → 触发全量写入覆盖本地 → bypass 日志才开始输出
+```
+
+关键证据：那 15 分钟内模块进程**完全静默**（无 `Mailbox write OK`、无 `ConfigReceiver: merged`），
+所以刷新 `saved_at` 的只可能是唯一无日志的写入点 `saveOverlayPosition`。
+
+**为什么只错一项**：`saveOverlayPosition` 只覆盖 position 一个 key，其余字段原封不动。
+本地文件的非 position 内容停留在它上一次被全量写入时的状态。用户 10-25 之后只改过
+「解除转向限制」这一个开关，所以只有它读回旧值。
+
+**两处修复**：
+
+1. **写入侧**：`saveOverlayPosition` 删掉 `json.put(KEY_SAVED_AT, ...)`。position 本来
+   就靠 `mergePositionFromLocalPublic` **无条件**合并生效，不需要参与它并不代表的仲裁。
+2. **读取侧**（存量自愈，关键）：`local` 是模块侧配置的**下游副本**——`ConfigReceiver`
+   写入时直接拷贝模块 `write` 带下来的 `saved_at`，所以它的 ts **不可能超过上游**
+   `max(remote, provider, mailbox)`。超前即判污染、按 0 淘汰：
+
+   ```kotlin
+   val upstreamTs = maxOf(remoteTs, providerTs, mailboxTs)
+   val localTs = if (upstreamTs > 0L && localTsRaw > upstreamTs) 0L else localTsRaw
+   ```
+
+   **只修写入侧对存量用户无效**——污染值已经落进他们的本地文件。钳制让它在下次启动
+   自动被淘汰，用户无需任何操作。
+
+   ⚠️ 守卫 `upstreamTs > 0L` 不能省：三个上游都没有 `saved_at`（旧格式 JSON）时无从
+   判断谁超前，不钳可避免把所有旧格式用户打回默认配置。
+
+**已否决的方案**：
+- [X] **拆分 position 专用时间戳**（`pos_saved_at` + "只信更新的 position"）：彻底消除
+  隐式依赖，但要改字段 + 合并逻辑 + 旧文件迁移（无 `pos_saved_at` 时如何判定），
+  而 position 走无条件合并本来就没有问题。
+- [X] **local 不再参与仲裁**（只当 position 容器）：会让「游戏运行中改配置、广播送达、
+  之后模块进程再也起不来」的场景丢配置——local 是唯一落地副本。
+- [X] **让 position 写入参与仲裁**（即 B8 本身，`c283181`）：把全局量当局部信号用。
+
+**诊断手法**（可复用）：「`saved_at` 差值 + 该时刻是否有全量写入日志」两步就能把
+"哪个源赢了"推到"谁写了它"。判据是 `ConfigReceiver: merged` 出现在故障时刻**之后**，
+即可把嫌疑人锁死到唯一无日志的写入点。本次之前 `saveOverlayPosition` 正是零日志，
+已补一条（含 `saved_at=… (not refreshed)`，下次一眼可辨）。
+
+**验证判据**（三项，装机实测全中）：`position saved: … (not refreshed)` 的 `saved_at`
+恒为旧值；`Config arbitration: local saved_at=… 超过上游 …` 在污染的设备上出现；
+`winner=` 与 `initSteerLimit` 与配置页一致。
 
 ---
 
