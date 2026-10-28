@@ -1158,19 +1158,23 @@ object ModConfig {
      * Saves a single overlay position into the existing config without
      * touching other keys. Safe to call from the target game process.
      *
-     * ⚠️ **同时刷新 [KEY_SAVED_AT]**（2026-10-04）：拖拽/缩放位置是"用户刚改过
-     * 配置"，必须让本地源在新鲜度仲裁里排到最新。旧实现只写 position 字段——
-     * 位置更新对仲裁完全不可见，只因 [mergePositionFromLocalPublic] **无条件**用
-     * local 的 position 覆盖仲裁赢家才侥幸生效。这是隐式依赖：一旦有人给该合并
-     * 逻辑加"只信更新的源"之类的优化，拖拽保存的位置就会静默失效（实机日志
-     * 实证：local ts 停在 4 天前，remote 一直赢仲裁）。
+     * ⚠️ **绝不刷新 [KEY_SAVED_AT]**（2026-10-28 定案，推翻 2026-10-04 的
+     * `c283181`）。`saved_at` 的语义边界是「**最后一次全量配置写入**的时间」，
+     * 而本方法只改 position 一个 key —— 用整份文件的新鲜度信号去表达一次局部
+     * 改动，等于让拖一下屏幕就伪造出"配置是最新的"。四源新鲜度仲裁（[readFromTargetProcess]）
+     * 一旦让这个被顶高的 local 赢出，就会拿**一份非 position 字段全是陈旧的**
+     * JSON 覆盖掉 remote/provider/mailbox 里的权威值。
      *
-     * ⚠️ 刷新 saved_at 的**前提是两个写方都代表真实配置变更**：该文件（游戏进程
-     * externalFilesDir 的 JSON）还有第二个写方 [ConfigReceiver]（收模块广播时
-     * 合并写非 position 字段）——它拷贝的是模块 [write] 带下来的 saved_at，同样
-     * 对应一次真实改动，不会把"没改过的配置"顶成"看起来更新"。两条写路径字段
-     * 不相交（本方法只碰 position + saved_at；ConfigReceiver 跳过全部 position），
-     * 不会互相覆盖对方的内容。若日后引入第三个写方，需重新审视这条前提。
+     * 实机证据（2026-10-28，用户报「解除转向限制一直是开着的，进游戏要重新关-开
+     * 才生效」）：本地文件 saved_at 被一次 23:17:57 的拖拽顶到最新 → 次日启动
+     * `winner=local file` → `initSteerLimit unlock=false`（读到 10-25 的旧值），
+     * 而 10-27 那次启动 `winner=ConfigProvider` → `unlock=true` 正确。其余十余项
+     * 配置两次完全一致，因为用户 10-25 之后只改过这一个开关。
+     *
+     * position 本来就**不需要**靠 saved_at 竞争：[mergePositionFromLocalPublic]
+     * **无条件**用 local 的 position 覆盖仲裁赢家。`c283181` 当初把这条隐式依赖
+     * 当作隐患去消除，方向反了 —— 正确的做法是承认 position 走独立通道，而不是
+     * 让它参与一个它并不代表的仲裁。
      *
      * If the shared directory cannot be created (e.g. missing storage
      * permission on Android 10+), the save is silently skipped so the
@@ -1182,10 +1186,18 @@ object ModConfig {
             file.parentFile?.mkdirs()
             val json = if (file.exists()) JSONObject(file.readText()) else JSONObject()
             json.put(key, position.toJson())
-            json.put(KEY_SAVED_AT, System.currentTimeMillis())
             file.writeText(json.toString(2))
-        } catch (_: Throwable) {
+            // 低频诊断日志（拖拽结束才落盘，非高频路径）：本路径 2026-10-28 前
+            // 零日志，排查「本地配置被谁改新了」只能靠排除法。
+            Logger.i(
+                TAG,
+                "position saved: $key x=%.4f y=%.4f w=%.4f h=%.4f ".format(
+                    position.x, position.y, position.width, position.height
+                ) + "saved_at=${json.optLong(KEY_SAVED_AT, 0L)} (not refreshed)"
+            )
+        } catch (e: Throwable) {
             // Storage may not be writable from the target game process; ignore.
+            Logger.w(TAG, "position save failed: $key", e)
         }
     }
 
@@ -1301,7 +1313,31 @@ object ModConfig {
         val remoteTs = savedAt(remoteJson)
         val providerTs = savedAt(providerJson)
         val mailboxTs = savedAt(mailboxJson)
-        val localTs = savedAt(localJson)
+        val localTsRaw = savedAt(localJson)
+
+        // ⚠️ local 的 saved_at 上限钳制（2026-10-28）：local 是模块侧配置的
+        // **下游副本**——[ConfigReceiver] 写入时直接拷贝模块 [write] 带下来的
+        // saved_at，所以它的 ts **不可能超过上游**（remote/provider/mailbox）。
+        // 超过 ⇒ 一定是被「拖拽刷新 saved_at」的历史 bug（2026-10-04 ~ 2026-10-28
+        // 的 `saveOverlayPosition`）顶高的：那次写入只改了 position，其余字段
+        // 仍是旧的，却把整份文件标成了最新。
+        //
+        // 不钳制的话，**存量用户升级后依然会踩**——污染值已经落进他们的本地文件，
+        // 修 `saveOverlayPosition` 只对未来的写入生效。钳到 0（哨兵"最旧"）让
+        // 它被淘汰，下一轮全量写入（用户改任一开关）自然恢复。
+        //
+        // 不变量正常成立时（上游存在且 local 未超前）这条判据恒假，零副作用。
+        // 上游全为 0 时（三个源都没有 saved_at）不钳——那种情况下无从判断谁超前。
+        val upstreamTs = maxOf(remoteTs, providerTs, mailboxTs)
+        val localTs = if (upstreamTs > 0L && localTsRaw > upstreamTs) {
+            Logger.w(
+                TAG,
+                "Config arbitration: local saved_at=${localTsRaw} 超过上游 $upstreamTs " +
+                    "——疑似被历史 position 写入污染，按 0 处理（已淘汰）"
+            )
+            0L
+        } else localTsRaw
+
         val bestJson = when {
             remoteJson != null && remoteTs >= providerTs && remoteTs >= mailboxTs && remoteTs >= localTs -> remoteJson
             providerJson != null && providerTs >= mailboxTs && providerTs >= localTs -> providerJson
