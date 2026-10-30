@@ -125,6 +125,7 @@ The project uses a 6-digit `versionCode` encoding the semantic version, release 
 - **APK filename**: `Ala Mobile Tool v<versionName>.apk` (note the `v` prefix is added only in the filename, not in versionName).
 - **CI build APK** (non-tag push): `Ala Mobile Tool v<versionName> CI.apk` — `versionCode` stays identical to the latest Release; the ` CI` suffix is the only distinguisher.
 - **Single source of truth**: `versionName` lives in `app/build.gradle.kts`; CI extracts it from there to derive the APK filename. `module.prop` `version` must mirror it. `versionCode` must be consistent with the stage/sequence per the table above.
+- ⚠️ **CI 里提取 versionName 必须用带引号的精确匹配**（2026-10-30 教训）：`.github/workflows/sync-lsposed-mirror.yml` 曾用松匹配 `grep 'versionName'`，命中了 `app/build.gradle.kts` 顶部构建指纹注释里的散文行（`**versionName /`，无引号）⇒ `sed` 替换不掉引号就原样输出整段中文 ⇒ 镜像 tag 变成非法字符串 ⇒ `HTTP 422 tag_name is not well-formed`，LSPosed 镜像同步失败。正确形态 = `grep -oE 'versionName = "[^"]+"'`（与 `build.yml:90` 一致）。**往 `build.gradle.kts` 顶部加注释时，不要写含 `versionName`/`versionCode` 字样且形似赋值的散文行**。诊断时注意 `gh api .../jobs/<id>/logs` 会整段回显脚本源码，`echo "::error::…"` 是代码不是输出（见全局记忆 `gh-actions-log-shows-script-source`）。
 
 ### Release Stage Policy
 
