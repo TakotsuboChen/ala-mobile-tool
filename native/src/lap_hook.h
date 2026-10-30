@@ -25,8 +25,15 @@ typedef struct {
     int32_t lap_seq;    ///< 单调递增事件序号（0 = 无待传），Java 去重用
     int32_t gp_index;   ///< 0..15（buildIndex − 2）
     int32_t lap_ms;     ///< 完整圈时（毫秒）
-    /// 整圈辅助配置码（0 = 缺失）。非 0 时表示**整圈全程未变过**，
-    /// 可安全作为该圈的成绩属性上报。见 lap_set_assist_config 的 epoch 说明。
+    /// 整圈辅助配置码（0 = 缺失，-1 = 该维**无效**）。见 lap_set_assist_config。
+    ///
+    /// 三态语义（2026-10-30 起）：
+    ///   - `0`（缺失）：根本没拿到配置（旧模块 / native 未就绪 / 该维未推过）。
+    ///   - `-1`（无效）：配置拿到了，但**本圈中途变过**，无法确定整圈用的是哪档
+    ///     ——不可作为成绩属性采信（改配置即等于改变了这一圈的竞赛条件）。
+    ///   - `>= 1`（有效）：整圈全程未变，可安全上报。
+    /// 三者必须区分：把"无效"折成"缺失"会让用户看不出是自己中途改了配置
+    /// （这正是 2026-10-30 之前的行为，用户实机报障后才改的）。
     int32_t pedal_mode;   ///< 1=off(原生) 2=single 3=dual
     int32_t tc_mode;      ///< 1=default 2=custom
     int32_t tc_strength;  ///< 1=off 2=weak 3=medium 4=strong 5=stock
@@ -80,14 +87,22 @@ bool lap_install_hooks(const lap_hook_config_t *config);
 bool lap_poll_upload(lap_upload_t *out);
 void lap_mark_upload_consumed(int32_t lap_seq);
 
-// ─ 整圈辅助配置一致性（2026-09-18）──
+// ─ 整圈辅助配置一致性（2026-09-18，2026-10-30 改逐维）──
 // 由 Java 在「启动时 + ConfigReceiver 收到广播时」推入当前配置的 5 个码
-// （0 = 缺失/未知）。native 只在**整圈全程配置未变过**时才把配置随圈上报——
-// 圈中途改过配置的圈记「缺失」（无法证明整圈一致）。
+// （0 = 缺失/未知）。
 //
-// 实现：任何一维与上次不同 → epoch++；LLV.Awake（新会话=第一圈起点）与每次
-// order==2（上一圈结束=下一圈起点）时把 epoch 快照到 boundary。圈完成时比对
-// epoch == boundary_epoch，不等即全填 0。
+// **逐维判定**（2026-10-30 起）：只有真正变过的维度才记「无效」（-1），
+// 其余维度照常上报。旧实现是"任一维变过 → 五维全 0 = 缺失"，会让用户圈中
+// 只改了 ABS、踏板与 TC 也一起丢失并导致整圈被屏蔽（实机报障后改）。
+//
+// 维度归属（5 码 → 3 逻辑维）：
+//   pedal → 踏板维；tc_mode + tc_strength → TC 维；abs_mode + abs_strength → ABS 维。
+//   TC/ABS 按**折叠后的生效档位**比对（`default` ≡ `custom/stock`），与展示层
+//   服务端 `collapse_mode` 规则一致——否则"切到默认又切回自定义最高"这种计分
+//   等价的操作用户会被误标无效。
+//
+// 实现：逐维维护 epoch；LLV.Awake（新会话=第一圈起点）与每次 order==2（上一圈
+// 结束=下一圈起点）时把 epoch 快照到 boundary。圈完成时逐维比对。
 // ⚠️ 用 epoch 而非逐维比对：「改了又改回」逐维比对会误判一致，epoch 会抓住。
 void lap_set_assist_config(int pedal_mode, int tc_mode, int tc_strength,
                            int abs_mode, int abs_strength);

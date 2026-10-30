@@ -154,7 +154,7 @@ enum {
 };
 static volatile float g_upload_setup[US_COUNT] = {0};
 
-// ── 整圈辅助配置一致性检测（epoch 快照法）──
+// ── 整圈辅助配置一致性检测（**逐维** epoch 快照法）──
 //
 // 目标：判断"这一整圈里玩家的踏板/TC/ABS 配置有没有变过"。配置是离散枚举
 // （不可能连续变化），所以只需检测**变更事件**，不必逐帧采样。
@@ -162,16 +162,34 @@ static volatile float g_upload_setup[US_COUNT] = {0};
 // 为什么用 epoch 计数器而不是逐个字段比对：配置变了又改回原值时，逐字段比
 // 对会判"没变"（属于碰运气式漏判）；epoch 单调递增能抓住任何一次变更历史。
 //
-// 边界语义：boundary_epoch 表示"当前这一圈的起点时的配置版本"。
+// ⚠️ **2026-10-30 改为逐维计数**（此前是单一全局 epoch）：旧的单计数器让
+//    "圈中只改了 ABS"也把踏板与 TC 一起判成缺失——三项一起丢，用户看到的是
+//    整圈「配置缺失」并被屏蔽。现在每个逻辑维度各自计数，只有真正变过的维度
+//    才记「无效」，其余照常上报。**逻辑维度是 3 个不是 5 个**：TC/ABS 各由
+//    (mode, strength) 两列构成，但展示层早已折叠成单一档位（`default` ≡
+//    `custom/stock`，见服务端 `collapse_mode`），故按折叠后的生效档位比对。
+//
+// 边界语义：boundary_epoch[k] 表示"当前这一圈的起点时，第 k 维的配置版本"。
 //   - LLV.Awake（= 场景加载 = 第一圈开始）时快照；
 //   - 每次 order==2 事件（= 上一圈结束 = 下一圈开始）时快照；
-//   - 圈完成时比对 cur_epoch == boundary_epoch，不等则本圈配置记缺失。
+//   - 圈完成时逐维比对 cur_epoch[k] == boundary_epoch[k]，不等则该维记无效。
 // 单写者：全部在主线程（Java 的 lap_set_assist_config 走 JNI，任意线程——故
 // 该函数对字段写用简单比较 + 赋值，与主线程读的竞态后果仅是"某一圈被判不一致"，
 // 属于安全侧的误判，不会错误地宣称一致）。
+//
+// 维度下标（与 g_assist_cfg 的前 3 个逻辑维对应，见 ASSIST_DIM_*）。
+enum { ASSIST_DIM_PEDAL = 0, ASSIST_DIM_TC = 1, ASSIST_DIM_ABS = 2, ASSIST_DIM_COUNT = 3 };
+
+// 该维「无效」哨兵码：配置拿到了，但本圈中途变过 ⇒ 不可采信。
+// ⚠️ 与 0（缺失 = 根本没拿到）必须区分——展示层据此分别渲染「无效」与「缺失」。
+// 负值不会与任何合法码（>= 1）或缺失（0）冲突。
+#define LAP_ASSIST_CODE_INVALID (-1)
+
 static volatile int32_t g_assist_cfg[5] = {0, 0, 0, 0, 0};
-static volatile int32_t g_assist_epoch = 0;
-static volatile int32_t g_assist_boundary_epoch = 0;
+// 逐维「折叠后的生效档位」——变更检测的比对基准（见 lap_set_assist_config）。
+static volatile int32_t g_assist_eff[ASSIST_DIM_COUNT] = {0, 0, 0};
+static volatile int32_t g_assist_epoch[ASSIST_DIM_COUNT] = {0, 0, 0};
+static volatile int32_t g_assist_boundary_epoch[ASSIST_DIM_COUNT] = {0, 0, 0};
 
 // ── 本圈「模块踏板实际使用占比」（2026-10-25）──
 //
@@ -840,9 +858,11 @@ static void proxy_llv_awake(void *this, void *method_info) {
     g_mode_gated = 0;
     g_session_diag_logged = 0;
     g_sector_diag_logged = 0;
-    // 新会话 = 第一圈的起点：配置版本快照。**不重置 epoch 本身**（它是配置的
-    // 变更历史计数，与游戏会话无关；Java 推配置时仍会照常递增）。
-    g_assist_boundary_epoch = g_assist_epoch;
+    // 新会话 = 第一圈的起点：配置版本快照（**逐维**）。**不重置 epoch 本身**
+    // （它是配置的变更历史计数，与游戏会话无关；Java 推配置时仍会照常递增）。
+    for (int k = 0; k < ASSIST_DIM_COUNT; k++) {
+        g_assist_boundary_epoch[k] = g_assist_epoch[k];
+    }
     // 踏板使用计数同样归零（新会话 = 第一圈起点）。
     g_pedal_active_frames = 0;
     g_pedal_total_frames = 0;
@@ -950,8 +970,11 @@ static void proxy_odometer_handle_sectors_times(void *this, int sector_order,
         // 取到局部变量（供下面的比对用），再把 boundary 推进到当前值——
         // 顺序颠倒会让本圈的比对退化成恒真（自己和自己比）。
         // 无效圈也推进：下一圈仍然从此刻开始。
-        int32_t lap_start_epoch = g_assist_boundary_epoch;
-        g_assist_boundary_epoch = g_assist_epoch;
+        int32_t lap_start_epoch[ASSIST_DIM_COUNT];
+        for (int k = 0; k < ASSIST_DIM_COUNT; k++) {
+            lap_start_epoch[k] = g_assist_boundary_epoch[k];
+            g_assist_boundary_epoch[k] = g_assist_epoch[k];
+        }
         // 踏板使用帧数：本圈快照取到局部变量（供下面判定 + 日志用），
         // 然后立即归零开始计下一圈。**无效圈也必须归零**——本圈统计到此为止。
         int32_t lap_pedal_active = g_pedal_active_frames;
@@ -985,24 +1008,53 @@ static void proxy_odometer_handle_sectors_times(void *this, int sector_order,
             // 定案：无物理阈值拒收（全放行）——validLap 位是唯一有效性门槛。
             if (g_current_gp_index >= 0) {
                 int32_t ms = (int32_t) (total_lap_time * 1000.0f + 0.5f);
-                // 辅助配置：整圈未经变更才随圈上报（否则五维全 0 = 缺失）。
-                int32_t cur_epoch = g_assist_epoch;
-                int consistent = (cur_epoch == lap_start_epoch);
-                if (consistent) {
-                    for (int i = 0; i < 5; i++) {
-                        g_upload_assist[i] = g_assist_cfg[i];
-                    }
+                // ── 辅助配置：**逐维**上报（2026-10-30 改）──
+                //
+                // 旧实现是"整圈任何一维变过 → 五维全 0 = 缺失"，导致用户只在
+                // 圈中动了 ABS，踏板与 TC 也一起丢失、整圈被屏蔽。现在每个逻辑
+                // 维各自比对 epoch：变过的维记 INVALID（哨兵码），其余照常上报。
+                //
+                // 为什么比 epoch 而不是比"圈起点值 vs 圈完成值"：用户改成 A 再
+                // 改回原值，两端比对会判"没变"——epoch 单调递增能抓住变更历史。
+                //
+                // 维度归属（5 个码 → 3 个逻辑维）：
+                //   [0] pedal        → 踏板维
+                //   [1] tc_mode, [2] tc_strength   → TC 维（成对）
+                //   [3] abs_mode, [4] abs_strength → ABS 维（成对）
+                // mode 与 strength 必须成对标记：服务端 `is_assist_missing` 逐列
+                // 判空，只标一半会被当成"管理端补录写了一半"的残缺状态。
+                int changed_dims = 0;
+                for (int k = 0; k < ASSIST_DIM_COUNT; k++) {
+                    if (g_assist_epoch[k] != lap_start_epoch[k]) changed_dims |= (1 << k);
+                }
+
+                if (changed_dims & (1 << ASSIST_DIM_PEDAL)) {
+                    // 踏板维：配置中途变过 ⇒ 无法确定这一圈算哪种输入方式。
+                    // ⚠️ 不沿用"按帧占比推断"——占比只能证明"模块有没有在写
+                    //    踏板"，证明不了"这一圈到底算单踏板还是双踏板"。安全侧
+                    //    取 INVALID。
+                    g_upload_assist[0] = LAP_ASSIST_CODE_INVALID;
+                    LOGI("LAPcfg: pedal dim changed mid-lap → INVALID (lap %s)", now_buf);
+                } else {
+                    int32_t cfg_pedal = g_assist_cfg[0];
+                    g_upload_assist[0] = cfg_pedal;
                     // ── 踏板维按**实际使用**修正（2026-10-25）──
                     // 设置值是 single/dual（= 2/3）但本圈模块踏板的活跃帧
                     // 不足一半 ⇒ 这一圈实际是拿游戏原生按键跑的，必须报
                     // off（= 1），否则白吃服务端 +10% 线性踏板加成。
                     // 设置本来就是 off 时无需修正（本来就是 1）。
-                    int32_t cfg_pedal = g_upload_assist[0];
                     if (cfg_pedal == 2 || cfg_pedal == 3) {
                         int used_pct = (lap_pedal_total > 0)
                                 ? (int) ((int64_t) lap_pedal_active * 100 / lap_pedal_total)
                                 : 0;
-                        if (used_pct < PEDAL_USAGE_MIN_PCT) {
+                        if (lap_pedal_total <= 0) {
+                            // 一帧都没采到（圈完成瞬间被取消/重开等）⇒ 无证据。
+                            // 旧行为是降级成 off，那等于"没证据就断言用了原生
+                            // 按键"；标 INVALID 才是诚实表达（用户 2026-10-30 定案）。
+                            g_upload_assist[0] = LAP_ASSIST_CODE_INVALID;
+                            LOGI("LAPcfg: pedal frames=0 → INVALID (cfg=%d, lap %s)",
+                                 cfg_pedal, now_buf);
+                        } else if (used_pct < PEDAL_USAGE_MIN_PCT) {
                             g_upload_assist[0] = 1;  // off（原生按键）
                             LOGI("LAPcfg: pedal usage %d/%d frames (%d%%) < %d%% → report off "
                                  "(cfg=%d, lap %s)",
@@ -1018,10 +1070,27 @@ static void proxy_odometer_handle_sectors_times(void *this, int sector_order,
                         LOGI("LAPcfg: pedal usage %d/%d frames (cfg=%d = native keys, no correction)",
                              lap_pedal_active, lap_pedal_total, cfg_pedal);
                     }
+                }
+
+                // TC / ABS：两列成对上报或成对标无效。
+                const int tc_ok  = !(changed_dims & (1 << ASSIST_DIM_TC));
+                const int abs_ok = !(changed_dims & (1 << ASSIST_DIM_ABS));
+                g_upload_assist[1] = tc_ok  ? g_assist_cfg[1] : LAP_ASSIST_CODE_INVALID;
+                g_upload_assist[2] = tc_ok  ? g_assist_cfg[2] : LAP_ASSIST_CODE_INVALID;
+                g_upload_assist[3] = abs_ok ? g_assist_cfg[3] : LAP_ASSIST_CODE_INVALID;
+                g_upload_assist[4] = abs_ok ? g_assist_cfg[4] : LAP_ASSIST_CODE_INVALID;
+
+                if (changed_dims) {
+                    LOGI("LAPcfg: config changed mid-lap → %s%s%s marked INVALID "
+                         "(epochs %d/%d/%d vs lap-start %d/%d/%d, lap %s)",
+                         (changed_dims & 1) ? "pedal " : "",
+                         (changed_dims & 2) ? "tc " : "",
+                         (changed_dims & 4) ? "abs" : "",
+                         g_assist_epoch[0], g_assist_epoch[1], g_assist_epoch[2],
+                         lap_start_epoch[0], lap_start_epoch[1], lap_start_epoch[2],
+                         now_buf);
                 } else {
-                    for (int i = 0; i < 5; i++) g_upload_assist[i] = 0;
-                    LOGI("LAPcfg: config changed mid-lap (epoch %d != lap-start %d) → assist marked missing",
-                         cur_epoch, lap_start_epoch);
+                    LOGI("LAPcfg: assist config consistent whole lap (lap %s)", now_buf);
                 }
                 g_upload_gp = g_current_gp_index;
                 g_upload_lap_ms = ms;
@@ -1194,18 +1263,54 @@ void lap_note_pedal_frame(int pedal_active) {
     if (pedal_active) g_pedal_active_frames++;
 }
 
+// TC/ABS 的 (mode, strength) 折叠成单一"生效档位"码，用于**变更检测**。
+//
+// 为什么必须折叠：展示层早已把 `default` 与 `custom/stock` 视为同一档
+// （服务端 `collapse_mode`：default → "stock"，即"默认就是最高"）。若按原始
+// 两列比对，用户把 TC 从「自定义/最高」切成「默认」（计分上完全等价、展示上
+// 也完全一样）会被判成"圈中改过配置" → 该维误标无效。
+//
+// ⚠️ 本函数的折叠规则必须与服务端 `laps.rs::collapse_mode` 逐字一致：
+//    mode=0（缺失）        → 0（缺失）
+//    mode=1（default）     → 4（= stock，强度码 ordinal+1）
+//    mode=2（custom）      → strength 原样
+// 强度码表 = TcStrength.ordinal+1：off=1 weak=2 medium=3 strong=4 stock=5。
+#define ASSIST_STRENGTH_STOCK_CODE 5
+
+static inline int32_t collapse_mode(int32_t mode, int32_t strength) {
+    if (mode <= 0) return 0;              // 缺失
+    if (mode == 1) return ASSIST_STRENGTH_STOCK_CODE;  // default ≡ stock
+    return strength;                      // custom → 用真实档位
+}
+
 void lap_set_assist_config(int pedal_mode, int tc_mode, int tc_strength,
                            int abs_mode, int abs_strength) {
     int32_t next[5] = {pedal_mode, tc_mode, tc_strength, abs_mode, abs_strength};
-    int changed = 0;
     for (int i = 0; i < 5; i++) {
-        if (g_assist_cfg[i] != next[i]) {
-            changed = 1;
-            g_assist_cfg[i] = next[i];
+        if (g_assist_cfg[i] != next[i]) g_assist_cfg[i] = next[i];
+    }
+
+    // 逐维比对**折叠后的生效档位**（不是原始列），只有真正变过的维度才 +1。
+    int32_t eff[ASSIST_DIM_COUNT] = {
+        pedal_mode,
+        collapse_mode(tc_mode, tc_strength),
+        collapse_mode(abs_mode, abs_strength),
+    };
+    int changed_dims = 0;
+    for (int k = 0; k < ASSIST_DIM_COUNT; k++) {
+        if (g_assist_eff[k] != eff[k]) {
+            g_assist_eff[k] = eff[k];
+            g_assist_epoch[k]++;
+            changed_dims |= (1 << k);
         }
     }
-    if (!changed) return;
-    g_assist_epoch++;
-    LOGI("LAPcfg: assist config updated pedal=%d tcm=%d tcs=%d absm=%d abss=%d (epoch=%d)",
-         pedal_mode, tc_mode, tc_strength, abs_mode, abs_strength, g_assist_epoch);
+    if (!changed_dims) return;
+    LOGI("LAPcfg: assist config updated pedal=%d tcm=%d tcs=%d absm=%d abss=%d "
+         "(changed dims=%s%s%s, epochs=%d/%d/%d)",
+         pedal_mode, tc_mode, tc_strength, abs_mode, abs_strength,
+         (changed_dims & 1) ? "pedal " : "",
+         (changed_dims & 2) ? "tc " : "",
+         (changed_dims & 4) ? "abs" : "",
+         g_assist_epoch[0], g_assist_epoch[1], g_assist_epoch[2]);
 }
+

@@ -586,7 +586,23 @@ object ModConfig {
      * 每次配置变化都会整份重推）。
      */
     object LapAssistCodes {
+        /** 缺失：根本没拿到配置（旧模块 / native 未就绪 / 该维未推过）。 */
         const val MISSING = 0
+
+        /**
+         * 无效：配置拿到了，但**本圈中途变过**，无法确定整圈用的是哪档。
+         *
+         * 与 [MISSING] 必须区分（2026-10-30 用户定案）：把"无效"折成"缺失"
+         * 会让用户看不出是自己中途改了配置——实机报障场景是「圈中改 ABS →
+         * 整圈五维全缺 → 被屏蔽」，用户只看到「缺失」，不知道是自己造成的。
+         *
+         * ⚠️ 负值不会与合法码（>= 1）或缺失（0）冲突。native 侧同值见
+         *    `lap_hook.c` 的 `LAP_ASSIST_CODE_INVALID`。
+         */
+        const val INVALID = -1
+
+        /** 无效维上报给服务端的字面量 token（服务端 `normalized` 白名单需放行）。 */
+        const val INVALID_TOKEN = "invalid"
 
         fun pedalCode(m: PedalMode): Int = m.ordinal + 1
         /** mode 只有两值：false=default、true=custom（顺序固定，勿改）。 */

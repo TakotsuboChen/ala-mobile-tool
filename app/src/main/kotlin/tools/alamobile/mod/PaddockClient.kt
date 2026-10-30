@@ -644,7 +644,13 @@ object PaddockClient {
         val absMode: String?,
         val absStrength: String?,
     ) {
-        /** 五维全缺（native 未就绪 / 整圈配置变动过 / 旧数据）→ 不上报字段。 */
+        /**
+         * 五维全缺（native 未就绪 / 旧数据）→ 不上报字段。
+         *
+         * ⚠️ 2026-10-30 起「无效」不再折成缺失：整圈配置中途变过的维上报字面量
+         *    `"invalid"`，与「缺失（null）」在服务端可区分。故这里只剩"真的什么
+         *    都没拿到"一种情况。
+         */
         val allMissing: Boolean
             get() = pedalMode == null && tcMode == null && tcStrength == null &&
                 absMode == null && absStrength == null
@@ -662,16 +668,24 @@ object PaddockClient {
             val MISSING = LapAssist(null, null, null, null, null)
 
             /**
-             * native 单槽的 5 个配置码（0 = 缺失）→ 枚举字符串。
+             * native 单槽的 5 个配置码 → 枚举字符串 / `"invalid"` / null。
              *
-             * ⚠️ 码是**整圈一致性的载体**：native 只在整圈配置未变过时才填非 0，
-             * 否则整组填 0。故这里逐维解码即可，无需再判一致性。
+             * 三态（2026-10-30 起，见 `native/src/lap_hook.h` 的 lap_upload_t）：
+             *   - `0`  → null（缺失：根本没拿到配置，不发字段）
+             *   - `-1` → `"invalid"`（无效：本圈中途变过，不可采信但**不是**缺失）
+             *   - `>=1` → 枚举字符串（有效）
+             *
+             * ⚠️ 判据是 `code == INVALID` 而非 `code < 0` 之外的范围判断——0 与 -1
+             *    必须分开，否则用户看不出"是我中途改了配置"还是"模块没读到"。
              */
             fun fromCodes(out: IntArray): LapAssist {
                 val c = tools.alamobile.mod.config.ModConfig.LapAssistCodes
-                // 解码函数返回 "" 表示缺失 → 转 null（null 维不发字段，服务端记缺失）
-                fun str(code: Int, f: (Int) -> String): String? =
-                    if (code <= c.MISSING) null else f(code).takeIf { it.isNotEmpty() }
+                // 解码函数返回 "" 表示无效码 → 转 null（null 维不发字段）
+                fun str(code: Int, f: (Int) -> String): String? = when {
+                    code == c.INVALID -> c.INVALID_TOKEN
+                    code <= c.MISSING -> null
+                    else -> f(code).takeIf { it.isNotEmpty() }
+                }
                 return LapAssist(
                     pedalMode = str(out[3], c::pedalName),
                     tcMode = str(out[4], c::modeName),
