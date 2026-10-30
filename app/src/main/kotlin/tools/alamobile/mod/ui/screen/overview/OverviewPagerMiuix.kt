@@ -253,7 +253,7 @@ fun OverviewPagerMiuix(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(start = 12.dp)
+                                .padding(start = 12.dp, end = 12.dp)
                                 .offset { IntOffset(0, topOffsetPx) }
                                 .graphicsLayer { alpha = capsuleAlpha.value },
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -261,7 +261,12 @@ fun OverviewPagerMiuix(
                         ) {
                             coexistenceStatus?.let {
                                 VersionCapsule(
-                                    label = "Ala Mobile Pro",
+                                    // 文案用短名「Ala Mobile」而非「Ala Mobile Pro」：
+                                    // 胶囊行在窄屏上总宽约 316dp（8.0.6 Fix 3 已适配态），
+                                    // 320dp 屏几乎贴边、更窄的设备会溢出裁掉右侧 NPatch 胶囊。
+                                    // 去掉 "Pro" 省约 15dp，配合右端 12dp padding 可覆盖 320dp 屏。
+                                    // 应用全名仍在 README / 安装说明里，这里只是空间受限的显示。
+                                    label = "Ala Mobile",
                                     status = it
                                 )
                             }
