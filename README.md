@@ -3,472 +3,153 @@
 <p align="center">
   <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/LSPosed%20API-102-green" alt="LSPosed API">
-  <img src="https://img.shields.io/badge/version-1.0.3-green" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.4-green" alt="Version">
   <img src="https://img.shields.io/badge/target-Ala%20Mobile-red" alt="Target">
 </p>
 
 <p align="center">
   <strong>Ala Mobile 的体验增强 LSPosed 模块</strong><br>
-  线性踏板操控 &middot; 原生 TC/ABS 控制 &middot; 围场计时赛排行榜 &middot; 音乐替换 &middot; V10 引擎声浪 &middot; 内购解锁
+  线性踏板 · 原生 TC/ABS 调校 · 围场计时赛排行榜 · 音乐与声浪替换 · 内购解锁
 </p>
+
+---
+
+> ⚠️ **免责声明**：本项目仅供 **个人学习、技术研究与逆向工程教学** 使用。它通过修改游戏运行时
+> 行为（内存读写、函数钩子、输入注入）增强操控体验，**可能违反游戏服务条款并导致账号封禁**。
+> 请自行承担全部风险，作者不承担任何直接或间接损失的责任。与游戏开发商、发行商无任何关联。
 
 ---
 
 ## 演示
 
-### 踏板拓扑
-
 | 单踏板 | 双踏板 |
 |---|---|
-| <img src="docs/images/single-pedal.gif" width="360" alt="单踏板演示"> | <img src="docs/images/dual-pedal.gif" width="360" alt="双踏板演示"> |
+| <img src="docs/images/single-pedal.gif" width="340"> | <img src="docs/images/dual-pedal.gif" width="340"> |
 
-单踏板模式：手指在屏幕上下滑动，上半区控制油门、下半区控制刹车。
+**单踏板**：手指上下滑动，上半区油门、下半区刹车。**双踏板**：左右两指分别控制独立踏板。
 
-双踏板模式：左右两指分别控制独立的油门和刹车踏板。
+| 布局编辑 | 模块设置界面 |
+|---|---|
+| <img src="docs/images/overlay-edit.gif" width="340"> | <img src="docs/images/settings-ui.gif" width="340"> |
 
-### Overlay 控件
-
-图标按钮可拖动，单击切换 Overlay 控件显示/隐藏，长按模块图标按钮进入编辑模式（屏幕渐暗 + 居中操作提示），拖拽移动 + 四角圆点缩放各 Overlay 控件大小，长按空白处 2 秒重置（编辑模式下游戏画面全屏不可操作）：
-
-<img src="docs/images/overlay-edit.gif" width="360" alt="Overlay 编辑演示">
-
-### 模块设置界面
-
-miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式：
-
-<img src="docs/images/settings-ui.gif" width="180" alt="模块设置界面">
-
----
-
-## ⚠️ 免责声明
-
-> 本模块仅供 **个人学习、技术研究与逆向工程教学** 使用。
->
-> 它通过修改游戏运行时行为（内存读写、函数钩子、输入注入）来增强操控体验，**可能违反游戏服务条款并导致账号暂时或永久封禁**。请在单机模式下使用，并自行承担所有风险。原作者不承担任何直接或间接损失的责任。
-
-首次启动模块设置界面时会弹出完整的 **用户协议弹窗**（EULA v2），需阅读并点击「同意」后才能使用。
+长按工具按钮进入编辑模式：拖拽移动、四角缩放、长按空白 2 秒重置。
 
 ---
 
 ## 功能
 
-### ✅ 已实现
+| 分类 | 能力 |
+|---|---|
+| **操控** | 线性踏板（关闭 / 单踏板 / 双踏板）· 自定义响应曲线（多点控制点）· 双踏板优先级仲裁（6 策略）· 方向反转 · 透明度 / 边框 / 圆角可调 |
+| **驾驶辅助** | 原生 TC 档位（削减强度 + 介入时机）· 原生 ABS 档位（五档干预强度）· 最大制动压力 50–100% · 自动 DRS 与主动空力 · 自锁式超车按键 · 解除最大转向角度限制 |
+| **实时反馈** | TC/ABS 介入指示灯（上缘弓形，25Hz 同频闪烁）· 抓地力反馈（六通道振感 + 下缘光斑，1/4 强度 = 最佳抓地力）· 路肩振感（颗粒率随车速） |
+| **计时赛** | 禁止删除下一圈成绩（冲出限制只废本圈）· 有效圈自动识别（16 条 GP 赛道）· 圈速与车辆调教自动采集 |
+| **围场** | 在线排行榜（积分总榜 + 分赛道圈速榜）· 通行证账号 · 圈速自动上传（断网本地暂存补传）· 车手主页 · 账号设置（头像 / 改名 / 屏蔽缺失记录）· 围场指南 |
+| **其他** | 内购与 DLC 解锁 · 修复 DLC 更新卡加载 · 隐藏游戏原生油门 / 刹车 · 主菜单音乐替换 · V10 引擎声浪 · 日志一键导出 |
 
-#### 线性踏板（Pedal Overlay）
-- **三种拓扑**：关闭、单踏板（上半油门/下半刹车）、双踏板（独立油门/刹车控件）
-- **响应曲线**：线性 / 自定义（多点控制点 + 保单调三次样条），油门和刹车可分别设置
-- **死区与过渡点**：单踏板模式下可调油门/刹车交界处的无效范围（0-20%）和分界线位置（20-80%）
-- **踏板优先级仲裁**：双踏板模式下两指同时按下时的冲突仲裁策略，可选最早按住 / 最新触摸 / 始终油门 / 始终刹车 / 根据油门数值 / 根据刹车数值（默认），后两者配合可调过渡点（1-99%，默认 20%）
-- **踏板方向反转**：双踏板模式下反转油门/刹车踏板的填充方向（关闭 / 仅油门 / 仅刹车 / 全部）
-
-#### 主菜单音乐替换
-- 将主菜单背景音乐替换为 **Hans Zimmer - F1**（320kbps）
-- 默认开启。离开主菜单自动暂停，返回自动恢复
-- 通过 Native Hook 静音游戏原生 `AudioSource.set_volume`，不依赖游戏设置
-
-#### V10 引擎声浪
-- 将开场动画背景音替换为 **V10 引擎声浪**
-- 默认关闭。单次播放，播完即停
-- 通过 Native Hook 静音游戏开场 `introSound`（真 `AudioSource.set_volume`），独立于主菜单音乐替换
-
-#### 布局编辑
-- 长按工具按钮进入编辑模式（编辑中单击按钮无效，退出编辑同样靠长按）
-- 进入时屏幕 0.3 秒渐暗至 75%，屏幕中心显示三行操作提示；退出时渐亮恢复
-- 拖拽移动 + 四角圆点缩放各 Overlay 位置
-- 编辑中在控件中心竖排标注「油门」「刹车」，便于分辨（仅双踏板模式）
-- 长按 3 秒重置到出厂默认位置
-- 退出编辑后控件显示/隐藏状态还原到进入前的样子
-- 单踏板 / 双踏板模式的位置分别持久化，互不干扰
-
-#### Overlay 视觉属性
-- **可定制外观**：控件透明度（0-100%，默认 50%）、边框粗细（0-10dp，0 表示无边框，默认 5dp）、边框圆角（0-100%，圆角半径 = 比例 × 短边/2，0% 为直角，默认 50%）
-- 同时作用于踏板控件与换挡按钮，配置变更后重建生效
-
-#### TC/ABS 介入指示灯
-- 屏幕上边缘中点的椭圆弓形指示灯（宽 1/3 屏、高 1/30 屏），TC 介入绿色、ABS 介入红色，同时介入呈黄色；直边中点 75% 透明度向弧边渐变至 0%
-- **信号源为游戏原生执行点**：ShadowHook 指令级拦截 RoadForce 内 ABS 滑移管理写入（命中 = 游戏真实介入，叠加该轮制动压力过滤排除油门打滑空转）；TC 为削减量判定叠加 25Hz 帧相位
-- 介入期间以 25Hz 方波闪烁，与游戏实际介入节奏同频；默认开启，可在 Overlay 控件区关闭
-
-#### 抓地力反馈（振感 + 视觉）
-- **六条通道各自映射后取大**，把「轮胎正在发生什么」翻译成振动强度与屏幕下缘的弓形光斑（与上缘的 TC/ABS 指示灯共用同一套弓形几何）
-- ① 纵向（刹车锁死/空转）② 横向 max（**最佳抓地力提示器**，硬封顶 1/4）③ 横向后轮 min（失控甩尾，可满振）④ **后轮空转（最高优先级，油门门控）** ⑤ 车身侧滑角（松油门后的惯性打转）⑥ 四轮集体饱和（高速宽滑）
-- 信号全部取自游戏自身的轮胎物理字段（滑移率、滑移角、轮面滑移速度），**不自行重算物理量**
-- 振感为 480ms 平顶波形 + 两级重发判据（稳定期零重发、真事件立即下发），视觉为电平驱动的连续透明度
-- 默认开启（全部：振感 + 视觉），可在杂项区调整为关闭 / 振感 / 视觉 / 全部，并分别调节最大振动强度（默认 50%）与最大不透明度（默认 100%）
-- ⚠️ **振感手感取决于游戏包是否带 `VIBRATE` 权限**：共存版由打包流程补上该权限，走振幅波形路（绵密连续 + 强度滑条）；若某次打包漏了权限，模块会降级到免权限的 `View.performHapticFeedback`——该 API 只接受系统预置的语义常量、**做不出连续波形**，听感变成「快速的哒哒哒」。这是 Android 平台限制，与机型无关。
-
-#### 内购解锁（Unlock / IAP Bypass）
-- 双重锁定路径：**Native inline Hook**（主路径）+ **Java 层 Xposed Hook**（辅助路径）
-- native 路径：`BillingManager.Awake` + `GetInstance`（兜底）+ 15 秒延迟 `forceUnlockNow` one-shot
-- Java 路径：`BillingBridge.checkOwned` / `checkOwnedInternal` → 注入 `OnAlreadyOwned` 消息
-- 首次解锁弹窗后写 `/data/data/<pkg>/files/ala_unlock_done.flag`，后续启动不再弹窗
-- 解锁走 `SetUnlocked(true)` 完整路径写 PlayerPrefs（`AnciTuttu`），修复「标记文件残留但 PlayerPrefs 丢失」导致车库车锁着的问题
-- **关闭解锁开关时**仍 hook `Awake` 预设 `IsUnlocked=true` + 阻挡 `OnOwnedNone`/`OnPurchaseFailed` 弹窗，
-  防止正版用户每次冷启动看到"Fresh unlock"弹窗，同时让游戏正常走 Google Play 查询流程
-
-#### 原生 TC 控制
-- 通过 hook `TractionFilter`（TC）在入口处决定是否跳过
-- **TC 已生效**：关闭时 TractionFilter 直接返回原始 accel，不削减
-- **档位调节**（v1.4）：削减强度（TractionFilter 返回值插值）+ 介入时机
-  ((ε, minSPD) 成对覆写，含起步 0~40 km/h 低速门)，游戏默认档纯透传
-
-#### 配置即时生效
-- 三路配置同步：**Remote Preferences**（LSPosed daemon SQLite）→ **ConfigProvider**（ContentProvider）→ **定向广播**
-- 游戏不运行时改配置：下次启动从 daemon 读取最新值，不再丢失
-- 游戏运行时改配置：广播即时推送，Overlay 重建生效
-
-#### 日志系统
-- 日志始终记录（无开关；2MB 滚动上限控制存储），Java 层 `Logger` 与 native 层 `native_log` 两侧无条件写文件
-- 模块进程日志写 `filesDir`；游戏进程日志写 `/sdcard/Android/media/<游戏包>/`（模块持「所有文件访问」权限跨包直读）
-- 设置页一键导出并分享（FileProvider + ShareSheet），导出仅含最近 24h 条目；**导出不要求游戏在运行**——直读日志文件，游戏被杀/闪退后仍可导出崩溃现场
-- 崩溃自捕：模块进程未捕获异常 + 游戏进程 native 信号崩溃自动落盘堆栈/PC 现场，随日志导出带出，无需 adb
-
-#### 计时赛有效圈速（Lap Timing）
-- Hook `odometerHandler.HandleSectorsTimes`（游戏圈段事件）与 `IRDSLevelLoadVariables.Awake`，纯透传只读，不写任何游戏字段
-- 有效圈判定直接采信游戏原生 `validLap` 位（切弯/逆行判定的最终产物），会话最快有效圈在过圈瞬间写入日志（`LAPbest` / `LAPdone` / `LAPinv`）
-- 圈完成事件经单槽 JNI 缓冲暴露给 Java 层，是**围场圈速上传**的数据源
-- 赛道自动识别：经 `SceneManagerHelper` + `CommonUtilities.GetGPIndex` 探测场景 buildIndex（`LAPscene` 行），16 条 GP 赛道映射见 `docs/TRACK_IDENTIFICATION.md`（4 条已实机交叉验证）
-- 会话门禁：仅计时赛记录（`ChampionshipManager.isTimeAttack`），正赛 / 比赛周练习等其他会话自动静默（`LAPgate`）
-
-#### 围场互联（Paddock）
-- **计时赛在线排行榜**：总榜（积分制）+ 分赛道榜（圈速制），模块 App 围场页直连
-- **积分规则**：基础分 `round((N+1−rank)×100/N)`（第一名 100、每名次递减 100/N、虚位第 N+1 名 0），再加上**辅助加成**——线性踏板 +10% / 关 TC +10% / 低档 ABS +10% / 关 ABS +30%（最高 +50%，加成只作用于基础分）；每赛道 × 每游戏版本独立排名计分，总榜为各版本积分之和（版本 = 独立赛季）
-- **辅助配置上报**：跑出有效圈时模块把当圈的踏板模式 / TC / ABS 设置随圈上传，服务端据此算加成。**只报原始枚举**，加分规则留在服务端；整圈中途改过设置的圈记"缺失"不计分（native 用 epoch 快照检测，见 `native/src/lap_hook.c`）
-- **零辅助金标**：最快圈 TC 与 ABS 全关即为"零辅助"。赛道榜该行整行金色流光；积分榜零辅助最快圈占比 ≥50% 时用户名与积分金色流光（判据只看 TC/ABS，不含踏板）
-- **通行证账号**：模块内申请即设密 → QQ 群发送校验指令完成建号 → 直接登录；密码重置经群内口令 + 重置码完成
-- **圈速自动上传**：有效圈过线瞬间经 native 单槽缓冲 → 1Hz 轮询上传，仅计时赛会话生效；服务端 Toast 四条件判定（全服/版本/赛道/个人最佳）
-- **丢圈保护**:上传失败（断网/弱网/服务端故障）一律暂存本地队列（30 天时效），游戏进程每 30 秒静默补传——**绝不丢成绩**；启动时按连通性提示（连上=车手问候，连不上=成绩本地暂存提示），两者均不影响模块功能
-- **个人资料**：圆形头像（1:1 裁剪上传）、车手 ID、计时赛总积分；登录态跨进程持久（Remote Preferences daemon 通道），重装不丢
-- **服务器可配置**：默认官方围场服务器，设置页可切自建服务器
-
-#### AI 车隔离
-- 通过 `IRDSPlayerControls.Update()` 捕获玩家车 controller（该组件只挂在玩家车 GameObject 上）
-- writer 线程只写 `g_player_controller`（由 `IRDSPlayerControls` 设置），不受 AI 车干扰
-- 油门/刹车 Hook 中 `is_player_controller` 检查 `playerControls` 字段（偏移 0x108）过滤 AI 车
-
-#### 多框架兼容
-- 支持 **LSPosed**（Root）和 **NPatch**（非 Root）框架
-- NPatch 路径：通过 `content://top.nkbe.npatch.remote` ContentProvider 拿 remote service binder 读写配置
-- LSPosed 共存版：`System.setProperty` 进程级标记避免双 ClassLoader 重复注入
-
-#### LSPosed 激活检测
-- 概览页显示激活状态（已激活 / 未激活），冷启动检测一次后会话级固定，下次冷启动重新检测
-- 事件驱动判定（去轮询）：ConnectionState 三态等待 + onServiceDied service 身份检查，避免超时误弹免 Root 弹窗
-- 判定优先级：游戏进程 `onModuleLoaded` 标记 > `frameworkName == "LSPosed"` > Non-root 确认标记 > 未激活
-- NPatch 等非 Root 框架（`frameworkName == "NPatch"`，API 101）不算 LSPOSED；检测到 NPatch 已安装才弹"作用域确认"弹窗，未安装时点击激活卡片 Toast 提示
-
-#### 游戏版本检测
-- 概览页标题上方显示 **Ala Mobile Pro 版本检测胶囊**（每次启动自动检测）
-- 用 `<queries>` 声明两个游戏包名，`getPackageInfo` 静默查询，无需运行时权限
-- 已适配（8.0.6）显示绿色胶囊，未适配显示红色胶囊，未安装显示黄色胶囊，**共存版打包过旧显示黄色「需更新」胶囊**
-- **共存版打包修订号走 versionName 后缀**：`versionCode` 恒为游戏原值 200150（同时是 IL2CPP 偏移安全键与围场榜单分区键），无法用它区分新旧共存包，故同版本期间改动打包时改 `versionName` 为 `8.0.6 Fix N`；模块**逐项严格相等**判定（`versionCode == 200150`、base == `8.0.6`、`Fix N == SUPPORTED_COEX_FIX`），不匹配一律拦截
-- 下滑收缩时胶囊即时隐藏，上滑恢复后延迟渐显，避免与居中小标题重叠
-
-#### 现代 UI
-- Miuix 风格三页布局（概览 / 配置 / 设置），支持深色模式
-- 顶栏/底栏毛玻璃（blurRadius=12f），下滑顶栏折叠
-- 内嵌 GitHub 与 QQ 群入口图标（SVG Path 渲染）
-
-#### Tool Button（工具按钮）
-- 96×96dp 圆角矩形按钮，前景为 App 图标（Base64 内嵌，绕过跨进程资源访问限制）
-- 单击：切换 Overlay 展开/折叠
-- 长按：进入编辑模式
-- 拖动：移动按钮自身位置（默认记忆，下次进游戏自动恢复）
-
-#### 启动门控（版本不匹配 / 模块过期）
-- 游戏启动后**先确认游戏与模块版本，确认完成之前完全零 Hook**
-- 游戏版本不匹配（非 8.0.6 / 200150）：不安装任何 Hook，游戏正常运行，持续弹 Toast 提示更新游戏——IL2CPP 偏移按 8.0.6 硬编码，错版本安装 Hook 必然开屏闪退
-- 共存版打包过旧（引擎对但无 `Fix N` 后缀）：不安装任何 Hook，持续弹 Toast 提示**更新共存版安装包**（与"更新游戏"文案区分）
-- 模块不是最新版：不安装任何 Hook，持续弹 Toast 提示更新模块
-- 两者同时命中：提示文案合并，仍零 Hook
-- **拦截时同样写文件日志**（`Logger.init` 提到所有门控 return 之前）——否则"被拦截"这一最需诊断的场景只有 logcat（游戏进程 logcat 极吵约 1 分钟被冲掉），用户导出日志会读到上一次正常跑的日志而误判
-- 判定通过后 Hook 正常安装；在线用户判定约 1~3 秒，完全离线且无缓存时放行（宁可放过不误伤）
-
-#### 用户协议（EULA）
-- 强制确认弹窗，按版本号持久化（当前 v2），条款更新重新弹窗
-- 存于模块进程 `filesDir`，`pm clear` / 卸载重装自动清除，语义正确
-- 协议同意前激活弹窗不可见，保证协议优先
-- 协议弹窗需滚到底部阅读完才能点击「同意」
-
-#### vivo/iQOO OriginOS 兼容
-- 所有重操作（ShadowHook 初始化、JNI 调用、Service 绑定）延迟到 `Handler.post` 下一主循环
-- 避开 `createOrUpdateClassLoaderLocked` 内部 Resources 未初始化时序窗口
-
-#### 检查更新
-- 启动时自动检查 GitHub Releases（官方 + 镜像站竞速），有新版本自动弹窗
-- 稳定版通道仅检查正式 Release，预览版通道同时检查 Pre-release
-- Release Note 轻量 Markdown 渲染，下载进度实时显示，下载完成调起安装器
-- 支持「跳过该版本」（仅影响自动弹窗，手动检查不受限）和「清除跳过更新标记」
-- 同版本已下载的 APK 不重复下载，直接调起安装器；启动时自动清理旧版本残留 APK
-
-#### 原生 TC/ABS 控制
-- 牵引力控制（TC）：默认 / 自定义（削减强度 + 介入时机档位，自定义时机经 (ε, minSPD) 成对覆写生效）；关闭 TC 档直接返回原始 accel
-- 防抱死制动系统（ABS）：默认 / 自定义（干预强度档位：关闭 ABS/低/中/高/最高（默认），修改干预制动偏置——覆写 pulse 释放深度，缓解游戏 ABS 全段过度保护）；关闭 ABS 档经 per-wheel `usesABS=false` 双重门控，重刹轮子直接锁死
-- 最大制动压力：50–100% 无级，把踏板行程重映射到更低的最大压力（90% = 满行程 4050），各车速允许的刹车压力上限封顶保持游戏原生曲线；与 ABS 档位/开关完全无关
-
-#### 支持开发
-- 概览页「支持开发」卡片，展示收款码，可保存到相册
-
-### 🚧 开发中
-
-- **自动 DRS 与 AA**：捕捉游戏自身的「可开启」信号（`OnDRSStateChanged` 进入 Deployable 态）自动打开减阻系统与主动空力套件，地效车 DRS 与 2026 主动空力两套区域判定均覆盖（已实机验证）
-- **自锁式超车按键**：把 OTK（超车）屏幕按钮从「按住才生效」改成「点一下切换」，长距离超车不必一直按着；是否允许开超车（ERS 解锁 / 电量）仍完全由游戏判定（已实机验证）
-- **禁止删除下一圈成绩**：赛道限制作废圈速时只删除本圈成绩——游戏原生在赛道后段（赛道进度 >80%）冲出限制会同时作废本圈与下一圈，刷圈时一次失误牺牲两圈；开启后只作废本圈，提示文案也同步变为「本圈成绩已删除」
-- **手动换挡**：`DoGearShifting` Hook 曾致起步失败暂时禁用，待重新实现
-- **大奖赛/娱乐匹配**：围场页占位入口，服务端赛程功能待实现
+> 「围场」是本模块的在线计时赛服务。默认使用官方服务器，也可在设置页切换为自建服务端
+> （见 [ala-mobile-paddock](https://github.com/TakotsuboChen/ala-mobile-paddock)）。
 
 ---
 
 ## 安装
 
-### 前提条件
+### 前提
 
-- 一部已 Root 的 Android 手机，安装了 **LSPosed**（或兼容分支）框架
-- 已安装 **Ala Mobile Pro 8.0.6 Fix 2**（`com.Takotsubo.AlamobileFormula`，versionCode 200150）
+- Android 8.0 及以上，**arm64-v8a**
+- 游戏：**Ala Mobile Pro 8.0.6 Fix 3**（`com.Takotsubo.AlamobileFormula`，versionCode 200150）
+- 框架：**LSPosed**（Root）或 **NPatch 850**（非 Root）
 
-### 步骤
+> 官方原版包已停止支持，仅支持共存版（应用名 "Ala Mobile Pro"）。版本不匹配时模块
+> **零 Hook 并循环提示更新**，游戏本身可正常运行、不会闪退。
 
-1. 从 [Releases 页面](https://github.com/TakotsuboChen/ala-mobile-tool/releases) 下载最新 APK
-2. 安装 APK 到手机
-3. 打开 **LSPosed Manager**，在模块列表中找到 **Ala Mobile Tool** 并启用
-4. 在作用域中勾选 **Ala Mobile Pro**（`com.Takotsubo.AlamobileFormula`）
-5. 启动游戏，进入后点击左上角工具按钮显示 Overlay
+### Root（LSPosed）
 
-> 💡 **首次使用**：建议先进入模块设置界面（打开模块 App）确认配置，再进入游戏。
+1. 从 [Releases](https://github.com/TakotsuboChen/ala-mobile-tool/releases) 下载 APK 并安装
+2. 在 LSPosed 管理器中启用 **Ala Mobile Tool**
+3. 作用域勾选 **Ala Mobile Pro**（`com.Takotsubo.AlamobileFormula`）
+4. 打开模块 App，授予 **「所有文件访问」** 权限（必填，缺了模块无法正常工作）
+5. 启动游戏，点击左上角工具按钮展开 Overlay
+6. **登录围场**：模块的计时赛、排行榜与游戏内功能均需登录围场通行证
 
-> ⚠️ **必需权限：所有文件访问**。首次打开模块 App 会出现「必要权限」引导页，必须授予
-> **所有文件访问**（设置 → 应用 → 特殊权限 → 所有文件访问）才能进入主界面。该权限用于
-> 把配置与登录态写入游戏目录（`Android/media/<游戏包>/`），这是模块在游戏未运行时
-> 也能正确传递状态所必需的——缺少它，模块会无法正常工作。
+### 非 Root（NPatch）
 
-### 非 Root 用户（NPatch）
-
-1. 安装 [NPatch](https://github.com/nkbe/npatch) 框架、共存版游戏与模块
-2. 在 NPatch 中 Ala Mobile 的模块作用域勾选 Ala Mobile Tool
-
----
-
-## 配置
-
-在 LSPosed 模块列表中点击 **Ala Mobile Tool** 打开设置界面（三页布局）：
-
-### 概览页
-- 模块激活状态卡片（已激活 / 未激活，绿/红配色）
-- 游戏版本检测胶囊：Ala Mobile Pro 适配状态（已适配绿色 / 未适配红色 / 需更新黄色 / 未安装黄色）
-- 设备信息：版本名称、版本号、Android 版本、厂商、型号
-- 链接：GitHub Releases、QQ 群（直接拉起 QQ App）、GitHub 源代码
-- 支持开发卡片：展示收款码，可保存到相册
-
-### 配置页
-
-配置页首页是四张互不相连的入口卡片，点进去各是一个独立二级页（标题栏带返回箭头）。
-
-| 分类 | 功能项 | 说明 |
-|---|---|---|
-| 原生特性控制 | 解锁付费内容 | 强制解锁 DLC 和 IAP（默认关闭） |
-| | 隐藏油门和刹车按键 | 隐藏游戏原生油门/刹车按钮（保留离合），配合模块踏板使用（默认关闭） |
-| | 禁止删除下一圈成绩 | 赛道限制作废圈速时只删除本圈成绩（游戏原生会在赛道后段连带删除下一圈），大幅提升刷圈效率（默认开启） |
-| | 牵引力控制（TC） | 默认 / 自定义：削减强度（关闭 TC~最高）+ 介入时机（较晚（默认）~实时） |
-| | 防抱死制动系统（ABS） | 默认 / 自定义：干预强度（关闭 ABS / 低 / 中 / 高 / 最高（默认）） |
-| | 最大制动压力 | 50-100% 无级，踏板行程重映射到更低压力上限（各车速封顶保持原生曲线，与 ABS 设置无关） |
-| Overlay 控件 | 线性踏板 | 拓扑选择：关闭 / 单踏板 / 双踏板 |
-| | 死区（单踏板） | 0-20%，踏板过渡区域附近的无效范围 |
-| | 过渡点（单踏板） | 20-80%，油门与刹车区域的分界线 |
-| | 踏板优先级（双踏板） | 最早按住 / 最新触摸 / 始终油门 / 始终刹车 / 根据油门数值 / 根据刹车数值 |
-| | 油门过渡点（双踏板） | 1-99%，选"根据油门数值"时显示（默认 20%） |
-| | 刹车过渡点（双踏板） | 1-99%，选"根据刹车数值"时显示（默认 20%） |
-| | 踏板方向反转（双踏板） | 关闭 / 仅油门 / 仅刹车 / 全部 |
-| | 控件透明度 | 0-100%，整个控件的透明度（默认 50%） |
-| | 边框粗细 | 0-10dp，0 表示不显示边框（默认 5dp） |
-| | 边框圆角 | 0-100%，圆角半径 = 比例 × 短边/2，0% 时为直角（默认 50%） |
-| 响应曲线 | 油门响应曲线 | 线性 / 自定义（多点控制点） |
-| | 刹车响应曲线 | 线性 / 自定义（多点控制点） |
-| 杂项 | 替换主菜单音乐 | 更换为 Hans Zimmer - F1（默认开启） |
-| | 替换开场动画背景音 | 更改为 V10 引擎声浪（默认关闭） |
-| | 抓地力反馈 | 关闭 / 振感 / 视觉 / 全部（默认全部）；展开可调最大振动强度（20-100%，默认 50%）与最大不透明度（20-100%，默认 100%） |
-
-### 围场页（模块设置界面第 3 页）
-
-打开模块 App 后底栏第 3 个 tab（概览 / 配置 / 围场 / 设置）：
-
-| 功能项 | 说明 |
-|---|---|
-| 通行证核验 | 未登录：用户名 + 密码表单，注册/登录并排；注册后弹窗复制申请指令并跳转 QQ 群，粘贴发送完成建号（勿改指令文字、勿当入群答案）；忘记密码经群内口令 + 重置码完成 |
-| 用户信息卡 | 已登录：头像、用户名、车手 ID、计时赛总积分 |
-| 计时赛排行榜 | 积分总榜 / 分赛道圈速榜，按游戏版本筛选；行 = 排名 + 头像 + 用户名 + 右对齐数值（积分或圈速，等宽数字对齐） |
-| 头像设置 | 相册选图 + 1:1 圆形裁剪上传 |
-| 大奖赛 / 娱乐匹配 | 占位入口（赛程功能开发中） |
-| 退出登录 | 二次确认弹窗 |
-
-> 围场服务器默认使用官方服务器（`https://paddock.takotsubo.cloud`），自建服务端见 [ala-mobile-paddock](https://github.com/TakotsuboChen/ala-mobile-paddock) 仓库；设置页可切换自定义服务器地址。
-
-### 设置页
-
-| 功能项 | 说明 |
-|---|---|
-| 模块更新通道 | 稳定版（仅正式 Release）或预览版（含 Pre-release） |
-| 导出并分享日志 | 合并模块与游戏进程日志（含崩溃记录），经 FileProvider 分享（日志始终记录，无开关；无需游戏在运行） |
-| 清除激活标记 | 删除 Non-root 确认标记与旧版激活残留（filesDir，pm clear 可清）；不碰 EULA 同意状态；清除后本次会话状态不变，下次冷启动重新检测 |
-| 清除跳过更新标记 | 恢复被跳过版本的自动弹窗提示 |
-| 用户协议 | 重新查看并确认用户协议 |
+1. 安装 [NPatch](https://github.com/nkbe/npatch) 850、共存版游戏与模块
+2. 在 NPatch 中为 Ala Mobile 勾选 **Ala Mobile Tool** 作用域
+3. 同样需授予模块「所有文件访问」权限
+4. 启动游戏并登录围场
 
 ---
 
-## 已测试版本
+## 快速上手
 
-| 版本 | versionCode | 架构 |
-|---|---|---|
-| 8.0.6 | 200150 | arm64-v8a |
+首次启动按顺序通过三道门，全部通过后模块才会生效：
 
-> 已做启动门控：游戏版本不匹配时零 Hook + 持续 Toast 提示更新，游戏本身正常运行不闪退。IL2CPP 方法地址随版本变化，非匹配版本无法加载 Native Hook。8.0.4（200146）支持已于 2026-09-04 起弃用（1.0.2 及更早版本仍可用 8.0.4）。
+1. **用户协议** — 阅读并滚动到底，点击「同意」
+2. **所有文件访问权限** — 跳系统设置授予，缺了模块无法正常工作
+3. **登录围场** — 注册通行证（用户名 + 密码），按弹窗指令到 QQ 群发送校验消息完成建号
+
+> ⚠️ 未登录围场时，模块在游戏内**不安装任何 Hook**——这是有意的门控，不是故障。
+
+打开模块 App，底栏四页：
+
+| 页面 | 内容 |
+|---|---|
+| **概览** | 激活状态、游戏与 NPatch 版本胶囊、设备信息、检查更新、日志导出 |
+| **配置** | 四张入口卡片：原生特性控制 / Overlay 控件 / 响应曲线 / 杂项 |
+| **围场** | 排行榜、车手主页、账号设置、围场指南 |
+| **设置** | 更新通道、围场服务器、导出日志、用户协议 |
 
 ---
 
 ## 已知问题
 
-- 自动 DRS 与 AA 已实现并实机验证（捕捉游戏 `OnDRSStateChanged` 的 Deployable 信号），赛道区域判定交由游戏自身，无需解析赛道数据
-- 手动换挡因 `DoGearShifting` Hook 导致起步失败，**已暂时禁用**，待重新实现
-- **弯道「顿挫」通常来自游戏内置的刹车辅助**，与模块无关，请在游戏设置中关闭辅助功能；使用模块 ABS 自定义档时，也可通过干预强度档位与最大制动压力滑条缓解
-- 共存版（重打包改包名）需配合双 ClassLoader 守卫，当前版本已修复
-
----
-
-## 技术架构
-
-```
-Ala Mobile Tool (LSPosed 模块 APK)
-├── ConfigActivity          # Compose + miuix 设置界面（模块进程）
-├── AlaMobileModule         # Xposed 模块入口（游戏进程）
-├── NativeBridge            # JNI 桥接（Java → C）
-├── PedalOverlayView        # 双区踏板覆盖（Canvas View）
-├── GearShiftView           # 换挡按钮（Canvas View）
-├── ToolButtonView          # 工具按钮（Canvas View）
-├── TcAbsIndicatorView      # TC/ABS 介入指示灯（Canvas View）
-├── SlipFeedbackView        # 抓地力反馈弓形光斑（Canvas View，16ms 轮询）
-├── SlipHaptic              # 抓地力反馈振感（平顶波形 + 两级重发判据）
-├── SlipBowPainter          # 弓形光斑几何与渐变（与 TcAbsIndicatorView 共用）
-├── OverlayManager          # WindowManager 覆盖层管理
-├── OverlayEditView         # 编辑模式拖拽/缩放层（铺满整屏，矩形为内部状态）
-├── EditHintView            # 编辑模式屏幕居中三行操作提示
-├── EditLayerFactory        # 编辑层创建（铺满整屏 + 初始可见/透明态）
-├── MusicPlayer             # 主菜单音乐播放器（MediaPlayer + 轮询）
-├── IntroSoundPlayer        # V10 引擎声浪播放器（MediaPlayer + 轮询）
-├── ConfigProvider          # 跨进程配置 IPC（ContentProvider）
-├── ConfigReceiver          # 配置广播接收器
-├── BillingHook             # Java 层内购解锁（Xposed Hook）
-├── PaddockClient           # 围场 API 客户端（HTTPS，无新依赖）
-├── PaddockUploader         # 圈速上传（1Hz 轮询 native 单槽缓冲）
-├── LsposedStatus           # 激活状态判定（frameworkName 区分框架 + Non-root 弹窗确认）
-├── EulaManager             # 用户协议管理
-├── VersionGate             # 版本门控
-└── libala-core.so          # ShadowHook 原生引擎（arm64-v8a）
-    ├── pedal_hook          # 油门/刹车/换挡 + writer 线程 + TC/ABS 控制
-    ├── drs_hook            # DRS 拦截
-    ├── unlock_hook         # BillingManager 解锁（主路径）
-    ├── music_hook          # 主菜单音乐静音 + 心跳检测
-    ├── intro_hook          # 开场 V10 引擎声：静音 introSound + one-shot 信号
-    ├── hide_pedals_hook    # 隐藏游戏原生油门/刹车按键（IRDSUIMobileControls）
-    └── lap_hook            # 计时赛有效圈监听 + 赛道识别（围场上传数据源）
-```
-
-**技术栈：**
-- 现代 libxposed API 102（min 101）
-- Kotlin 2.4.10 + Jetpack Compose + miuix KMP 0.9.3
-- ByteDance ShadowHook 2.0.1（UNIQUE 模式）
-- C 语言 IL2CPP 运行时 inline Hook
-- AGP 9.3.1 / NDK 26.1.10909125 / Gradle 9.6.1
+- **手动换挡**：`DoGearShifting` Hook 曾导致起步失败，当前禁用，待重写
+- **大奖赛 / 娱乐匹配**：围场页占位入口，服务端赛程功能待实现
+- **弯道顿挫**：通常来自游戏内置刹车辅助，请在游戏设置中关闭；也可用模块的 ABS 干预强度与最大制动压力缓解
+- **抓地力 / 路肩振感** 标注为实验性，手感仍在迭代
 
 ---
 
 ## 自行构建
 
-需要 Android SDK（API 37）和 NDK r26c。
+需要 Android SDK（API 37）、NDK 26.1 与 JDK 17+。
 
 ```bash
-./gradlew :app:assembleDebug    # 调试构建
-./gradlew :app:assembleRelease  # 发布构建（需签名配置）
-./gradlew :app:lint             # 运行 lint（含 baseline）
+./gradlew :app:assembleDebug     # 调试构建
+./gradlew :app:assembleRelease   # 发布构建
+./gradlew :app:lint              # 提交前必跑
 ```
 
-**逆向工具：**
+Native 层位于 `native/`，仅编译 `arm64-v8a`。IL2CPP 偏移提取：
+
 ```bash
 tools/run-il2cpp-dumper.sh
 ```
 
-该脚本调用 [Il2CppDumper](https://github.com/Perfare/Il2CppDumper) 生成 `dump.cs`，用于提取目标方法偏移并更新 `OffsetTable.kt`。
+方法偏移的**单一事实源**是 `app/src/main/kotlin/tools/alamobile/mod/offsets/OffsetTable.kt`。
 
 ---
 
-## 路线图
+## 文档
 
-- [x] 自动 DRS 与 AA：捕捉游戏 `OnDRSStateChanged` 的 Deployable 信号自动开启（地效车 DRS + 2026 主动空力两套规则均覆盖）
-- [x] 自锁式超车按键：OTK 屏幕按钮「按住」→「点按切换」（只改按键语义，可用性判定仍归游戏；已实机验证）
-- [x] 禁止删除下一圈成绩：赛道限制作废圈速时只删除本圈（hook `InvalidateLap` 改写赛道进度入参，让游戏自己走「只删本圈」分支；提示文案同步正确）
-- [ ] 手动换挡：重新实现 `DoGearShifting` Hook（曾致起步失败，当前禁用待重写）
-- [ ] 大奖赛/娱乐匹配：围场服务端赛程体系
-- [x] 围场互联：计时赛排行榜 + 通行证账号 + 圈速上传 + 头像（v1.0.3）
-- [x] 计时赛有效圈速监听：原生 validLap 采信 + 16 赛道自动识别（v1.0.3）
-- [x] 适配 Ala Mobile 8.0.6（v1.0.3；8.0.4 支持弃用）
-- [x] 原生 ABS 控制：开关 + 干预强度档位 + 最大制动压力（carController hook + per-wheel usesABS 双重门控 + 刹车请求饱和重映射）
-- [x] 工具按钮位置记忆（默认启用，无开关）
-- [x] TC/ABS 介入指示灯（游戏原生介入信号 + 25Hz 同步闪烁，默认启用）
-- [x] 抓地力反馈：六通道振动 + 弓形光斑（默认启用全部，可调强度/透明度/样式）
-- [ ] 多语言支持
+| 文档 | 内容 |
+|---|---|
+| [TECHNICAL_ANALYSIS](docs/TECHNICAL_ANALYSIS.md) | 游戏引擎逆向分析（ABS / TC / 圈速 / 赛道） |
+| [TRACK_IDENTIFICATION](docs/TRACK_IDENTIFICATION.md) | 16 条 GP 赛道对照表 |
+| [docs/notes](docs/notes/) | 各子系统工程笔记与踩坑记录 |
+| [docs/design](docs/design/) | 设计决策与跨仓契约 |
 
 ---
 
-## 社区与支持
+## 社区
 
-- **GitHub Issues**：[报告 bug 或建议新功能](https://github.com/TakotsuboChen/ala-mobile-tool/issues)
-- **QQ 群**：[加入玩家交流群](https://qun.qq.com/universal-share/share?ac=1&authKey=V0nuKHg0u%2BZKVi/jgDReAiZSCQdbMb0yMwaOSV49gejQWRtdz%2BG4G6eQQgWyFOJB&busi_data=eyJncm91cENvZGUiOiI3NTc5NDA3MDgiLCJ0b2tlbiI6IjVzRjZTTWpLckJIRExvRTk3K0QzVzJGK2N4QURRM2RwRjJWNkw0L29wcG9ocjI1NXo5T1hLZ2FJVkZXZkhlMVAiLCJ1aW4iOiIxMjU5OTc2NTIwIn0=&data=x1JvsLJUAovAdpfNmLQpuTN_-yGbUrMfCJ1VSQqD-QbIzj9-ZLiRKNEHNbJXpokkPhx5cc-RG47HyWYUrPBtTA&svctype=4&tempid=h5_group_info)
+- [GitHub Issues](https://github.com/TakotsuboChen/ala-mobile-tool/issues) — 反馈 bug 或提功能建议
+- [QQ 群 757940708](https://qun.qq.com/universal-share/share?ac=1&authKey=V0nuKHg0u%2BZKVi/jgDReAiZSCQdbMb0yMwaOSV49gejQWRtdz%2BG4G6eQQgWyFOJB&busi_data=eyJncm91cENvZGUiOiI3NTc5NDA3MDgiLCJ0b2tlbiI6IjVzRjZTTWpLckJIRExvRTk3K0QzVzJGK2N4QURRM2RwRjJWNkw0L29wcG9oaHIyNXo5T1hLZ2FJVkZXZkhlMVAiLCJ1aW4iOiIxMjU5OTc2NTIwIn0=&data=x1JvsLJUAovAdpfNmLQpuTN_-yGbUrMfCJ1VSQqD-QbIzj9-ZLiRKNEHNbJXpokkPhx5cc-RG47HyWYUrPBtTA&svctype=4&tempid=h5_group_info) — 玩家交流与通行证校验
 - 欢迎提交 Pull Request
 
 ---
 
 ## 许可证
 
-本项目基于 **Apache License 2.0** 开源。详见 [LICENSE](LICENSE) 文件。
-
-游戏名称、素材、商标版权归其各自所有者；与游戏开发商、发行商无任何关联或授权关系。
-
----
-
-## 版本历史
-
-<details>
-<summary>展开查看</summary>
-
-**v1.0.3**（2026-09-04，正式版，versionCode 103300）
-> 围场互联大版本。新增围场（Paddock）在线功能：QQ 群校验注册的通行证账号体系、计时赛在线排行榜（积分总榜 + 分赛道圈速榜，积分 `round((N−rank)×100/N)`、游戏版本 = 独立赛季）、计时赛有效圈自动上传（服务端判定全服/版本/赛道/个人最佳并弹 Toast）、圆形头像裁剪上传、登录态跨进程持久化；配套新增计时赛有效圈速监听 lap_hook（采信游戏原生 validLap 判定、16 条 GP 赛道自动识别、仅计时赛会话生效）与隐藏游戏原生油门/刹车按键开关。全面适配 Ala Mobile 8.0.6（200150，8.0.4 支持弃用）：OffsetTable 37 个 RVA 全量更新、修复跑圈 SIGSEGV。体验增强：TC/ABS 介入指示灯（游戏原生介入信号 + 25Hz 同频闪烁）、工具按钮位置记忆、最大制动压力饱和重映射。修复多指触摸踏板跳满、隐藏踏板开关单向阀缺陷、ABS 档位浮点寄存器污染回归。
-
-**v1.0.2**（2026-08-29，正式版，versionCode 102300）
-> 制动控制大版本。新增 ABS 防抱死制动系统调节（干预强度五档：关闭 ABS/低/中/高/最高，修改干预制动偏置，缓解游戏 ABS 全段过度保护）与最大制动压力旋钮（50-100% 等比缩放制动扭矩上限，关 ABS 下也生效，缓解"关 ABS 秒锁死"）；TC 档位升级为削减强度五档 + 介入时机四档（(ε, minSPD) 成对覆写含起步低速门，修复只调阈值时起步段无感）；新增隐藏游戏原生油门/刹车按键开关；踏板响应曲线切线算法升级为曲率能量最小化凸优化（单点弯形状误差 −40%）；配置页新增页面级手势方向锁（横滑切页与竖滚互斥）。修复踏板/换挡控件半透明边框缝隙、多指触摸干扰踏板数值、关闭 TC 误伤 AI 车、日志洪水刷爆日志文件；新增踏板触摸诊断日志，导出仅保留最近 24h 条目。
-
-**v1.0.1**（2026-08-26，正式版，versionCode 101300）
-> 踏板操控与激活检测增强。新增踏板优先级枚举（6 策略仲裁 + 油门过渡点，替代旧单一刹车优先）、踏板方向反转枚举（油门/刹车可独立反转）、Overlay 视觉属性（透明度/边框粗细/边框圆角三个可配置滑块，作用于踏板与换挡控件）；LSPosed 激活检测稳定性大修（去轮询改事件驱动 + ConnectionState 三态 + service 身份检查，根治超时误弹免 Root 弹窗）；激活状态会话级持久化（冷启动检测一次固定到下次冷启动，清除标记下次冷启动重新检测）。
-
-**v1.0.0**（2026-08-19，正式版，versionCode 100300）
-> 首个正式版本。新增完整日志系统（logEnabled 开关统一门控 Java/native 文件输出 + 一键导出分享）；NPatch 激活确认流程收窄（激活弹窗收敛为「NPatch 作用域确认」，仅检测到 NPatch 已安装才弹出，未安装点击激活卡片 Toast 提示）；解锁持久化加固（走 `SetUnlocked(true)` 完整路径写 PlayerPrefs，修复标记文件残留导致车库车锁着的问题）。修复响应曲线图表在平板/横屏下高度溢出撑爆卡片、LSPosed 激活检测轮询超时误弹免 Root 弹窗。
-
-**v1.0.0 Beta 5**（2026-08-18）
-> 新增 V10 引擎声浪替换开场动画背景音、应用内检查更新（GitHub 官方+镜像竞速，Markdown Release Note 渲染，下载+安装+跳过版本）、更新通道设置（稳定版/预览版）、概览页游戏版本检测胶囊（官版/共存版适配状态）；恢复 EULA 启动门控（滚到底才能同意）；弹窗退出动画；支持开发卡片+捐赠弹窗；QQ 群卡片直接拉起 QQ App。配置页重组：功能开关改名游戏原生功能控制（仅解锁+TC），主菜单音乐与 V10 声浪移至杂项分类；设置页重组为模块更新通道/日志/激活协议三组，新增清除跳过更新标记；线性踏板关闭时响应曲线整组收回；移除显示悬浮窗开关。修复弹窗系统返回键不关闭直接退桌面（删除手动 NavigationEventDispatcherOwner）、清除激活标记误清 EULA 同意状态。
-
-**v1.0.0 Beta 4**（2026-08-17）
-> 新增自定义油门/刹车响应曲线编辑器（多点控制点 + 保单调三次样条）；修复配置修改后不立即生效（daemon 旧值覆盖新配置）、切换踏板模式后位置/大小丢失、native 库加载失败（移除 useLegacyPackaging）；适配 Ala Mobile 8.0.4（versionCode 200146，8.0.0 用户收到不支持警告）；底栏快速切换与切页掉帧修复。CI 自动构建 + tag 触发 Pre-release。
-
-**v1.0.0 Beta 3**（2026-08-12）
-> 配置页 UI 视觉大改。底栏切 tab 动画改为 KernelSU 式 `animateScrollBy`（连点不卡不错乱）；下滑顶栏折叠、标题居中；顶栏/底栏加毛玻璃（blurRadius=12f）；新增 miuix-blur 依赖。新增用户协议强制确认弹窗、配置页开关图标自定义、主菜单音乐替换（Hans Zimmer - F1，320kbps）、原生 TC 开关；修复 AI 车油门误控、LSPosed 激活判定误判（改 `frameworkName`）、NPatch 非 Root 配置跨进程同步、WSL2 Kotlin 编译卡死。真实设备已验证。
-
-**v1.0.0 Beta 2**（2026-07-30）
-> 踏板与配置体验大改。新增单/双踏板拓扑下拉、双踏板刹车优先仲裁与方向反转开关、长按重置出厂布局、SINGLE/DUAL 位置隔离持久化、配置即时生效（Remote Preferences 三路同步）；修复游戏自带方向键被 writer 持续清零导致的转向失灵；概览页激活卡片改为 KernelSU 风格对称配色，激活检测改用 LSPosed daemon 绑定状态。
-
-**v1.0.0 Beta 1**（2026-07-29）
-> 共存版稳定性大修。修复双 ClassLoader 注入导致的重复 hook/双 writer 线程；废除非原子的文件 IPC 路径，统一走 JNI 直调；用 rawY + 配置值坐标绕开 pairip 壳的 relayout 漂移。CI 自动构建 + tag 触发 Pre-release。
-
-**v1.0.0 Alpha 2**（2026-07-28）
-> UI 重构为 KernelSU 风格，修复多个编译错误，改进深色模式支持。
-
-**v1.0.0 Alpha 1**（2026-07-28）
-> 初始发布，包含踏板覆盖、换挡按钮和基础 DRS 拦截功能。
-
-</details>
+[Apache License 2.0](LICENSE)。游戏名称、素材与商标版权归其各自所有者。

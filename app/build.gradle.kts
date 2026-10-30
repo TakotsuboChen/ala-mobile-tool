@@ -56,8 +56,8 @@ android {
         applicationId = "tools.alamobile.mod"
         minSdk = 26
         targetSdk = 35
-        versionCode = 104230
-        versionName = "1.0.4 Beta 3"
+        versionCode = 104300
+        versionName = "1.0.4"
 
         // 构建指纹（见文件头注释）。日志环境块据此打出"这个包是什么时候、
         // 从哪个提交构建的"——版本号复用期间这是唯一的构建时间判据。
