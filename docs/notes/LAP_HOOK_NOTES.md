@@ -1,7 +1,7 @@
 # LAP_HOOK_NOTES — 计时赛有效圈速监听工程笔记
 
-> 状态：**活跃** · 最后编纂：2026-10-26
-> 一句话结论：计时赛有效圈速监听：hook `odometerHandler.HandleSectorsTimes` 取游戏自己的 `validLap` 位，圈完成在 `order==2` 事件上判定（不是 2→0 回绕），赛道身份走 `LAPscene` 探测链。
+> 状态：**活跃** · 最后编纂：2026-10-30
+> 一句话结论：计时赛有效圈速监听：hook `odometerHandler.HandleSectorsTimes` 取游戏自己的 `validLap` 位，圈完成在 `order==2` 事件上判定（不是 2→0 回绕），赛道身份走 `LAPscene` 探测链；辅助配置按**逐维 epoch** 判「无效」，只有本圈中途变过的维度标无效（§7）。
 
 > 文档规范见 [`docs/README.md`](../README.md)。
 
@@ -139,6 +139,14 @@ metadata 字面量 L2 + 实机 LAPscene L3 交叉，4/16 已实测全部吻合�
 
 - ⚠️ **圈完成判定挂在 order==2 事件上，勿改回"等 order 2→0 回绕"**——回绕在下一圈
   S1 过线才发生，会重现"第 5 圈消失"。
+- ⚠️ **辅助配置一致性是「逐维」不是「整圈」（2026-10-30 改）**：旧实现用单一全局
+  epoch，任一维变过就把五维全填 0（= 缺失）。实机报障（飞行雪绒 0:58.444）：用户
+  圈中只改了 ABS，踏板与 TC 也一起丢失，整圈被「屏蔽缺失配置记录」移出榜单。
+  现在三个逻辑维（踏板 / TC / ABS）各自维护 epoch，只有真变过的维标无效。
+  详见 §7。
+- ⚠️ **TC/ABS 必须按折叠后的生效档位比对**：`default` ≡ `custom/stock`（展示层
+  `collapse_mode` 早已合并）。按原始两列比对会把"切到默认又切回自定义最高"这种
+  **计分完全等价**的操作误标无效。
 - ⚠️ **`bestLapTimeInfo` (0x240) 是当前圈实时分段**，999.0=段未开始哨兵，
   **不是历史最佳**（pCur 命名即为此）；历史最佳在 `IRDSStatistics.bestLapTimesInfoByCar`
   字典（未读，Dictionary 布局成本高，当前无需求）。
@@ -150,7 +158,77 @@ metadata 字面量 L2 + 实机 LAPscene L3 交叉，4/16 已实测全部吻合�
 - [?] `sectorQuality` 精确取值表（0/2 实测出现，1 未观测）。
 - [?] 单圈 S3 切弯时 valid 翻转与圈完成同帧、无中间行——可接受，未深究。
 
-## 7. 验证清单（下次游戏升级时）
+## 7. 辅助配置三态与逐维判定（2026-10-30）
+
+> 一句话结论：配置码三态 `0`=缺失 / `-1`=无效 / `>=1`=有效；只有**本圈中途变过**
+> 的维度标无效，其余照常上报。
+
+### 7.1 为什么要三态
+
+旧实现只有两态（有效 / 缺失）。用户圈中改了配置 → 五维全填 0 → 看起来像"模块没读到
+配置"，用户无法得知是自己中途改的。而服务端又把这个"缺失"当成屏蔽依据，整圈被移出榜单。
+
+三态让「没读到」与「读到了但圈中变过」分开表达，前端可以分别渲染「缺失」与「无效」。
+
+### 7.2 维度归属（5 个码 → 3 个逻辑维）
+
+| 逻辑维 | 涉及列 | 无效时怎么标 |
+|---|---|---|
+| 踏板 | `pedal_mode` | 单列标 `-1` |
+| TC | `tc_mode` + `tc_strength` | **两列都标** `-1` |
+| ABS | `abs_mode` + `abs_strength` | **两列都标** `-1` |
+
+⚠️ TC/ABS 必须成对标记：服务端 `is_assist_missing` 逐列判 NULL，只标一半会被当成
+"管理端补录写了一半"的残缺状态。
+
+### 7.3 变更检测为什么用 epoch 而不是两端比对
+
+用户「改成 A 再改回原值」，圈起点与圈完成时的值相同，两端比对会判"没变"。
+epoch 是单调递增的变更历史计数，抓得住。
+
+### 7.4 折叠后比对（关键）
+
+`collapse_mode` 把 `(mode, strength)` 压成单一生效档位：
+
+```
+mode=0（缺失）      → 0
+mode=1（default）   → 5（stock，即"默认就是最高"）
+mode=2（custom）    → strength 原样
+```
+
+按原始两列比对会让 `custom/stock → default`（计分与展示都完全等价）被判成变更。
+⚠️ native 的 `collapse_mode` 必须与服务端 `laps.rs::collapse_mode` 逐字一致。
+
+### 7.5 服务端必须区分「无效」与「缺失」
+
+这是本次最容易做反的地方——两条判据方向相反：
+
+| 判据 | invalid 算不算 | 理由 |
+|---|---|---|
+| `is_assist_missing`（屏蔽依据） | **不算** | 算成缺失会让圈中改一次配置就整圈被屏蔽 |
+| `AssistFlags`（加成/金标依据） | **不加分** | 竞赛条件被改变过，不能据此享受加成 |
+
+⚠️ `ASSIST_MISSING_SQL` 与 Rust 版 `is_assist_missing` 必须同步，只判 `IS NULL`。
+
+### 7.6 实机验证（[V] 2026-10-30 Monza）
+
+```
+LAPcfg: assist config updated pedal=2 tcm=2 tcs=1 absm=2 abss=1 (changed dims=abs, epochs=1/1/5)
+LAPcfg: pedal usage 3715/3754 frames (98%) >= 50% → report 2
+LAPcfg: config changed mid-lap → abs marked INVALID (epochs 1/1/5 vs lap-start 1/1/3)
+```
+
+入库结果 `pedal=single / tc=custom+off / abs=invalid+invalid`，API 返回
+`hidden=false`、`abs=无效`，踏板与 TC 正常显示。
+
+### 7.7 已否决
+
+- [X] **整圈五维全填 0**（旧实现）：见 §6 第一条，用户报障。
+- [X] **事后清标志**（圈完成后把某维改回有效值）：改不回——原始配置已经丢了，
+  无法知道这一圈该用哪档。
+- [X] **只按原始两列比对**：会把计分等价的 `default ↔ custom/stock` 误判成变更。
+
+## 8. 验证清单（下次游戏升级时）
 
 1. 重跑 Il2CppDumper → `offsets_sheet.csv` 对照本表 RVA（8.0.0→8.0.4 增量
    `+0xC2DC`/`+0xD598` 无全局规律，须逐方法核对）。
