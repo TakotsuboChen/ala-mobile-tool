@@ -104,7 +104,11 @@ jobs:
               continue
             fi
             VC=$(git cat-file blob "$blade" 2>/dev/null | awk '/versionCode[ ]*=/{print $3}' | head -1)
-            VN=$(git cat-file blob "$blade" 2>/dev/null | grep 'versionName' | sed -E 's/.*"([^"]+)".*/\1/' | head -1)
+            # ⚠️ 必须用「带引号的精确形态」匹配，不能用 `grep 'versionName'`：
+            # build.gradle.kts 顶部有一段构建指纹注释，其中含 `versionName` 字样但
+            # 无引号（"**versionName /"），松匹配会把它当首条命中，sed 替换不掉引号
+            # 就原样输出整行散文 → 镜像 tag 非法 → HTTP 422（2026-10-30 v1.0.4 实测）。
+            VN=$(git cat-file blob "$blade" 2>/dev/null | grep -oE 'versionName = "[^"]+"' | head -1 | sed -E 's/versionName = "//; s/"$//')
             if [ -z "$VC" ] || [ -z "$VN" ]; then
               echo "::warning::Could not extract version at $TAG, skipping."
               continue
