@@ -39,7 +39,9 @@ import kotlin.math.pow
 class PedalOverlayView(
     context: Context,
     private val settings: ModConfig.Settings = ModConfig.Settings(
-        pedalMode = ModConfig.PedalMode.SINGLE,
+        // 仅在未显式传 settings 时生效（OverlayManager 三处调用点都显式传）。
+        // pedalMode 引用 Defaults 单一事实源，避免与配置默认值漂移。
+        pedalMode = ModConfig.DEFAULT_PEDAL_MODE,
         enableAutoDrs = true,
         disableAutoGear = false,
         enableManualShift = false,

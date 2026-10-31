@@ -78,6 +78,16 @@ object ModConfig {
      * 默认开：卡死是"进不去游戏"级别的故障。
      */
     const val DEFAULT_ENABLE_FIX_DLC_STUCK = true
+
+    // ── 以下 public 常量供早期路径/ConfigReceiver 的 `?: 兜底` 引用，避免
+    //    与 `Defaults`（private）漂移。`Defaults` 里同名项直接引用它们。
+    /** 隐藏游戏原生油门/刹车按钮默认值（2026-10-31 起默认开）。 */
+    const val DEFAULT_HIDE_GAME_PEDALS = true
+    /** V10 开场引擎声浪默认值（2026-10-31 起默认开）。 */
+    const val DEFAULT_ENABLE_V10_SOUND = true
+    /** 线性踏板模式默认值（2026-10-31 起默认双踏板）。 */
+    val DEFAULT_PEDAL_MODE = PedalMode.DUAL
+
     const val KEY_DISABLE_AUTO_GEAR = "disable_auto_gear"
     const val KEY_ENABLE_MANUAL_SHIFT = "enable_manual_shift"
     const val KEY_ENABLE_UNLOCK = "enable_unlock"
@@ -795,14 +805,17 @@ object ModConfig {
         const val ABS_PRESSURE = 1.0f
         // 主菜单音乐替换默认开启
         const val ENABLE_MUSIC_REPLACE = true
-        // V10 引擎声浪默认关闭
-        const val ENABLE_V10_SOUND = false
-        // 隐藏游戏原生油门和刹车按钮默认关闭
-        const val HIDE_GAME_PEDALS = false
+        // V10 引擎声浪默认开启（用户 2026-10-31 定案，原默认关）。
+        // ⚠️ 引用外层 public 常量，避免与早期路径兜底值漂移。
+        const val ENABLE_V10_SOUND = DEFAULT_ENABLE_V10_SOUND
+        // 隐藏游戏原生油门和刹车按钮默认开启（用户 2026-10-31 定案，原默认关）。
+        // ⚠️ 同上，引用外层 public 常量。
+        const val HIDE_GAME_PEDALS = DEFAULT_HIDE_GAME_PEDALS
         // TC/ABS 介入指示灯默认开启（纯视觉，参照"位置记忆默认启用"先例）。
         const val ENABLE_TC_ABS_INDICATOR = true
-        // 抓地力反馈默认开启全部（振感 + 视觉，用户 2026-10-04 定案）。
-        val SLIP_FEEDBACK_MODE = SlipFeedbackMode.BOTH
+        // 抓地力反馈默认**关闭**（用户 2026-10-31 定案，原默认「全部」）。
+        // 与路肩振感一同默认关：两条反馈都要用户主动开启。
+        val SLIP_FEEDBACK_MODE = SlipFeedbackMode.OFF
         // 最大振动强度默认 50%（用户 2026-10-04 定案；旧默认 100%）。
         const val SLIP_HAPTIC_INTENSITY = 50
         // 视觉最大不透明度默认 100%：与「最大振动强度」同构的封顶旋钮。
@@ -810,10 +823,12 @@ object ModConfig {
         // 要关就用模式下拉选「关闭」或「振感」。
         const val SLIP_VISUAL_OPACITY = 100
         val SLIP_VISUAL_STYLE = SlipVisualStyle.GLOW
-        // 路肩振感反馈**默认关闭**（2026-10-05 用户定案）：开启会覆盖抓地力振感，
-        // 可能影响抓地力判断，故默认关 + 开启前弹窗确认（见配置页）。
+        // 路肩振感反馈**默认关闭**（2026-10-05 用户定案，2026-10-31 复核保留）：开启会
+        // 覆盖抓地力振感，可能影响抓地力判断，故默认关 + 开启前弹窗确认（见配置页）。
         const val KERB_HAPTIC_ENABLED = false
-        val PEDAL_MODE = PedalMode.SINGLE
+        // 线性踏板默认**双踏板模式**（用户 2026-10-31 定案，原默认单踏板）。
+        // ⚠️ 引用外层 public 常量，避免与早期路径兜底值漂移。
+        val PEDAL_MODE = DEFAULT_PEDAL_MODE
         const val PEDAL_DEADZONE = 0.05f
         const val PEDAL_TRANSITION = 0.5f
         // 双踏板模式下刹车仲裁的过渡点（BRAKE_VALUE 策略，用户配置 0.01..0.99）。

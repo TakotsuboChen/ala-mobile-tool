@@ -501,7 +501,8 @@ class AlaMobileModule : XposedModule() {
         // （广播路径 settings 非空，enableUnlock 按用户值走）。
         val enableUnlock = settings?.enableUnlock ?: true
         // V10 引擎声浪开关：早期路径 ~2s 的开场动画就要用，必须在此派生。
-        val enableV10Sound = settings?.enableV10Sound ?: false
+        // 兜底取 public 默认常量（与 Defaults 单一事实源，见 ModConfig）。
+        val enableV10Sound = settings?.enableV10Sound ?: ModConfig.DEFAULT_ENABLE_V10_SOUND
         // 修复 DLC 更新检查超时卡加载：**卡死发生在启动后几秒**，等 15s 延迟块
         // 才装 hook 时游戏早已卡住，故必须在此派生并走早期路径。
         // 兜底取默认值 true（配置读不到时也要防卡死——进不去游戏是最坏结果）。
@@ -664,7 +665,7 @@ class AlaMobileModule : XposedModule() {
             }
 
             // 以下全部从 liveSettings 派生（原先是外层快照）。
-            val pedalMode = liveSettings?.pedalMode ?: ModConfig.PedalMode.SINGLE
+            val pedalMode = liveSettings?.pedalMode ?: ModConfig.DEFAULT_PEDAL_MODE
             val enableControlReplacement = pedalMode != ModConfig.PedalMode.OFF
             val enableAutoDrs = liveSettings?.enableAutoDrs ?: false
             // 自锁式超车按键：把 OTK 按钮从「按住才生效」改成「点一下切换」。
@@ -692,7 +693,7 @@ class AlaMobileModule : XposedModule() {
             } else Triple(1.0f, -1f, 1.0f)
             // 主菜单音乐替换 / 隐藏游戏原生踏板按钮开关。
             val enableMusicReplace = liveSettings?.enableMusicReplace ?: false
-            val hideGamePedals = liveSettings?.hideGamePedals ?: false
+            val hideGamePedals = liveSettings?.hideGamePedals ?: ModConfig.DEFAULT_HIDE_GAME_PEDALS
 
             if (ctx != null) {
                 try {

@@ -1184,8 +1184,10 @@ fun ConfigureMiscScreen(
     // 路肩振感开启确认（用户 2026-10-05 定案）：打开路肩开关且抓地力反馈含振感时
     // 弹一次。左灰「取消」= 不改变开关；右蓝「确认」= 真正打开。
     // 常驻组合树 + show 驱动（与 ABS 警示同模式，禁用 if 挂载以免丢退出动画）。
+    // 标题由 OverlayDialog 自带（居中粗体），正文左对齐 —— 2026-10-31 用户补标题。
     OverlayDialog(
         show = showKerbWarnDialog,
+        title = "⚠️振感冲突提示",
         onDismissRequest = { showKerbWarnDialog = false },
         onDismissFinished = { },
         content = {
