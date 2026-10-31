@@ -201,8 +201,22 @@ fun LeaderboardScreen() {
             visibleBoard = Triple(tabIndex, selectedTrack, selectedVersion)
             boardAlpha.snapTo(1f)
         }
-        // 筛选变更后把列表滚回顶部（否则新条件的第 1 页会从上次的滚动位置开始）
-        if (listState.firstVisibleItemIndex > 0) listState.scrollToItem(0)
+        // 筛选变更后把列表滚回顶部（否则新条件的第 1 页会从上次的滚动位置开始）。
+        //
+        // ⚠️ **必须用 `requestScrollToItem` 而不是 `scrollToItem`**（2026-10-31 实机修复）：
+        //    `scrollToItem` 只挪位置、**不清 key 锚点**——而本页榜单行的 key 是
+        //    `"t#${userId}"`，A 榜与 B 榜里同一个人的 key 完全相同。Compose 的
+        //    `LazyListState` 在数据源替换时按 `lastKnownFirstItemKey` 恢复滚动位置
+        //    （这正是"同一个人从 A 榜第 1 名变成 B 榜第 4 名，视口却跟着他跑"的根因）。
+        //    位置挪回 0 之后，下一轮测量又把 key 重新记成"当时可见的第一行"，
+        //    等新数据到达时再按它把视口拉走 —— 归位被静默撤销。
+        //    `requestScrollToItem` 内部调 `requestPositionAndForgetLastKnownKey()`，
+        //    同步清空该锚点，数据替换后框架无 key 可依，只能从 index 0 重新测量。
+        //    另：它是**非挂起**函数，不会像 `scrollToItem` 那样卡住协程
+        //    （DriverScreen.kt:201 记录过 scrollToItem 挂起导致请求永不发出的坑）。
+        //    无条件调用（不再判 `firstVisibleItemIndex > 0`）：索引为 0 但向下
+        //    偏移了几百像素时旧判据不归位，视觉上同样是"没回到顶部"。
+        listState.requestScrollToItem(0)
     }
 
     // 滚到底部自动翻页（用户定案：一次最多 30 条）。
