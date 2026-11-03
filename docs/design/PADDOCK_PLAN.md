@@ -283,18 +283,46 @@ bot：群内匹配码 → 建号事务（车手号=最小未占用正整数）�
   模块端弹窗自然重弹）；密码不一致 → 409（防用户名抢占攻击）
 - 密码在申请时一并设置（服务端哈希落 pending），bot 建号时直接使用——
   模块端无 verify 步骤、无校验码回填
-- **重置密码**：群内发「我需要重置密码」严格匹配 → bot 按群身份（member_openid）
-  反查账号签发一次性重置码；单聊不支持（user_openid/member_openid 两体系不互通）
-- **查询用户名**：群内发「查询用户名」严格匹配 → bot 按群身份（member_openid）
-  反查账号，回复围场用户名；未注册/无群身份各有独立失败文案；单聊不支持（同重置密码）
+- **重置密码**：群内发「我需要重置密码」严格匹配 → bot 按**平台身份**反查账号签发
+  一次性重置码；单聊不支持（平台两套身份体系不互通）
+- **查询用户名**：群内发「查询用户名」严格匹配 → bot 按**平台身份**反查账号，回复围场
+  用户名；未注册/无身份各有独立失败文案；单聊不支持（同重置密码）
+
+#### 双平台（QQ + Telegram，2026-11-03 定案）
+
+- **交互逻辑完全一致**：规则集、内置动作、失败文案、触发词**单一共享**（configs 表
+  同一个 `bot_message_rules` 键）。改一次两平台同时生效。
+- **引擎单一实现 = `bot_core`**：规则匹配、三个内置动作、模板渲染、播报判定、金标判定
+  全部在 `bot_core.rs`，两个适配层（`qq_bot` / `telegram_bot`）只做平台特有的
+  验签、收发、payload 解析。**禁止给某个平台复制一份引擎**——那才是「一致性」的落点。
+- **身份列并列不重叠**：`users.member_openid`（QQ，TEXT，**按群隔离**）与
+  `users.telegram_id`（TG，**BIGINT**，全局唯一）。两平台账号体系**独立**
+  （用户定案）：同一人两平台是两个账号、两套成绩。加列迁移 `0012`，无回填。
+- **平台差异收敛到三处**：① 身份列 ② `{{at_me}}` 渲染（QQ 内联 `<qqbot-at-user/>`
+  / TG 转 `text_mention` 实体）③ 内置失败文案措辞（「QQ 群设置」↔「Telegram 隐私模式」，
+  仅当文案与内置默认逐字相同才改写，用户自定义的原样输出）。
+- **Telegram 发消息走 `entities` 而非 `parse_mode`**：MarkdownV2 有 18 个必须转义的
+  字符，现有模板里 `.`/`-`/`#`/`!` 遍地都是，漏一个就整条 400 丢失。走 entities
+  完全绕开转义解析；实体 offset 是 **UTF-16 code unit**（非字节、非码点）。
+- **两个独立发送队列**：QQ 未认证 30 条/分钟（2s 串行间隔）与 Telegram 单群
+  20 条/分钟（3s 每 chat 节流）策略不同，共用队列会让 TG 延迟被 QQ 节流拖垮。
+- **Telegram 特有约束**（实现已处理）：`update_id` 幂等去重（at-least-once 投递）；
+  webhook 秒回 2XX + 异步处理；`message_thread_id` 必须回传（论坛话题群）；
+  4096 字符分段（每段重算实体偏移）；group→supergroup 迁移（`migrate_to_chat_id`）；
+  过滤三类假身份（`1087968824` 匿名管理员 / `777000` 频道转发 / `is_bot`）。
+- **隐私模式是部署前提**：Telegram bot 默认收不到群内全部消息。BotFather
+  `/setprivacy` 关闭后**必须把机器人移出群再重新拉进来**（对已存在群不立即生效），
+  或**设为群管理员**（立即生效）。`getMe().can_read_all_group_messages` 可自检。
+- **webhook 地址**：`/qq/webhook`（QQ）、`/tg/webhook`（Telegram），两者 secret
+  完全独立，不共用配置键。
 
 ### Bot 消息规则引擎（2026-09-12 重构）
 
-- **单一事实源 = `qq_bot::action_metas()`**：每个内置动作（`reply`/`reg_code`/`reset_password`/
+- **单一事实源 = `bot_core::action_metas()`**：每个内置动作（`reply`/`reg_code`/`reset_password`/
   `query_username`）的触发语义、匹配方式（normal/contains/exact）、失败字段与内置默认文案
   全部定义于此。管理端设置页把整表注入前端（`ACTIONS_META`），**前端不再维护任何镜像**
   （此前 JS 里 ACTIONS/FAIL_FIELDS/PRESET_FAIL 三份硬编码曾漂移出「切动作预填错文案」）。
-- **新增一个动作 = 两处改动**：① `action_metas()` 加一条 ② 群/单聊 handler 的 `match` 加分支。
+- **新增一个动作 = 两处改动**：① `action_metas()` 加一条 ② `bot_core::decide_reply` 的 `match` 加分支（两平台自动同时生效）。
   管理端编辑器自动出现该动作及其失败字段。
 - **失败文案优先级**：该动作的字段（如 `no_user_template`）→ 通用 `fail_template` → 内置默认。
 - **普通回复的身份依赖兜底**：模板含 `{{paddock_name}}`/`{{paddock_id}}`/`{{at_me}}` 而

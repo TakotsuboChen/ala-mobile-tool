@@ -179,6 +179,7 @@
 | [`notes/CROSS_PROCESS_CHANNELS.md`](notes/CROSS_PROCESS_CHANNELS.md) | 活跃 | 模块进程 → 游戏进程的全部跨进程通道审计与裁决 |
 | [`notes/CAR_IDENTIFICATION.md`](notes/CAR_IDENTIFICATION.md) | 活跃 | **玩家车身份识别**：carId 运行时读取路径、42 台车映射表、真实型号名不存在的证据 |
 | [`notes/CAR_SETUP.md`](notes/CAR_SETUP.md) | 活跃 | **车辆调教读取**：`GlobalVariables.currentCarSetup` 静态字段路径、14 字段偏移与量纲、刹车平衡单字段语义 |
+| [`notes/TELEGRAM_BOT.md`](notes/TELEGRAM_BOT.md) | 活跃 | **服务端 Telegram Bot 接入**：规则引擎单一共享（`bot_core`）、平台差异三处收敛、entities 渲染、代理与隐私模式约束 |
 
 ### 设计契约（`design/`）
 
