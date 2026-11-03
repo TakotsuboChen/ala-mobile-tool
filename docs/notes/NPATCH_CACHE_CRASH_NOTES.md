@@ -1,23 +1,23 @@
 # NPatch 缓存问题导致的启动闪退 — 调查记录
 
-> 状态：**活跃** · 最后编纂：2026-10-26
-> 一句话结论：NPatch 四个症状各异、根因不同的启动问题（Bug A 缓存损坏 / B 缓存可写 / C 服务未就绪 / D R8 折叠），排查前先对号入座——A/B 崩溃都在模块加载之前，与模块本身无关。
+> 状态：**活跃** · 最后编纂：2026-11-03
+> 一句话结论：NPatch 五个症状各异、根因不同的启动问题（Bug A 缓存损坏 / B 缓存可写 / C 服务未就绪 / D R8 折叠 / **E 作用域未勾选**），排查前先对号入座——A/B 崩溃都在模块加载之前，与模块本身无关。
 
 > 文档规范见 [`docs/README.md`](../README.md)。
 
 
-> ⚠️ **本文件记录四个不同的 NPatch 问题，症状各异、根因不同，排查前先对号入座**（前三者是启动/加载类，§13 是诊断导出类）：
+> ⚠️ **本文件记录五个不同的 NPatch 问题，症状各异、根因不同，排查前先对号入座**（前四者是框架层问题，§15 是**配置层**问题）：
 >
-> | | Bug A（#147，§1–§10） | Bug B（Android 16 W^X，§11） | Bug C（服务回落缺失，§12） | Bug D（R8 混淆，§13） |
-> |---|---|---|---|---|
-> | 症状 | **开屏白屏闪退** | **开屏白屏闪退** | **不崩溃，模块静默不加载** | **不崩溃，诊断包缺 `logcat.log`** |
-> | 崩溃栈 | `Unable to instantiate application` → `Resources.getAssets()` **NPE** | `Unable to instantiate application` → `SecurityException: Writable dex file ... is not allowed` | **无崩溃栈**（进程正常起，只是没 hook） | **无崩溃栈**（`runCatching{}.getOrNull()` 静默降级） |
-> | 根因 | 缓存 **内容损坏**（无完整性校验/无 fsync/无锁） | 缓存**权限可写**（未设只读） | 管理器不在后台时**模块清单能加载、但服务未就绪**（`VectorServiceClient.service` = null ⇒ 模块不实例化） | `ShizukuService` 被 **R8 折叠成抽象空壳 `mm0`**（零构造器），Shizuku 反射实例化失败 |
-> | 触发条件 | 任意 Android 版本 | **Android 14+（本机 Android 16 实证）** | **NPatch 1.0.8+ 本地模式 + 管理器未运行** | 任意版本（**843 及以前**）；需 Shizuku 可用才会走到这条路径 |
-> | 用户侧解法 | **清「游戏」缓存**（不是 NPatch 数据） | **无效** → 只能升级 NPatch 到 **830+**（已修） | **先把 NPatch 管理器挂后台再开游戏**（治标）；根治等上游修服务层 | **无需处置**（不影响模块可用性）；换 Shizuku 实现**无效** |
-> | 上游状态 | 1.0.8 已修（原子写 + 锁） | **830 测试版已修** | **836 存在**；**843 测试版已修**（上游提交 `bbd8897` "keep framework service binder local"，见 §12.8） | **845 已修**（上游提交 `63f8f6be` proguard keep 规则，见 §13.5） |
+> | | Bug A（#147，§1–§10） | Bug B（Android 16 W^X，§11） | Bug C（服务回落缺失，§12） | Bug D（R8 混淆，§13） | **Bug E（作用域未勾选，§15）** |
+> |---|---|---|---|---|---|
+> | 症状 | **开屏白屏闪退** | **开屏白屏闪退** | **不崩溃，模块静默不加载** | **不崩溃，诊断包缺 `logcat.log`** | **不崩溃，模块静默不加载（与 C 同症状）** |
+> | 崩溃栈 | `Unable to instantiate application` → `Resources.getAssets()` **NPE** | `Unable to instantiate application` → `SecurityException: Writable dex file ... is not allowed` | **无崩溃栈**（进程正常起，只是没 hook） | **无崩溃栈**（`runCatching{}.getOrNull()` 静默降级） | **无崩溃栈**（模块代码从未被注入） |
+> | 根因 | 缓存 **内容损坏**（无完整性校验/无 fsync/无锁） | 缓存**权限可写**（未设只读） | 管理器不在后台时**模块清单能加载、但服务未就绪**（`VectorServiceClient.service` = null ⇒ 模块不实例化） | `ShizukuService` 被 **R8 折叠成抽象空壳 `mm0`**（零构造器），Shizuku 反射实例化失败 | **NPatch 管理器里没给本模块勾选游戏包作用域** ⇒ 框架不注入 |
+> | 触发条件 | 任意 Android 版本 | **Android 14+（本机 Android 16 实证）** | **NPatch 1.0.8+ 本地模式 + 管理器未运行** | 任意版本（**843 及以前**）；需 Shizuku 可用才会走到这条路径 | 用户新装/重装后忘记勾作用域 |
+> | 用户侧解法 | **清「游戏」缓存**（不是 NPatch 数据） | **无效** → 只能升级 NPatch 到 **830+**（已修） | **先把 NPatch 管理器挂后台再开游戏**（治标）；根治等上游修服务层 | **无需处置**（不影响模块可用性）；换 Shizuku 实现**无效** | **到管理器给本模块勾选游戏包作用域，重启游戏** |
+> | 上游状态 | 1.0.8 已修（原子写 + 锁） | **830 测试版已修** | **836 存在**；**843 测试版已修**（上游提交 `bbd8897` "keep framework service binder local"，见 §12.8） | **845 已修**（上游提交 `63f8f6be` proguard keep 规则，见 §13.5） | 非 bug，无需修复 |
 >
-> **一句话区分**：崩溃栈里出现 `Writable dex file ... is not allowed` = Bug B；出现 `Resources.getAssets()` null = Bug A；**不崩溃但模块零日志、logcat 里 NPatch 有 `Loaded cached module` 却无 `Module loaded in process`、且有 `VectorServiceClient service is not ready`** = Bug C；**诊断包能导出但 `collection-report.txt` 写 `Included system logcat via Shizuku: No`、logcat 有 `NoSuchMethodException: mm0.<init> []`** = Bug D（不影响模块可用性）。
+> **一句话区分**：崩溃栈里出现 `Writable dex file ... is not allowed` = Bug B；出现 `Resources.getAssets()` null = Bug A；**不崩溃但模块零日志** ⇒ 看 NPatch 文件日志：**有 `npatch/log/` 段且含 `Loaded cached module`** = Bug C（服务未就绪）；**连 `npatch/log/` 段都没有、导出日志里只有「模块进程日志」一段** = **Bug E（作用域没勾，模块根本没被注入）**；**诊断包能导出但 `collection-report.txt` 写 `Included system logcat via Shizuku: No`、logcat 有 `NoSuchMethodException: mm0.<init> []`** = Bug D（不影响模块可用性）。
 >
 > 📌 **版本号速查见 §14**：NPatch 的 `VERSION_CODE` = `git commitCount`，私有仓与公开镜像差 5，**版本号不能直接当代码内容用**。当前主线：844 = `63f8f6be`、845 = `f962cd83`、**846 = `e6a1fd21`（最新，2026-10-18）**。
 
@@ -684,3 +684,107 @@ grep -c "method public constructor <init>()V" out/top/nkbe/npatch/ShizukuService
 | 共存版 APK | `安装包/Ala Mobile Pro 8.0.6 Fix 2.apk`（631,356,783 B，sha256 `9a626be3…bee59`） | 包内 `lspConfig.VERSION_CODE=846` |
 | 签名 | 证书 SHA-256 `b3720382…3a57`，与 845 代**逐位相同** | `apksigner verify --print-certs`；老用户可覆盖安装 |
 | 用户实机验收 | 用户报"测试没问题" | 用户口述（2026-10-18） |
+
+---
+
+## 15. Bug E：作用域未勾选 ⇒ 模块从未被注入（2026-11-03 新增）
+
+> ⚠️ **这不是 NPatch 的 bug，是配置遗漏**。但它与 Bug C 的**用户可见症状完全相同**（游戏正常、模块功能全无、不崩溃），且排查顺序上应当**先排除它**——因为它的判据最简单（一份导出日志就能定案），而 Bug C 需要 logcat。
+
+### 15.1 现象 [V]
+
+新用户反馈「解锁不生效」。提供了一份模块导出的日志
+`ala_tool_log_20261103_205743.txt`（601 行，52,785 B）。
+
+设备：Redmi M2103K19G（`camellian`）/ MIUI V140 / Android 13 (API 33)；
+模块 `1.0.4 (104300)`，构建 `2026-10-30 23:15:14`，提交 `3090780`；
+游戏包读到 `8.0.6 Fix 3 (200150)`；NPatch 本地模式（`detectOnce → NONROOT`）。
+
+**用户最终确认的根因（用户原话）**：「破案了，是没弄作用域」。
+
+### 15.2 决定性判据：导出日志里只有「模块进程」一段 [V]
+
+```
+$ grep -n '^===' ala_tool_log_20261103_205743.txt
+1:=== 模块进程日志 (Java) ===
+```
+
+`LogExporter.export()` 的正常输出应当依次含这些段（`util/LogExporter.kt:103-178`）：
+
+| 段标题 | 本份日志 | 含义 |
+|---|---|---|
+| `=== 模块进程日志 (Java) ===` | ✅ 有 | ConfigActivity 进程，与游戏无关 |
+| `=== 游戏进程日志 (Java) ===` | ❌ **无** | `/sdcard/Android/media/<pkg>/ala_tool.log` 不存在 |
+| `=== 游戏进程日志 (Native) ===` | ❌ **无** | 同上，native 侧 |
+| `=== 游戏进程崩溃记录 ===` | ❌ 无 | `ala_tool_crash_native.log` 不存在 |
+| `=== NPatch 框架日志 (N 个文件) ===` | ❌ **无** | `npatch/log/` 目录不存在或全被标记过滤 |
+
+**辅助证据**：全文件 grep `Module loaded` / `Package loaded` / `onPackageReady read config` /
+`unlock` / `Billing` / `SetUnlocked` —— **全部零命中**。
+
+### 15.3 为什么「零游戏日志」= 模块没被注入 [V]
+
+`AlaMobileModule.onModuleLoaded()` 的**第一句**就是
+`logX(Log.INFO, TAG, "Module loaded in process ${param.processName}")`（`AlaMobileModule.kt:127`），
+紧接着 `initGameLogger()`（`AlaMobileModule.kt:151`）——注释里明写**必须在所有门控 return 之前**，
+专门为了「被拦截」这种最需诊断的场景也留文件日志。
+
+⇒ **只要 NPatch 把模块注入进游戏进程，无论后面被哪个门控拦住，都会留下游戏进程日志。**
+一条都没有 ⇒ 注入根本没发生。
+
+### 15.4 必须排除的两个误判 [V]
+
+**① 不是 AFA 权限问题。** 同一份日志里 20:46 起有
+
+```
+20:49:28 Mailbox write OK com.Takotsubo.AlamobileFormula/ala_tool_config.json (1241B)
+```
+
+`CrossPkgMailbox.write` 内部 `f.parentFile?.mkdirs()`（`config/CrossPkgMailbox.kt:55`）
+会**创建** `Android/media/<游戏包>/` 目录。所以目录存在、AFA 已授权（18:33 首次启动时
+还是 `EPERM`，20:46 起转 `OK`），但目录里**没有** `ala_tool.log` —— 文件是真的不存在。
+
+**② 不是版本门控问题。** 模块进程读到的游戏版本是 `8.0.6 Fix 3 (200150)`，
+正好等于 `SUPPORTED_COEX_FIX = 3`（`VersionGate.kt:66`）；模块 `1.0.4` 要求
+NPatch 850（`NPatchVersionGate.kt:62`）。版本维度全部满足 ⇒ 不是被门控拦下，
+而是压根没跑到门控。
+
+### 15.5 与 Bug C 的区分（同为「不崩溃 + 模块零加载」）[V]
+
+| | Bug C（服务未就绪） | **Bug E（作用域未勾）** |
+|---|---|---|
+| `npatch/log/` 目录 | **存在**，含 `Loaded cached module` 但无 `Module loaded in process` | **不存在**（框架根本没走到加载模块） |
+| 导出日志的段数 | ≥2 段（模块段 + NPatch 段） | **只有 1 段**（模块段） |
+| logcat 特征 | `VectorServiceClient service is not ready` ×2 | 无相关输出 |
+| 需要 root 抓 logcat 吗 | **需要** | **不需要**，导出日志即可定案 |
+| 处置 | 先开管理器（843 起已修） | 管理器里勾选作用域 |
+
+⇒ **排查顺序：先看导出日志有没有 NPatch 段。没有 = Bug E，一步定案，不用抓 logcat。**
+
+### 15.6 实现（固化）：判据落在代码里的哪一处
+
+- 段标题来源：`util/LogExporter.kt:106`（模块）、`:135`（游戏 Java）、`:139`（游戏 Native）、
+  `:147`（崩溃记录）、`:159`（NPatch 框架）
+- 游戏日志路径：`util/Logger.kt:90` `gameMediaDir()` = `/sdcard/Android/media/<context.packageName>/`
+- 模块注入的第一个日志点：`AlaMobileModule.kt:127` `Module loaded in process`
+
+### 15.7 已否决的方案 [X]
+
+- [X] **靠「日志里有没有某条游戏侧业务日志」判断是否注入** —— 业务日志都在门控之后，
+  被拦住时同样为零，无法区分「没注入」与「注入了但被拦」。
+  必须用 `onModuleLoaded` 的**第一条**日志（它在所有门控之前）。
+- [X] **让用户抓 logcat 再判断** —— 99% 用户没有电脑（memory `users-cannot-use-adb`），
+  且 Bug E 用一份导出日志就能定案，不该抬到需要 root/adb 的门槛。
+
+### 15.8 待验证 [?]
+
+- [?] **`LogExporter` 对「段缺失」是静默的**（`foundAny` 只要模块日志读到就是 `true`，
+  `LogExporter.kt:180` 的「未找到」分支不会触发）⇒ 用户和我们看到的都是一份
+  「看起来正常」的日志，实际少了最关键的一半。**建议改为每段显式输出
+  `[未找到：<路径>]`**，让缺失本身成为证据。本会话未实施。
+- [?] Bug E 是否应写进用户侧 FAQ/围场指南（目前只在开发侧文档）。
+
+### 15.9 一句话总结
+
+**导出日志只有「模块进程日志」一段、没有任何游戏进程段 ⇒ NPatch 没给本模块勾作用域，
+模块从未被注入。让用户到 NPatch 管理器勾上 `com.Takotsubo.AlamobileFormula` 并重启游戏即可。**
