@@ -146,6 +146,18 @@ class ConfigReceiver : BroadcastReceiver() {
                 Logger.i(TAG, "ConfigReceiver: setFixDlcStuck $enableFixDlcStuck")
             }
 
+            // 实时同步「强制全局 120 FPS」开关——hook 恒装上（见 fps_unlock_hook.c），
+            // 运行中拨开关立即生效，不需要重装 hook。
+            // ⚠️ 广播里缺该键时回落默认 false（本功能默认关）。
+            val enableForce120Fps = incoming.optBoolean(
+                "enable_force_120_fps",
+                ModConfig.DEFAULT_ENABLE_FORCE_120_FPS
+            )
+            if (tools.alamobile.mod.NativeBridge.isAvailable) {
+                tools.alamobile.mod.NativeBridge.setForce120FpsSafe(enableForce120Fps)
+                Logger.i(TAG, "ConfigReceiver: setForce120Fps $enableForce120Fps")
+            }
+
             // 实时同步 TC 档位（强度插值 + 时机 ε/minSPD 配对覆写）——游戏运行中改档立即生效。
             // **必须经 tcEffectiveParams 按 tc_mode 派生**：mode=default 时无视
             // 缓存的 strength/timing（记忆值）恒为原厂透传，否则"调回游戏默认"

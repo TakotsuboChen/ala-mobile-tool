@@ -428,3 +428,18 @@ val ChequeredFlagIcon: ImageVector = svgIconMulti(
         ),
     )
 )
+
+// ── 「强制全局 120 FPS」开关 icon：帧率 ───
+// 用户提供 SVG（viewBox="1 1 22 22"，三条 path，fill），path 数据逐字符搬运。
+// ⚠️ viewBox 原点非零（1,1）× 尺寸 22×22 —— 必须用 viewportOriginX/Y 平移回
+// 0..22，否则图形右下角被裁掉 1/22。正方形故 24×24 intrinsic 不改比例。
+val FrameRateIcon: ImageVector = svgIconMulti(
+    "FrameRateIcon", 22f, 22f,
+    listOf(
+        SvgPath(d = "M22,11H12a1,1,0,0,0-1,1V22a1,1,0,0,0,1,1H22a1,1,0,0,0,1-1V12A1,1,0,0,0,22,11ZM21,21H13V13h8Z"),
+        SvgPath(d = "M3,12V3h9a1,1,0,0,0,0-2H2A1,1,0,0,0,1,2V12a1,1,0,0,0,2,0Z"),
+        SvgPath(d = "M7,6A1,1,0,0,0,6,7V17a1,1,0,0,0,2,0V8h9a1,1,0,0,0,0-2Z"),
+    ),
+    viewportOriginX = 1f,
+    viewportOriginY = 1f,
+)

@@ -358,6 +358,36 @@ object NativeBridge {
     external fun setFixDlcStuck(active: Boolean)
 
     /**
+     * 强制全局 120 FPS hooks 安装（不动 init() 参数签名，与 [initNextLap] 同模式）。
+     *
+     * 游戏移动端「画面 → 帧率」下拉只有 30 / 60 两项，玩家永远够不到 120；
+     * 但引擎本身支持三档 —— `odometerHandler.setGameAndGraphicsVariables`
+     * 按 `settingsValues._graphicsFramerate`(0x20) 硬编码 30 / 60 / 120。
+     *
+     * 模块 hook `Application.set_targetFrameRate(int)`，开关开启时把入参
+     * 30 / 60 改写为 120，其它值原样透传。**不写任何游戏字段** ⇒ 不污染存档
+     *（`odometerHandler.OnDestroy` 退赛道时会把 `sV` 全字段写回 saveFile）、
+     * 也不影响设置页显示。
+     *
+     * ⚠️ 只解决**软件渲染上限**；屏幕实际刷新率是另一层约束，屏幕停在 60Hz
+     * 时目标 120 不会带来可感知改善。详见 native/src/fps_unlock_hook.h。
+     *
+     * ⚠️ 走 **15s 延迟块**（与 next_lap/overtake/steer_limit 并列），不是早期路径 ——
+     * 触发时机是进赛道，玩家从启动到进赛道远超 15s。
+     *
+     * @param setTargetFrameRate `Application.set_targetFrameRate(int)` 的 RVA
+     */
+    @JvmStatic
+    external fun initFpsUnlock(
+        enableForce120Fps: Boolean,
+        setTargetFrameRate: Long
+    )
+
+    /** 运行时开关强制全局 120 FPS（配置广播到达后调用，不重装 hook）。 */
+    @JvmStatic
+    external fun setForce120Fps(active: Boolean)
+
+    /**
      * 计时赛有效圈速监听 hooks 安装（log-only，无 UI）。
      * - IRDSLevelLoadVariables.Awake：捕获 LLV 单例 → 读 trackToRace 赛道名
      *   （16 条 GP 赛道自动识别）。
@@ -796,6 +826,30 @@ object NativeBridge {
     fun setFixDlcStuckSafe(active: Boolean) {
         if (!isAvailable) return
         try { setFixDlcStuck(active) } catch (e: Throwable) { Logger.w(TAG, "setFixDlcStuck failed", e) }
+    }
+
+    /**
+     * 强制全局 120 FPS hooks 安装安全包装。native 不可用 / 加载失败时静默降级 ——
+     * 等价于功能不生效（帧率保持游戏原生 30 / 60），不影响游戏。
+     */
+    @JvmStatic
+    fun initFpsUnlockSafe(enableForce120Fps: Boolean) {
+        if (!isAvailable) return
+        try {
+            initFpsUnlock(
+                enableForce120Fps = enableForce120Fps,
+                setTargetFrameRate = OffsetTable.APPLICATION_SET_TARGET_FRAME_RATE
+            )
+        } catch (e: Throwable) {
+            Logger.w(TAG, "initFpsUnlock failed", e)
+        }
+    }
+
+    /** 运行时同步「强制全局 120 FPS」开关（不重装 hook，同 [setFixDlcStuckSafe] 模式）。 */
+    @JvmStatic
+    fun setForce120FpsSafe(active: Boolean) {
+        if (!isAvailable) return
+        try { setForce120Fps(active) } catch (e: Throwable) { Logger.w(TAG, "setForce120Fps failed", e) }
     }
 
     /**

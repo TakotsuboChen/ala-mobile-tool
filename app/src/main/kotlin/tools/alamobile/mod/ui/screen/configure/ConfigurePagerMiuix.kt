@@ -86,6 +86,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import tools.alamobile.mod.config.ModConfig
 import tools.alamobile.mod.ui.MarkdownText
+import tools.alamobile.mod.ui.FrameRateIcon
 import tools.alamobile.mod.ui.MiscIcon
 import tools.alamobile.mod.ui.NativeFeatureIcon
 import tools.alamobile.mod.ui.OverlayIcon
@@ -360,6 +361,26 @@ fun ConfigureNativeFeaturesScreen(
                 },
                 checked = uiState.enableFixDlcStuck,
                 onCheckedChange = actions::setEnableFixDlcStuck
+            )
+            // 强制全局 120 FPS：移动端设置页「画面 → 帧率」只有 30 / 60 两项，
+            // 玩家够不到 120（引擎本身支持三档，120 那一支只存在于 PC 版画布）。
+            // 开启后模块 hook Application.set_targetFrameRate，把入参 30/60 改写
+            // 为 120 —— 不写游戏字段，故不改动用户存档、不影响设置页显示。
+            // 默认关：本作 DynamicResolution 是禁用状态，没有自动降分辨率兜底，
+            // 性能不足的机型强推 120 可能反而更不稳。
+            SwitchPreference(
+                title = "强制全局 120 FPS",
+                summary = "可能增加发热与耗电",
+                startAction = {
+                    Icon(
+                        FrameRateIcon,
+                        modifier = Modifier.padding(end = 6.dp),
+                        contentDescription = null,
+                        tint = colorScheme.onBackground
+                    )
+                },
+                checked = uiState.enableForce120Fps,
+                onCheckedChange = actions::setEnableForce120Fps
             )
             SwitchPreference(
                 title = "隐藏油门和刹车按键",

@@ -508,6 +508,14 @@ class AlaMobileModule : XposedModule() {
         // 兜底取默认值 true（配置读不到时也要防卡死——进不去游戏是最坏结果）。
         val enableFixDlcStuck = settings?.enableFixDlcStuck
             ?: ModConfig.DEFAULT_ENABLE_FIX_DLC_STUCK
+        // 强制全局 120 FPS：**必须走早期路径**（不能等 15s 块）。
+        // 帧率的实际设置点是 odometerHandler.Start() → setGameAndGraphicsVariables()，
+        // 而**主菜单场景没有 odometerHandler** ⇒ 首次启动那一次 30 fps 在 15s 块
+        // 装 hook 之前就已经设完了，hook 漏掉它（实机现象：「刚开游戏进主界面锁 30，
+        // 玩过再回主菜单才是高帧率」；原生设 60 时同样如此 ⇒ 本身就是游戏行为）。
+        // 早期安装 + 装好后主动补设一次（见 fps_unlock_hook.c）覆盖零窗口。
+        val enableForce120Fps = settings?.enableForce120Fps
+            ?: ModConfig.DEFAULT_ENABLE_FORCE_120_FPS
 
         // forceLoad + initUnlock（deferred 后同步执行，ShadowHook 已 init）
         // 启动门控：激活时跳过早期 unlock/intro hooks。登录门控（evaluateLoginGate
@@ -605,6 +613,24 @@ class AlaMobileModule : XposedModule() {
             logX(Log.ERROR, TAG, "Early dlc-guard hooks failed: ${e.message}")
         }
 
+        // 强制全局 120 FPS：同走早期路径（与上面的 DLC guard 并列）。
+        // ⚠️ 不能放 15s 块 —— 首次启动那次 30 fps 早在那之前就设完了。详见
+        // 上方 `enableForce120Fps` 派生处的注释。hook 装好后会主动补设一次，
+        // 因此即使本块仍晚于游戏首次设置，最终值也会被纠正为 120。
+        try {
+            if (!NativeBridge.isAvailable) {
+                NativeBridge.forceLoad(getAppContext())
+            }
+            if (NativeBridge.isAvailable) {
+                NativeBridge.initFpsUnlockSafe(enableForce120Fps)
+                logX(Log.INFO, TAG, "Early fps-unlock hooks installed (force120=$enableForce120Fps)")
+            } else {
+                logX(Log.ERROR, TAG, "Early fps-unlock: NativeBridge not available after forceLoad")
+            }
+        } catch (e: Throwable) {
+            logX(Log.ERROR, TAG, "Early fps-unlock hooks failed: ${e.message}")
+        }
+
         // IntroSoundPlayer 也在早期初始化——开场在 ~2s 触发，轮询要尽快开始。
         val earlyCtx = getAppContext()
         if (enableV10Sound && earlyCtx != null) {
@@ -677,6 +703,10 @@ class AlaMobileModule : XposedModule() {
             // 解除最大转向角度限制：SetMaxSteeringAngle 恒用静态基础转角（不再随
             // 车速收紧）。默认关。
             val enableUnlockSteerAngle = liveSettings?.enableUnlockSteerAngle ?: false
+            // 强制全局 120 FPS：hook Application.set_targetFrameRate，把游戏原生
+            // 30/60 改写为 120（只解决软件渲染上限）。默认关。
+            val enableForce120Fps = liveSettings?.enableForce120Fps
+                ?: ModConfig.DEFAULT_ENABLE_FORCE_120_FPS
             // 手动换挡开 ⇒ 关闭游戏自动换挡（disableAutoGear 由 enableManualShift 派生）。
             val enableManualShift = liveSettings?.enableManualShift ?: false
             val disableAutoGear = enableManualShift
@@ -766,6 +796,16 @@ class AlaMobileModule : XposedModule() {
                         logX(Log.INFO, TAG, "initSteerLimit unlock=$enableUnlockSteerAngle")
                     } catch (e: Throwable) {
                         logX(Log.ERROR, TAG, "initSteerLimit failed: ${e.message}")
+                    }
+                    // 强制全局 120 FPS：**不在此处安装** —— 已改走早期 deferred 块
+                    //（见上方 "Early fps-unlock hooks installed"）。首次启动那次
+                    // 30 fps 在 15s 块之前就设完了，放这里会漏掉第一次。
+                    // 但这里仍要同步一次运行时开关：配置广播可能已把它改过。
+                    try {
+                        NativeBridge.setForce120FpsSafe(enableForce120Fps)
+                        logX(Log.INFO, TAG, "setForce120Fps $enableForce120Fps")
+                    } catch (e: Throwable) {
+                        logX(Log.ERROR, TAG, "setForce120Fps failed: ${e.message}")
                     }
                     // ABS 档位下发：同 TC 模式（init 兜底为不覆写/不缩放，这里补用户档位）。
                     try {

@@ -79,6 +79,21 @@ object ModConfig {
      */
     const val DEFAULT_ENABLE_FIX_DLC_STUCK = true
 
+    // 强制全局 120 FPS：游戏移动端「画面 → 帧率」下拉只有 30 / 60 两项，玩家
+    // 永远够不到 120；但引擎本身支持三档（odometerHandler.setGameAndGraphicsVariables
+    // 按 _graphicsFramerate 硬编码 30/60/120）。开启后模块 hook
+    // Application.set_targetFrameRate，把入参 30/60 改写为 120，其它值透传。
+    // **不写任何游戏字段** ⇒ 不污染存档、不影响设置页显示。
+    // ⚠️ 只解决软件渲染上限；屏幕实际刷新率是另一层约束。见 native/src/fps_unlock_hook.h。
+    const val KEY_ENABLE_FORCE_120_FPS = "enable_force_120_fps"
+    /**
+     * 「强制全局 120 FPS」的默认值（public，供 ConfigReceiver 兜底使用 ——
+     * `Defaults` 是 private object）。
+     * 默认关：本作 DynamicResolution 是禁用状态，没有自动降分辨率兜底，
+     * 性能不足的机型强推 120 可能在 40~50 反复横跳、反而更差。
+     */
+    const val DEFAULT_ENABLE_FORCE_120_FPS = false
+
     // ── 以下 public 常量供早期路径/ConfigReceiver 的 `?: 兜底` 引用，避免
     //    与 `Defaults`（private）漂移。`Defaults` 里同名项直接引用它们。
     /** 隐藏游戏原生油门/刹车按钮默认值（2026-10-31 起默认开）。 */
@@ -788,6 +803,8 @@ object ModConfig {
         // 误判并跳过本次目录检查，下次启动重试即可）。用户仍可在配置页关闭。
         // ⚠️ 引用外层 public 常量，避免两处默认值漂移。
         const val ENABLE_FIX_DLC_STUCK = DEFAULT_ENABLE_FIX_DLC_STUCK
+        // 强制全局 120 FPS：默认关（引用外层 public 常量避免漂移）。
+        const val ENABLE_FORCE_120_FPS = DEFAULT_ENABLE_FORCE_120_FPS
         const val DISABLE_AUTO_GEAR = false
         const val ENABLE_MANUAL_SHIFT = false
         const val ENABLE_UNLOCK = false
@@ -931,6 +948,10 @@ object ModConfig {
                     KEY_ENABLE_FIX_DLC_STUCK,
                     Defaults.ENABLE_FIX_DLC_STUCK
                 ),
+                enableForce120Fps = json.optBoolean(
+                    KEY_ENABLE_FORCE_120_FPS,
+                    Defaults.ENABLE_FORCE_120_FPS
+                ),
                 disableAutoGear = json.optBoolean(
                     KEY_DISABLE_AUTO_GEAR,
                     Defaults.DISABLE_AUTO_GEAR
@@ -1044,6 +1065,7 @@ object ModConfig {
         put(KEY_ENABLE_PROTECT_NEXT_LAP, settings.enableProtectNextLap)
         put(KEY_ENABLE_UNLOCK_STEER_ANGLE, settings.enableUnlockSteerAngle)
         put(KEY_ENABLE_FIX_DLC_STUCK, settings.enableFixDlcStuck)
+        put(KEY_ENABLE_FORCE_120_FPS, settings.enableForce120Fps)
         put(KEY_DISABLE_AUTO_GEAR, settings.disableAutoGear)
         put(KEY_ENABLE_MANUAL_SHIFT, settings.enableManualShift)
         put(KEY_ENABLE_UNLOCK, settings.enableUnlock)
@@ -1427,6 +1449,7 @@ object ModConfig {
                 enableProtectNextLap = j.optBoolean(KEY_ENABLE_PROTECT_NEXT_LAP, Defaults.ENABLE_PROTECT_NEXT_LAP),
                 enableUnlockSteerAngle = j.optBoolean(KEY_ENABLE_UNLOCK_STEER_ANGLE, Defaults.ENABLE_UNLOCK_STEER_ANGLE),
                 enableFixDlcStuck = j.optBoolean(KEY_ENABLE_FIX_DLC_STUCK, Defaults.ENABLE_FIX_DLC_STUCK),
+                enableForce120Fps = j.optBoolean(KEY_ENABLE_FORCE_120_FPS, Defaults.ENABLE_FORCE_120_FPS),
                 disableAutoGear = j.optBoolean(KEY_DISABLE_AUTO_GEAR, Defaults.DISABLE_AUTO_GEAR),
                 enableManualShift = j.optBoolean(KEY_ENABLE_MANUAL_SHIFT, Defaults.ENABLE_MANUAL_SHIFT),
                 enableUnlock = j.optBoolean(KEY_ENABLE_UNLOCK, Defaults.ENABLE_UNLOCK),
@@ -1660,6 +1683,7 @@ object ModConfig {
             enableProtectNextLap = Defaults.ENABLE_PROTECT_NEXT_LAP,
             enableUnlockSteerAngle = Defaults.ENABLE_UNLOCK_STEER_ANGLE,
             enableFixDlcStuck = Defaults.ENABLE_FIX_DLC_STUCK,
+            enableForce120Fps = Defaults.ENABLE_FORCE_120_FPS,
             disableAutoGear = Defaults.DISABLE_AUTO_GEAR,
             enableManualShift = Defaults.ENABLE_MANUAL_SHIFT,
             enableUnlock = Defaults.ENABLE_UNLOCK,
@@ -1718,6 +1742,9 @@ object ModConfig {
         // 时超时清 IsSynchronizing 让主场景加载）。默认开。带默认值 ——
         // 命名参数部分构造的调用点无需改动即可编译。
         val enableFixDlcStuck: Boolean = Defaults.ENABLE_FIX_DLC_STUCK,
+        // 强制全局 120 FPS（hook Application.set_targetFrameRate，把 30/60 改写为 120）。
+        // 默认关。带默认值 —— 命名参数部分构造的调用点无需改动即可编译。
+        val enableForce120Fps: Boolean = Defaults.ENABLE_FORCE_120_FPS,
         val disableAutoGear: Boolean,
         val enableManualShift: Boolean,
         val enableUnlock: Boolean,

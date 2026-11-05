@@ -67,6 +67,7 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
                 enableProtectNextLap = s.enableProtectNextLap,
                 enableUnlockSteerAngle = s.enableUnlockSteerAngle,
                 enableFixDlcStuck = s.enableFixDlcStuck,
+                enableForce120Fps = s.enableForce120Fps,
                 disableAutoGear = s.disableAutoGear,
                 enableManualShift = s.enableManualShift,
                 enableUnlock = s.enableUnlock,
@@ -112,6 +113,7 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
             enableProtectNextLap = s.enableProtectNextLap,
                 enableUnlockSteerAngle = s.enableUnlockSteerAngle,
             enableFixDlcStuck = s.enableFixDlcStuck,
+            enableForce120Fps = s.enableForce120Fps,
             disableAutoGear = s.disableAutoGear,
             enableManualShift = s.enableManualShift,
             enableUnlock = s.enableUnlock,
@@ -167,6 +169,7 @@ class ConfigViewModel(application: Application) : AndroidViewModel(application) 
     fun setEnableProtectNextLap(v: Boolean) { _uiState.value = _uiState.value.copy(enableProtectNextLap = v); scheduleSave() }
     fun setEnableUnlockSteerAngle(v: Boolean) { _uiState.value = _uiState.value.copy(enableUnlockSteerAngle = v); scheduleSave() }
     fun setEnableFixDlcStuck(v: Boolean) { _uiState.value = _uiState.value.copy(enableFixDlcStuck = v); scheduleSave() }
+    fun setEnableForce120Fps(v: Boolean) { _uiState.value = _uiState.value.copy(enableForce120Fps = v); scheduleSave() }
     fun setDisableAutoGear(v: Boolean) { _uiState.value = _uiState.value.copy(disableAutoGear = v); scheduleSave() }
     fun setEnableManualShift(v: Boolean) { _uiState.value = _uiState.value.copy(enableManualShift = v); scheduleSave() }
     fun setEnableUnlock(v: Boolean) { _uiState.value = _uiState.value.copy(enableUnlock = v); scheduleSave() }
@@ -234,6 +237,8 @@ data class ConfigUiState(    val pedalMode: ModConfig.PedalMode,
     val enableUnlockSteerAngle: Boolean,
     /** 修复 DLC 更新检查超时卡加载：卡在 "Synchronizing additional content..." 时超时跳过。 */
     val enableFixDlcStuck: Boolean,
+    /** 强制全局 120 FPS：把游戏原生 30/60 改写为 120（只解决软件渲染上限）。 */
+    val enableForce120Fps: Boolean,
     val disableAutoGear: Boolean,
     val enableManualShift: Boolean,
     val enableUnlock: Boolean,
@@ -279,6 +284,7 @@ data class ConfigUiState(    val pedalMode: ModConfig.PedalMode,
         enableProtectNextLap = enableProtectNextLap,
         enableUnlockSteerAngle = enableUnlockSteerAngle,
         enableFixDlcStuck = enableFixDlcStuck,
+        enableForce120Fps = enableForce120Fps,
         disableAutoGear = disableAutoGear,
         enableManualShift = enableManualShift,
         enableUnlock = enableUnlock,

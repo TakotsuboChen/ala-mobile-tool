@@ -234,4 +234,16 @@ object OffsetTable {
     const val UNITY_TRANSFORM_GET_CHILD: Long = 0x32AE49CL
     const val UNITY_TRANSFORM_GET_CHILD_COUNT: Long = 0x32ADE34L
     const val UNITY_OBJECT_GET_NAME: Long = 0x32A408CL
+
+    // ── 强制全局 120 FPS（fps_unlock_hook）──
+    // UnityEngine.Application::set_targetFrameRate(int) —— ICall thunk（不是托管
+    // 方法：函数体尾部 `br x1` 尾跳 il2cpp_resolve_icall 解析出的原生实现）。
+    // ABI = w0=value, x1=method_info（静态方法，**无 this**）。
+    // 全 .so 五个调用点：三处在 odometerHandler.setGameAndGraphicsVariables
+    //（传 30/60/120），两处在 demo 死代码 EffectsGui.Start / MainGui.Start（传 300，
+    // 序列化字段零命中 ⇒ 不执行）。模块只改写 30/60，其它值原样透传。
+    // ⚠️ 升版必核：① 调用点仍为 5 个且全为 `bl`（内联化会绕过 hook）；
+    //    ② .rodata 0x9540b4 的符号名仍为 UnityEngine.Application::set_targetFrameRate；
+    //    ③ 函数体前 4 条指令仍含 adrp 0x390c000（PC 相对，ShadowHook 需重定位）。
+    const val APPLICATION_SET_TARGET_FRAME_RATE: Long = 0x3257B6CL
 }

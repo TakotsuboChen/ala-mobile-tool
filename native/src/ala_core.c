@@ -11,6 +11,7 @@
 #include "next_lap_hook.h"
 #include "dlc_guard_hook.h"
 #include "steer_limit_hook.h"
+#include "fps_unlock_hook.h"
 #include "unlock_hook.h"
 #include "music_hook.h"
 #include "intro_hook.h"
@@ -505,6 +506,39 @@ Java_tools_alamobile_mod_NativeBridge_setUnlockSteerAngle(JNIEnv *env, jclass cl
     (void) env;
     (void) clazz;
     steer_limit_set_active((int) active);
+}
+
+// ─ 强制全局 120 FPS（不动 init() 参数签名，与 initNextLap 同模式）──
+// 触发时机是**进赛道**（odometerHandler.Start → setGameAndGraphicsVariables），
+// 玩家从启动到进赛道远超 15s，故与 next_lap/overtake/steer_limit 并列走 15s 块，
+// **不需要**早期路径（与本文件上方的 DLC guard 不同）。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_initFpsUnlock(JNIEnv *env, jclass clazz,
+                                                    jboolean enable_force_120_fps,
+                                                    jlong set_target_frame_rate) {
+    (void) env;
+    (void) clazz;
+
+    fps_unlock_hook_config_t fu_cfg = {
+        .enable_force_120_fps = (bool) enable_force_120_fps,
+        .set_target_frame_rate_offset = (uintptr_t) set_target_frame_rate,
+    };
+
+    LOGI("initFpsUnlock: force120=%d setTargetFrameRate=0x%lx",
+         (int) enable_force_120_fps, (unsigned long) set_target_frame_rate);
+
+    if (!fps_unlock_install_hooks(&fu_cfg)) {
+        LOGE("Failed to install FPS unlock hooks");
+    }
+}
+
+// 运行时开关强制全局 120 FPS（配置广播到达后调用，不重装 hook）。
+JNIEXPORT void JNICALL
+Java_tools_alamobile_mod_NativeBridge_setForce120Fps(JNIEnv *env, jclass clazz,
+                                                     jboolean active) {
+    (void) env;
+    (void) clazz;
+    fps_unlock_set_active((int) active);
 }
 
 // ─ 修复 DLC 更新检查超时卡加载（不动 init() 参数签名，与 initIntro 同模式）──
