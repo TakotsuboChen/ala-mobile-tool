@@ -532,7 +532,19 @@ class OverlayManager(context: Context) {
                 kerbEnabled = kerbOn,
                 onLevel = mixer?.let { m ->
                     { slipLv: Float, kerbLv: Float, kerbRate: Float, nowMs: Long ->
-                        m.tick(slipLv, kerbLv, kerbRate, nowMs)
+                        // ⚠️ **抓地力电平是否参与振感，由 `slipMode.hasHaptic` 单独判定**，
+                        // 不能因为 `mixer` 存在就直接传进去（2026-11-04 实机 bug）。
+                        // `mixer` 的存在条件是 `slipHapticOn || kerbOn`——只开路肩时
+                        // mixer 也必须建（两条振感要合成一条波形，见类注释「一」），
+                        // 于是"视觉模式 + 路肩开"会得到一个**存在但只该服务路肩**的
+                        // mixer。旧实现无条件 `m.tick(slipLv, ...)`，把抓地力电平也送了
+                        // 进去 ⇒ 用户选「视觉」仍然有抓地力振动（日志实证：
+                        // `mode=VISUAL` 窗口内 `shape none→grip-flat` + `level=1.00`，
+                        // 同期无任何 kerb 信号）。
+                        // 归零必须落在**传进去的 slip 实参**上，而不是只改 tick 内部的
+                        // peak 判据：`buildMixedAmps` 会把 slipCarrier 逐段取大进波形，
+                        // 路肩脉冲之间的静默段会露出抓地力载波。
+                        m.tick(if (slipHapticOn) slipLv else 0f, kerbLv, kerbRate, nowMs)
                     }
                 },
             ).apply {
