@@ -524,7 +524,7 @@ object PaddockClient {
                 code == 200 -> {
                     val j = JSONObject(resp)
                     // 版本化头像 URL 记录到内存：个人卡/磁盘缓存失效全靠它
-                    val avatarUrl = j.optString("avatar_url")
+                    val avatarUrl = j.avatarUrlOf()
                     setMyAvatarUrl(avatarUrl.takeIf { it.isNotEmpty() })
                     MeResult(
                         ok = true,
@@ -1215,7 +1215,7 @@ object PaddockClient {
                     regSeq = e.optLong("reg_seq"),
                     username = e.optString("username"),
                     points = e.optInt("points"),
-                    avatarUrl = e.optString("avatar_url").takeIf { it.isNotEmpty() },
+                    avatarUrl = e.avatarUrlOf().takeIf { it.isNotEmpty() },
                     bestCount = e.optInt("best_count"),
                     zeroCount = e.optInt("zero_count"),
                     // optBoolean 在旧服务端（无该字段）下返回 false = 无金标，天然向后兼容
@@ -1255,7 +1255,7 @@ object PaddockClient {
                     rank = e.optInt("rank"),
                     username = e.optString("username"),
                     lapDisplay = e.optString("lap_display"),
-                    avatarUrl = e.optString("avatar_url").takeIf { it.isNotEmpty() },
+                    avatarUrl = e.avatarUrlOf().takeIf { it.isNotEmpty() },
                     gold = e.optBoolean("gold"),
                 )
             }
@@ -1435,7 +1435,7 @@ object PaddockClient {
                     userId = it.optString("user_id"),
                     username = it.optString("username"),
                     regSeq = it.optLong("reg_seq"),
-                    avatarUrl = it.optString("avatar_url").takeIf { s -> s.isNotEmpty() },
+                    avatarUrl = it.avatarUrlOf().takeIf { it.isNotEmpty() },
                     totalPoints = it.optLong("total_points"),
                     totalRank = nullableLong("total_rank"),
                     bestCount = it.optInt("best_count"),
@@ -1603,6 +1603,13 @@ object PaddockClient {
      * trim 永不触发。缓存失效完全靠 URL 版本号（服务端 avatar_version，上传即变）。
      */
     fun fetchAvatar(avatarUrl: String, cacheKey: String = avatarUrl): Bitmap? {
+        // ⚠️ 防御：非空但非法的 URL（如字面量 "null"）必须在这里挡掉，否则会拼成
+        // `$serverBase` + `null` = `https://…cloudnull`，报「无法解析主机」——
+        // 症状看着像网络故障，实为上游解析把 JSON null 转成了字符串（见 avatarUrlOf）。
+        if (!avatarUrl.startsWith("http") && !avatarUrl.startsWith("/")) {
+            Logger.log(Log.WARN, TAG, "fetchAvatar: 非法 URL 已跳过 [$avatarUrl]")
+            return null
+        }
         memAvatarCache.get(cacheKey)?.let { return it }
         val url = if (avatarUrl.startsWith("http")) avatarUrl else "$serverBase$avatarUrl"
         // 磁盘命中 → 回填内存（文件本身已是降采样 JPEG，直接解码）
@@ -1681,6 +1688,28 @@ object PaddockClient {
     }
 
     @Volatile private var myAvatarUrlField: String? = null
+
+    /**
+     * 从 JSON 读 `avatar_url`，**把 JSON `null` 正确地转成 Kotlin null**。
+     *
+     * ⚠️ 绝不要写成 `o.optString("avatar_url").takeIf { it.isNotEmpty() }`
+     * （2026-11-15 修）：`JSONObject.optString` 在「key 存在但值为 JSON null」时
+     * 返回**字面量字符串 `"null"`**（不是 `""`）——只有 key 缺失才返回默认值。
+     * 服务端对无头像用户下发 `"avatar_url": null`，旧写法于是把 `"null"` 当 URL
+     * 往下传，最终拼成 `https://…cloudnull`，日志报「无法解析主机」，
+     * 看起来像网络故障，实为解析层类型错误。
+     *
+     * 判据必须是 `isNull(key)`（本文件其它字段如 `car_id`/`car_era`/`version_code`
+     * 一直是这个写法，只有 avatar_url 漏了）。
+     *
+     * 返回空串（而非 null）表示「无头像」——与本类 `MeResult.avatarUrl` /
+     * `UiState.avatarUrl` 的既有约定一致（非空 String + 空串哨兵），调用方继续用
+     * `takeIf { it.isNotEmpty() }` 判空即可，不必改类型。
+     */
+    private fun JSONObject.avatarUrlOf(): String {
+        if (isNull("avatar_url")) return ""
+        return optString("avatar_url")
+    }
 
     /** fetchMe 成功后记录服务端下发的版本化 avatar_url（个人卡/磁盘缓存共用）。 */
     fun setMyAvatarUrl(url: String?) {
