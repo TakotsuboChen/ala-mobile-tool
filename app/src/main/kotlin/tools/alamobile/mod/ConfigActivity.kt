@@ -193,7 +193,23 @@ class ConfigActivity : ComponentActivity() {
                                 entry<Route.Settings> { mainScreenEntry() }
                                 entry<Route.About> { AboutScreen() }
                                 entry<Route.Paddock> { tools.alamobile.mod.ui.screen.paddock.LeaderboardScreen() }
-                                entry<Route.Avatar> { tools.alamobile.mod.ui.screen.paddock.AvatarScreen() }
+                                // ⚠️ onUploaded 必须传真实导航：不传就落到默认空 lambda，
+                                // 上传成功后页面停在原处，用户以为没传成功（2026-11-14 实测
+                                // 连点 4 次「选择图片」）。本页无任何"已上传"视觉状态，
+                                // 成功即退出是唯一的正确反馈。
+                                entry<Route.Avatar> {
+                                    tools.alamobile.mod.ui.screen.paddock.AvatarScreen(
+                                        onUploaded = {
+                                            // 用 popUntil 而不是 pop：上传成功后必须确保**离开
+                                            // 头像页**。历史上出现过栈里压了两层 Avatar 的情况
+                                            // （LaunchedEffect 竞态重复 push），单次 pop 只删一层，
+                                            // 页面纹丝不动 = 用户以为没传成功。
+                                            // popUntil 保证无论残留几层都一次退到 Main 之上的
+                                            // 第一层，语义是"上传完了，回去"。
+                                            navigator.popUntil { it is Route.Main }
+                                        },
+                                    )
+                                }
                                 entry<Route.AccountSettings> {
                                     tools.alamobile.mod.ui.screen.paddock.AccountSettingsScreen()
                                 }

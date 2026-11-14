@@ -24,7 +24,22 @@ class Navigator(
 
     private val resultBus = mutableMapOf<String, MutableSharedFlow<Any>>()
 
+    /**
+     * 压栈。**栈顶已是同一 route 时不再压第二个**（2026-11-15 定案）。
+     *
+     * 为什么要防重复：`LaunchedEffect` 里 "读 state → 改 state → push" 的写法存在
+     * 竞态——`markAvatarDone()` 走 `_uiState.update`（快照写入，异步传播），
+     * 若同一 effect 因重组被启动两次，两次都会读到旧的 `needsAvatar=true`，
+     * 各 push 一次 ⇒ 栈里出现两层相同 route。实机日志实证（注册流程，两条
+     * `push Route.Avatar` 相距 72ms）：此后 `pop()` 只删一层，页面纹丝不动，
+     * 表现为"上传成功却停在原地"。
+     *
+     * ⚠️ 判据用 `backStack.lastOrNull() == key`（不是 `contains`）：只有**连续**
+     * 压同一个 route 才是 bug；`Main → Driver(A) → Driver(B)` 这类合法回访
+     * 不受影响（栈顶不同）。
+     */
     fun push(key: NavKey) {
+        if (backStack.lastOrNull() == key) return
         backStack.add(key)
     }
 

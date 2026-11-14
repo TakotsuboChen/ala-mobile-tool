@@ -37,10 +37,19 @@ fun PaddockPager(
     }
 
     // 注册后首次登录（needsAvatar）→ 跳头像上传页
+    //
+    // ⚠️ 必须判「栈顶已经是 Avatar 才跳过」而不是无条件 push（2026-11-15）：
+    // `markAvatarDone()` 走 `_uiState.update`（快照写入、异步传播），若本 effect
+    // 因重组被启动两次，两次都会读到旧的 `needsAvatar=true` 而各 push 一次 ⇒
+    // 栈里两层 Avatar，用户上传成功后单次 pop 只删一层、页面不动（实机日志实证：
+    // 两条 push 相距 72ms，backStack 变成 [Main, Avatar, Avatar]）。
+    // `Navigator.push` 内部也做了栈顶去重，这里是第二道保险（语义更明确）。
     LaunchedEffect(uiState.loggedIn, uiState.needsAvatar) {
         if (uiState.loggedIn && uiState.needsAvatar) {
             viewModel.markAvatarDone()
-            navigator.push(Route.Avatar)
+            if (navigator.backStack.lastOrNull() !is Route.Avatar) {
+                navigator.push(Route.Avatar)
+            }
         }
     }
 

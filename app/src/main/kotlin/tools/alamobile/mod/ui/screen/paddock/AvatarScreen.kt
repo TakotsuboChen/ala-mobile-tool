@@ -186,7 +186,14 @@ private fun collectImagePickers(context: android.content.Context, mime: String):
 /**
  * 头像上传页（Route.Avatar）：注册后首次登录跳转，也可从个人卡再次进入。
  * 选图（ACTION_GET_CONTENT + 应用选择器）→ CropImage 方形裁剪（1:1）→ 压缩 JPEG（≤2MB）→ 上传。
- * 成功后 Toast + 返回（pop）。
+ *
+ * ⚠️ **上传成功必须立刻退出本页**（2026-11-14 用户定案）：本页没有任何"已上传"
+ * 状态展示，留在原处会让用户以为没传成功（实测：用户连点 4 次「选择图片」，
+ * 而第一次其实已经上传成功、服务端 has_avatar=true）。
+ * 退出由 `onUploaded` 承担——**每个入口都必须传真实导航**，不能留默认空 lambda，
+ * 否则页面静默停在原地（这正是本 bug 的成因：`ConfigActivity` 注册路由时漏传）。
+ * 注意本页不能自己 `LocalNavigator.current.pop()`：注册流程需要"先滚回围场主页
+ * 再走时间线"，见 `PaddockPager` 的 `needsAvatar` 编排。
  *
  * ⚠️ 选图契约的两条红线：
  * 1. 不能用 PickVisualMedia——API < 33 依赖 Google 系统照片选择器组件，无 GMS 设备上打不开（用户反馈）。
@@ -204,17 +211,24 @@ fun AvatarScreen(
     val barColor = if (blurActive) Color.Transparent else colorScheme.surface
     val context = LocalContext.current
     var uploading by remember { mutableStateOf(false) }
-    var uploaded by remember { mutableStateOf(false) }
 
-    // 上传工作流：裁剪完成 → IO 线程压缩+上传 → Toast + 返回
+    // 上传工作流：裁剪完成 → IO 线程压缩+上传 → Toast → **退出本页**
+    //
+    // ⚠️ 成功路径的终点是 `onUploaded()`（退栈），不是留在本页——本页没有任何
+    // "已上传"的视觉状态，留在原处就是让用户以为没传成功（2026-11-14 实测用户
+    // 连点 4 次「选择图片」，而第一次其实已经成功）。
+    // 故**不存在"再换一张"状态**：成功后页面已退出，那个按钮永远没机会显示
+    // （2026-11-15 用户定案：「再换一张根本没有意义」）。
+    // `uploading` 仅用于上传中禁用按钮 + 显示「上传中…」。
     suspend fun upload(bytes: ByteArray, contentType: String) {
         uploading = true
+        Logger.i("AvatarScreen", "upload: 压缩后字节=${bytes.size} type=$contentType")
         val err = withContext(Dispatchers.IO) {
             PaddockClient.uploadAvatar(bytes, contentType)
         }
         uploading = false
+        Logger.i("AvatarScreen", "upload: 结果 err=$err")
         if (err == null) {
-            uploaded = true
             Toast.makeText(context, "头像已更新", Toast.LENGTH_SHORT).show()
             onUploaded()
         } else {
@@ -336,7 +350,9 @@ fun AvatarScreen(
                                     color = colorScheme.onBackground.copy(alpha = 0.6f),
                                 )
                                 TextButton(
-                                    text = if (uploading) "上传中…" else if (uploaded) "再换一张" else "选择图片",
+                                    // 上传成功后本页会立刻退出，不存在"再换一张"这个状态
+                                    // （2026-11-15 用户定案：该文案毫无意义且会误导）。
+                                    text = if (uploading) "上传中…" else "选择图片",
                                     onClick = {
                                         // 现查候选（用户可能刚装了相册 App），再弹自绘选择器。
                                         pickerApps = collectImagePickers(context, "image/*")
