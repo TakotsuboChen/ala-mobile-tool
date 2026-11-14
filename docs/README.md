@@ -181,6 +181,7 @@
 | [`notes/CAR_SETUP.md`](notes/CAR_SETUP.md) | 活跃 | **车辆调教读取**：`GlobalVariables.currentCarSetup` 静态字段路径、14 字段偏移与量纲、刹车平衡单字段语义 |
 | [`notes/TELEGRAM_BOT.md`](notes/TELEGRAM_BOT.md) | 活跃 | **服务端 Telegram Bot 接入**：规则引擎单一共享（`bot_core`）、平台差异三处收敛、entities 渲染、代理与隐私模式约束 |
 | [`notes/FPS_UNLOCK.md`](notes/FPS_UNLOCK.md) | 活跃 | **强制全局 120 FPS**：引擎三档硬编码（30/60/120）、移动端 UI 只给 30/60、ICall thunk 的 proxy 写法、切存档污染风险与「改入参不写字段」的取舍 |
+| [`notes/PADDOCK_UI_NOTES.md`](notes/PADDOCK_UI_NOTES.md) | 活跃 | **围场 UI 实现笔记**：导航栈重复 push 致 `pop()` 失效、`optString` 把 JSON null 变 `"null"` 的假网络错误、头像页成功即退出 |
 
 ### 设计契约（`design/`）
 
