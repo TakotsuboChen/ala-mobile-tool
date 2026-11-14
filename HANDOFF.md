@@ -1,160 +1,115 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-11-05T22:38:00+08:00 · Git HEAD: `bd782c4`
+生成时间: 2026-11-14T21:46:15+08:00 · Git HEAD: 5dcc15d
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: `main` @ `bd782c4`（工作切片 `c7ff86c` + 固化切片 `bd782c4`）
-- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `bd782c4`——HEAD 必是本次 handoff 提交（步骤 7），其 parent 才是文档记录的 SHA
-- 待重探的 [?]: 见 §5 标 `[?]` 的条目
-- 先读: [`docs/notes/FPS_UNLOCK.md`](docs/notes/FPS_UNLOCK.md)（本次主要产出）
+- 锚点: `main` @ `5dcc15d`（2026-11-14 21:46）
+- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `5dcc15d`——HEAD 必是本次 handoff 提交，
+  其 parent 才是文档记录的 SHA
+- 待重探的 [?]: 见 §5
+- 先读: `docs/design/AVATAR_OSS.md`（本次全部结论的单源）
 
 ## 1. 当前目标
-无进行中的功能切片。本会话完成：**新增「强制全局 120 FPS」开关**，
-实机验证通过（冷启动直接进主界面即高帧率），已装机。
+头像迁移到阿里云 OSS **已完成上线**。读路径已从「VPS 代理」切成「客户端直连」，
+全站头像流量不再经过服务器。**写路径（上传）按用户决定暂不做直连。**
 
 ## 2. 已验证状态 — 工作实际停在哪
-- [V] **工作切片 `c7ff86c`**：新增 `native/src/fps_unlock_hook.c/.h`，
-  hook `Application.set_targetFrameRate`（RVA `0x3257B6C`），开关开启时把入参
-  30/60 改写为 120。11 个文件，详见 commit message 与 `docs/notes/FPS_UNLOCK.md` §3。
-- [V] **固化切片 `bd782c4`**：`docs/notes/FPS_UNLOCK.md`（五节骨架）+
-  CLAUDE.md Files to Know + `docs/README.md` §5 索引。
-- [V] **lint**：`./gradlew :app:lint` → `BUILD SUCCESSFUL in 2m 12s`，
-  67 warnings / 0 error（全是既有基线）。
-- [V] **构建**：`./gradlew :app:assembleRelease -x :app:lintVitalAnalyzeRelease
-  -x :app:lintVitalRelease` → `BUILD SUCCESSFUL in 1m 53s`，APK 11,425,343 B。
-- [V] **产物实证**：APK `22:25:24` > 源码 `22:21:09`；
-  `fps_unlock: applied targetFrameRate`（native）命中 1；
-  `Early fps-unlock hooks installed`（dex）命中 1；
-  「强制全局 120 FPS」「可能增加发热与耗电」各命中 1；
-  `FrameRateIcon` 的 path `M22,11H12a1,1,0,0,0-1,1V22` 命中 1。
-- [V] **已装机**：`MEIZU_20`（192.168.50.142:5555），`install -r` Success。
-- [V] **实机验证通过**：用户确认「冷启动直接进主界面就是高帧率，不用先进赛道」。
-- 工作区: 干净，`main...origin/main` 已同步。
 
-### 测试/build 输出（本次交接 run 的真实输出）
-```
-$ ./gradlew :app:lint
-BUILD SUCCESSFUL in 2m 12s
-Lint found 67 warnings, 4 hints (2 errors/14 warnings filtered by baseline)
+- **OSS 直连生效** [V] 生产 `/v1/leaderboard/points` 返回的 `avatar_url` 已是
+  `https://ala-mobile-paddock.oss-cn-hangzhou.aliyuncs.com/avatars/{uuid}/{v}.jpg`
+- **145 张头像抽查全部可下载** [V] `urllib` 循环请求 145/145 成功，0 失败；
+  体积 min 2419B / p50 20503B / max 46851B（压缩前 p50 197KB）
+- **手机端实测正常** [V] MEIZU 20 模块日志 21:37 起 `MISS, downloading https://...oss...`
+  共 145 条，磁盘缓存新增 145 个文件、总量 4.4MB；用户确认「测试正常」
+- **服务端测试** [V] `cargo test -p paddock-api` → `64 passed; 0 failed`，
+  `cargo build` exit=0
+- **模块端构建** [V] `./gradlew :app:assembleDebug` BUILD SUCCESSFUL，
+  `compressAvatar` 在 `classes10.dex` 命中 3 次；`:app:lint` 0 error
+- **生产镜像** `paddock-api:1.0.1-oss8`（VPS `.env` 的 `PADDOCK_IMAGE`）
+- 工作区: 两仓均已提交并 push，干净
 
-$ ./gradlew :app:assembleRelease -x :app:lintVitalAnalyzeRelease -x :app:lintVitalRelease
-BUILD SUCCESSFUL in 1m 53s
-
-$ adb install -r app/build/outputs/apk/release/app-release.apk
-Performing Streamed Install
-Success
-```
+### 关键数字（生产实测）
+| 项 | 值 |
+|---|---|
+| 头像总数 | 231（全部已在 OSS 上，HeadObject 探测 Ok(true)） |
+| 压缩效果 | p50 197KB → 20KB，降约 90% |
+| 原 `/v1/avatar/*` 占全站出流量 | 97.0%（17.04GB / 17.56GB） |
+| VPS | 阿里云广州 `8.134.50.222`；bucket 在**杭州** |
 
 ## 3. 决策与理由
-- **hook 改「入参」而不是「写字段」** [V]——`odometerHandler.OnDestroy` 退出
-  赛道时会调 `savePlayerSettings`，`BuildPlayerSettings_V2` 把 `sV` 全部字段
-  写回 `saveFile`（含 `+0x20`）⇒ 写字段会永久污染用户存档；且移动端下拉只有
-  2 项，`set_value(2)` 越界会让设置页显示与行为不一致。否决：写
-  `sV->_graphicsFramerate`（三个缺陷无法规避）。
-- **只匹配 30/60，不用区间判据** [V]——未来若出现 90 档，白名单不会误改；
-  300（demo 死代码）与 `-1`（原生刷新率）一律透传。
-- **走早期 deferred 块 + 装好后补设一次** [V]——见 §4 第一条，这是踩过的坑。
-- **默认关闭** [V]（用户上一轮定案）——本作 `DynamicResolution` 是禁用状态
-  （`Enable()` 全 `.so` 零调用者），没有自动降分辨率兜底，弱设备强推 120
-  可能 40~50 横跳、反而更差。
-- **图标用用户提供的 SVG** [V]——`viewBox="1 1 22 22"` 原点非零，走
-  `viewportOriginX/Y=1` 平移（不要改 path 坐标，见 CLAUDE.md CustomIcons 条）。
+
+- **读直连、写不直连** [V]——用户明确定案。写入引流仅占 0.003%（圈速上传全期
+  0.5MB），且写直连需发新版模块。服务端已留接口位。
+- **URL 切换用 `configs.oss_migrated` 标记** [V]——**不能用 key 字符串形态判断**。
+  key 形态由代码写死、与对象实际位置无关（详见 §4 第一条死路）。
+- **版本号编进路径** `avatars/{uuid}/{v}.jpg`，不用 `?v=` [V]——OSS 查询参数是
+  白名单式的（`versionId`/`response-*`），无「忽略未知参数」的承诺。
+- **迁移零失败才写标记** [V]——有失败时切 URL 会让那部分头像 404。
+- **OSS V4 独立实现，不与 Garage 的 AWS SigV4 合并** [V]——三处实质差异：
+  `host` 不参与签名 / `x-oss-content-sha256` 只收 `UNSIGNED-PAYLOAD` /
+  密钥前缀 `aliyun_v4`。官方测试向量逐字节验证通过。
+- **`image` crate 只开 jpeg+png** [V]——镜像 20.4MB → 21.1MB，仅 +0.7MB。
 
 ## 4. 失败的尝试 — 不要再试
-- [X] **把 `initFpsUnlock` 放 15s 延迟块**（第一版实现）——首次启动那次 30 fps
-  在 15s 块之前就设完了，hook 漏掉。实机现象「刚开游戏进主界面锁 30，玩过再回
-  主菜单才是高帧率」。⚠️ 这**不是**模块引入的问题：用户原生设 60 时同样如此。
-  修法 = 提前安装 + 装好后补调一次，**改回调逻辑无效**（回调压根没被调用）。
-- [X] **直接写 `GlobalVariables.sV->_graphicsFramerate = 2`**——存档永久污染
-  （`odometerHandler.OnDestroy` 隐式存盘）+ UI 错乱（下拉只有 2 项）+
-  被 `acceptNewValues` 冲掉。三个缺陷都无法规避。
-- [X] **先 hook `setGameAndGraphicsVariables` 再裸调一次**——多一层 methodInfo
-  依赖、调用次数变两次；唯一优势场景（值不为 0/1/2）在移动端不可达。
-- [X] **只改 Android 层 `preferredRefreshRate` 代替改 IL2CPP**——两层正交，
-  屏幕 120Hz 而 `targetFrameRate` 仍 60 时每帧重复显示两次，流畅度不变。
-- [X] **NDK `ANativeWindow_setFrameRate`**——Unity 已通过 `dlopen`+`dlsym`
-  实现并在 `SwappyGL::swap` 里调用，重复无益。
-- [X] 继承死路（详 `.handoffs/20261105223736-handoff.md` §4 及更早）：靠业务日志
-  判断模块是否注入 / `Mailbox write OK` 当游戏侧通道证据 / 「不崩溃+功能全无」
-  直接判 Bug C / `@{围场用户名}` 做 TG 提及降级 / 无身份时"只显示名字不加 @" /
-  容器加 `HTTP_PROXY` 不配 `NO_PROXY` / 修改已应用的迁移文件 / `text_mention`
-  当 `@username` / `teloxide` / 共用 QQ 的 `SendJob` / 启动时自动 `setWebhook` /
-  本地共用生产 token / `getUpdates` 探活 / `try_send` 入队 / `handle_*` 返回
-  空串表示静默 / 整圈五维全填 0 / `strings | grep` 搜 APK 中文 / `baksmali` 后
-  grep 中文 / 条件调用 `remember` / `PickVisualMedia` / `createChooser` /
-  `ResolveInfo.loadLabel()` / 相信 `UP-TO-DATE` / hook `HybridComponent.EnableOTK` /
-  hook `drsToggle` / 直写 `_currentDRSState` / 整段 `md.disasm(detail=True)` /
-  `coroutineScope{}` 内多源竞速 / Remote Preferences `remove()` / 全局挂 `tnum` /
-  `FontFamily.Monospace` / 用构造快照 `position` 做触摸基准 / `kerbTapWave` 垫底 /
-  `g_*_active || g_config.enable_*` 双判据 / 扫描 `this` 前 N 字节找候选指针 /
-  `saveOverlayPosition` 刷新 `saved_at` / `scrollToItem` 跨数据集归位 /
-  `firstVisibleItemIndex > 0` 才归位。
+
+- [X] **用 `key` 字符串形态判断「对象在哪」**——`is_migrated_key()` 认为
+  `avatars/{uuid}/{v}.jpg` = 已迁移。但新 `upload_avatar` 一上线就往 **Garage**
+  写新形态 key ⇒「新形态 key + 对象在 Garage」⇒ 231 张全部误判、一张没搬，
+  且 URL 指向 OSS ⇒ 全站 404。**判「有没有」必须发 HeadObject，别查字段格式。**
+- [X] **用「OSS 配置项是否齐全」判断能否直连**——配好 OSS 但没迁移时，对象还在
+  Garage，直接下发 OSS URL ⇒ 全站 404（中间态可长达数天）。
+- [X] **从 `key` 末段反解版本号**——存量 key 末段是 UUID，得到 `?v=01a06d14-...`。
+  不报错不 404，但缓存失效语义永久错误（换头像后客户端一直显示旧图）。
+  必须从 `users.avatar_version` 列读。
+- [X] **Canonical URI 只写 `/{key}`**——OSS 签名的 Canonical URI **必须含 bucket**，
+  即使走 virtual-hosted（HTTP 路径只有 `/{key}`）。漏了 ⇒ 403 SignatureDoesNotMatch。
+  官方向量 `/examplebucket/exampleobject` 就是这个意思。
+- [X] **迁移模块 S3 URL 写 `{ep}/avatars/{key}`**——key 已含 `avatars/` 前缀 ⇒
+  `avatars/avatars/...` ⇒ Garage 404。
+- [X] **追加 `<script>` 用 `rfind('</script>')` 定位**——模板已有多个脚本块时命中的
+  不是想的那一个，`migStart` 落在标签外被当纯文本 ⇒ 按钮完全无反应。
+- [X] **轮询函数复用外部局部变量 `el`**——每轮 `ReferenceError` 被
+  `catch { /* 静默 */ }` 吞掉 ⇒ 进度条不动。轮询必须自取 DOM。
+- [X] **`api()` 当 `{ok,message}` 对象用**——它是「成功返回字符串 / 失败抛异常」。
+  成功路径因此显示「失败：undefined」。
+- [X] **先上生产再看 bucket 权限**——bucket 私有读时服务端带签名一切正常
+  （测试连接通过、迁移成功），客户端匿名访问全 403。**部署前先匿名 curl 一个对象。**
+- [X] 继承死路（详 `.handoffs/20261114214606-handoff.md` §4 及更早，含 120FPS
+  与更早期全部条目，**一条未删**）
 
 ## 5. 已知坑
-- ⚠️ **首次启动那条更早的 30 fps 设置路径仍未反汇编定位** [?]——功能上已被
-  「安装后补设」覆盖，但如果那条路径在运行期会再触发，补设可能被覆盖。
-  目前实测未见复发。见 `docs/notes/FPS_UNLOCK.md` §5。
-- ⚠️ **hook 目标只有 56 字节且前 4 条含 `adrp`** [?]——PC 相对寻址，
-  ShadowHook 需重定位才能装。本次安装成功，但升版后要重验
-  （失败码从 `shadowhook_get_errno()` 取）。
-- ⚠️ **只解决软件渲染上限** [V]——游戏窗口 `preferredRefreshRate` = 0（无偏好），
-  屏幕停 60Hz 时目标 120 无体感改善。本次目标设备已能跑满，但换设备需重测。
-- ⚠️ **`LogExporter` 对「段缺失」是静默的** [?]（继承，未做）——`foundAny` 只要
-  模块日志读到就是 `true`，游戏进程日志缺失完全不提示。**待改**：每段显式输出
-  `[未找到：<路径>]`。
-- ⚠️ **`baksmali` 输出目录别放 `/tmp`** [V]（继承）——本机 `/tmp` 是 4.9G tmpfs。
-- ⚠️ **`grep -a` 与逐 dex 检查** [V]——`classes*.dex` 通配在 zsh 下可能零匹配而
-  静默返回 0；APK 内只有 `classes.dex` 一个。
-- ⚠️ **`const val Long` 的 RVA 不能靠 grep 验证** [V]——被内联成二进制常量。
-- ⚠️ **NPatch 的 `android.util.Log` 只进 logcat 不落文件** [V]（继承）。
-- ⚠️ **Bug E 不需要 logcat，Bug C 必须** [V]（继承）——先数导出日志段数。
-- ⚠️ **VPS 直连 `api.telegram.org` 被 DNS 污染** [V]（继承）；**`NO_PROXY` 不可省** [V]（继承）。
-- ⚠️ **已应用的迁移文件不能改** [V]（继承）。
-- ⚠️ **Telegram 隐私模式对已存在的群不立即生效** [V]（继承）；**`entity` 偏移是 UTF-16 code unit** [V]（继承）。
-- ⚠️ **`tg_broadcast_chats` 与 `bot_broadcast_groups` 是两套独立配置** [V]（继承）。
-- ⚠️ **`@username` 补录需要用户先发过言或点「检查状态」** [V]（继承）。
-- ⚠️ **`edited_message` 当前忽略** [V]（继承）。
-- ⚠️ **`bot_known_groups` 4 群 vs `bot_broadcast_groups` 2 群** [?]（继承，疑正常）。
-- ⚠️ **`reqwest` 对 `NO_PROXY` 的 CIDR 语法未单独验证** [?]（继承）。
-- ⚠️ **supergroup 迁移链路未实机触发** [?]（继承）。
-- ⚠️ **QQ markdown 通道对纯 `***`/`# ` 的渲染未真机验证** [?]（继承）。
-- ⚠️ **魅族 20 的 IP 会来回变** [V]（继承）——`.142`/`.123` 都出现过。
-- ⚠️ **覆盖重发后已装用户收不到更新提示** [V]（继承）——按 versionCode 比较。
-- ⚠️ **`sort=time_desc/asc` 排的是上传时间** [V]（继承）。
-- ⚠️ **`best_laps` 是物化快照，回填 `laps` 后必须重算** [V]（继承）。
-- ⚠️ **VPS 系统时钟慢 3 分钟** [V]（继承）。
-- ⚠️ **对话纪律** [?]（继承）：1 逐条消化 mid-turn 消息 2 旧快照不当现在时
-  3 装机前验设备 APK 版本 4 调查日志先对齐「几次」计数 5 修 UI 时序先拉触摸时间线
-  6 日志判不了的结论不要用日志反驳用户体感 7 别在用户锁屏时操作设备
-  8 动用户设备状态前先说明 9 不要主动提版本号 10 跑长耗时/带 timeout 的命令前必须
-  先说明 11 对外交流不用内部编号，用现象描述 12 数据还有没有用由需求方判断
-  13 用户要的 APK 先看 `/sdcard/Download/` 14 未经许可不得操作设备（最高优先级）
-  15 已确认的信息不要重复问 16 数据展示口径（精度/小数位/间距）先问再定
-  17 下断言前先取证 18 大段文档写文件不贴终端 19 日志里有某行 ≠ 该行被执行了
-  20 用户说「我的设备没事但别人的可能有问题」时，不能因为本机复现不了就否定
+
+- ⚠️ `cacheKey = avatarUrl` ⇒ **任何改头像 URL 形态的动作都会让全量缓存失效**
+  [V] 本次从相对切绝对时实测重下 145 张。未来换域名/换 key 格式前要预期这个代价。
+- ⚠️ **bucket 必须公共读** [V]——模块端没有 AK/SK，只能匿名 GET。
+- ⚠️ **`avatar_migrate.rs` 与 `AvatarCompress.kt` 各有一个 `AVATAR_SIDE = 256`**
+  [?] 改必须两边同改（代码里已加注释，但无编译期约束）。
+- ⚠️ **`decodeAvatarScaled` 阈值 168 与上传尺寸 256 绑定** [V]——上传压到 256 后
+  `inSampleSize` 从 16 掉到 1，解码 192→256px，memAvatarCache 反而 37MB→67MB。
+  改上传尺寸必须重算这个阈值。
+- ⚠️ **61 个 `avatar_version = 1` 的异常值** [?]（正常应是 epoch millis）——
+  对象存在且可访问，不影响功能，未清理。
+- ⚠️ **前缀继承项** [?]：VPS 时钟慢 3 分钟 / 魅族 20 IP 会变（`.142`↔`.123`）/
+  `best_laps` 是物化快照须重算 / 覆盖重发后同版本用户收不到更新提示。
 
 ## 6. 下一步（有序）
-1. **（待你决定）刷新率那一层**：若在别的设备上 120 不生效，才需要做
-   `WindowManager.LayoutParams.preferredRefreshRate`。动手前必须先测
-   `Display.getRefreshRate()` 实际值 + `logcat | grep -i swappy`。
-   见 `docs/notes/FPS_UNLOCK.md` §5。
-2. **（待你决定）修 `LogExporter` 的「段缺失静默」**：每段显式输出 `[未找到：<路径>]`。
-   独立小改动，与任何功能无关。
-3. **（待你决定）存量用户的 `@username` 补齐**（服务端）。
-4. **（待你决定）Telegram 播报目标群提示**：管理端缺「勾了 QQ 不等于 TG 也播报」说明。
-5. **（待你决定）服务端 1.0.2 发版**——版本号是你的决策域。
-6. **（待你决定）「应用调教」功能**：数据已能取到、已入库、已能展示，回写游戏未做。
-7. **（待你决定）历史研究成果回收**：`docs/README.md` §7 的 8 个主题表。
+
+1. **（待你决定）模块端三项改动是否发版**：256 压缩 / 100MB 缓存 / 解码阈值
+   168 是一套，一起发才有意义。已提交在 `ad8d613`，未发版。
+2. **（待你决定）写直连**：服务端已留接口位（`avatar.rs` 的双后端结构），
+   需加 `/v1/me/avatar/prepare` 签 presigned PUT + `/confirm` 发号，模块改
+   `uploadAvatar` 三步走。收益是流量 0.003%，价值在架构纯度。
+3. **（待你决定）清理 61 个 `avatar_version=1` 的异常值**。
+4. **（待你决定）Garage 收尾**：迁移已完成，可关掉 garage 容器（保留数据卷）。
+   compose 里 `GARAGE_*` 环境变量与 `NO_PROXY` 的 `garage` 可一并清。
+5. **（待你决定）历史研究成果回收**：`docs/README.md` §7 的 8 个主题表。
+6. 继承的待办见 `.handoffs/20261114214606-handoff.md` §6（120FPS 刷新率层 /
+   LogExporter 段缺失静默 / TG 播报提示 / 服务端发版 / 应用调教回写）——均未动。
 
 ## 7. 留给用户的开放问题
-- 换设备（不同屏幕刷新率）时 120 是否仍生效？要不要现在补刷新率那层？
-- 本次 120 FPS 要不要进下一个版本的 Release Notes？
-- 弱设备上开 120 会不会反而更差？要不要加个提示文案？
-- 首次启动那条更早的 30 fps 路径要不要继续挖？（功能已覆盖，根因未知）
-- 覆盖重发/版本相同导致存量用户收不到更新提示，是否需要升 Fix 号？（继承）
-- `position saved` 每帧落盘要不要改成松手才落盘？（继承）
-- 是否要按调教做榜？（继承）
-- `selectedSimples`（0x10，int[]）语义未解析——要不要一起读？（继承）
-- 负前束/正前束的 UI 表述未核对（实测 `toe=-0.0326/0.0884`）。（继承）
-- 50% 踏板占比阈值是否合适？（继承）
+
+- 模块三项改动何时发版？（版本号是你的决策域）
+- 写直连要不要做？
+- Garage 现在可以关掉，还是想再观察几天？
+- 61 个 `avatar_version=1` 要不要归一化？
