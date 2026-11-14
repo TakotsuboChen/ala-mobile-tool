@@ -1,7 +1,6 @@
 package tools.alamobile.mod.ui.screen.paddock
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContract
@@ -72,7 +71,6 @@ import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
-import java.io.ByteArrayOutputStream
 
 /**
  * 选图契约：**定向启动用户选中的 App**（component 由自绘选择器决定）。
@@ -231,12 +229,7 @@ fun AvatarScreen(
             if (uri != null) {
                 MainScope().launch {
                     val packed = withContext(Dispatchers.IO) {
-                        val input = context.contentResolver.openInputStream(uri)
-                        val bmp = BitmapFactory.decodeStream(input)
-                        if (bmp == null) return@withContext null
-                        val out = ByteArrayOutputStream()
-                        bmp.compress(Bitmap.CompressFormat.JPEG, 90, out)
-                        Pair(out.toByteArray(), "image/jpeg")
+                        compressAvatar(context, uri)
                     }
                     if (packed != null) upload(packed.first, packed.second)
                     else Toast.makeText(context, "图片读取失败", Toast.LENGTH_SHORT).show()
@@ -258,6 +251,14 @@ fun AvatarScreen(
                     aspectRatioY = 1,
                     fixAspectRatio = true,
                     outputCompressFormat = Bitmap.CompressFormat.JPEG,
+                    // 内存护栏：cropper 默认不缩放（outputRequestWidth=0），3072² 全尺寸
+                    // 解码是 37.7MB 位图。这里限到 1024（约 4MB）——正好大于最终 256，
+                    // 留足双线性精修的信息量，又不让一次解码吃掉半屏内存。
+                    // ⚠️ 用 RESIZE_INSIDE 不用 RESIZE_EXACT：后者是
+                    //    createScaledBitmap(filter=false) 最近邻，大幅降采样会出锯齿。
+                    outputRequestWidth = 1024,
+                    outputRequestHeight = 1024,
+                    outputRequestSizeOptions = CropImageView.RequestSizeOptions.RESIZE_INSIDE,
                     cropShape = CropImageView.CropShape.OVAL,
                     guidelines = CropImageView.Guidelines.ON,
                 ),

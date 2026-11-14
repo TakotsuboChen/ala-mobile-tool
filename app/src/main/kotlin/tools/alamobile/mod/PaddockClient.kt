@@ -61,8 +61,22 @@ object PaddockClient {
     /** 待传队列上限——防刷圈异常时无限膨胀 */
     private const val QUEUE_MAX = 200
 
-    /** 头像磁盘缓存总量上限（裁剪后 JPEG 普遍 20~80KB，5MB ≈ 百人级榜单全量） */
-    private const val AVATAR_DISK_MAX_BYTES = 5L * 1024 * 1024
+    /**
+     * 头像磁盘缓存总量上限。
+     *
+     * 2026-11-14 从 5MB 提到 100MB：旧注释「裁剪后 JPEG 普遍 20~80KB」已被现实
+     * 证伪（实测最大 1.8MB/张、p90 667KB）。上限过低会让满编榜单（205 行）在
+     * 滚动到底时触发 trim 自删，回滚又要重下——正是 2026-09-06 花大力气修掉的
+     * 「全量重下死循环」。100MB 对现代机型是可忽略的占用（`cacheDir` 本身可被
+     * 系统在存储紧张时清理），换来的是彻底不抖动。
+     */
+    private const val AVATAR_DISK_MAX_BYTES = 100L * 1024 * 1024
+
+    /** 头像上传的目标边长（服务端显示最大 96dp，3× 屏 = 288px，256 有 1.3× 余量） */
+    private const val AVATAR_UPLOAD_SIDE = 256
+
+    /** 头像上传的 JPEG 质量（实测 256/q88 ≈ 22KB/张） */
+    private const val AVATAR_UPLOAD_QUALITY = 88
 
     /**
      * 圈速上传失败但**已进本地待传队列**时的提示文案(2026-09-10)。
@@ -1680,12 +1694,21 @@ object PaddockClient {
     /** 仅查内存缓存（UI 首帧同步路径用，绝不阻塞）；miss 返回 null 走异步加载。 */
     fun fetchAvatarFromCache(cacheKey: String): Bitmap? = memAvatarCache.get(cacheKey)
 
-    /** 头像解码降采样（36~56dp 显示尺寸；512px 全尺寸 ×N 张的内存/GC 压力不可接受）。 */
+    /**
+     * 头像解码降采样（36~56dp 显示尺寸；全尺寸 ×N 张的内存/GC 压力不可接受）。
+     *
+     * 阈值 144→168（2026-11-14）：这是本轮压缩改动的**必要配套**，不是顺手优化。
+     * 循环退出条件等价于「解码后边长落在 [阈值, 2×阈值)」。上传端压到 256 后，
+     * `inSampleSize` 会从原来的 16 掉到 1，解码结果从 192px 涨到 256px——
+     * **流量降了、内存反而涨**（`memAvatarCache` 256 张的位图总量 37MB→67MB）。
+     * 阈值提到 168 让 256px 输入走 `sample = 2`（解出 128px），既覆盖 3× 屏
+     * 56dp = 168px 的最严苛显示需求，又把内存压回去。
+     */
     private fun decodeAvatarScaled(bytes: ByteArray): Bitmap? = try {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         var sample = 1
-        while (bounds.outWidth / (sample * 2) >= 144) sample *= 2
+        while (bounds.outWidth / (sample * 2) >= 168) sample *= 2
         BitmapFactory.decodeByteArray(
             bytes, 0, bytes.size,
             BitmapFactory.Options().apply { inSampleSize = sample },
