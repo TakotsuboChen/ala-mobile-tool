@@ -189,6 +189,7 @@
 | [`design/PADDOCK_PLAN.md`](design/PADDOCK_PLAN.md) | 活跃 | 围场私服契约源：API 形状、积分公式、赛道显示名、圈速详情取数路径 |
 | [`design/ABS_LEVEL_DESIGN.md`](design/ABS_LEVEL_DESIGN.md) | 活跃 | ABS 档位调节设计（v2） |
 | [`design/TC_LEVEL_DESIGN.md`](design/TC_LEVEL_DESIGN.md) | 活跃 | TC 档位调节设计 |
+| [`design/AVATAR_OSS.md`](design/AVATAR_OSS.md) | 活跃 | **头像对象存储直连**：OSS V4 与 AWS SigV4 的三处差异、版本号进路径不进 query、迁移三条红线、缓存/解码阈值耦合 |
 
 ### 归档（`archive/`）
 
