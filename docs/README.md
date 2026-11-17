@@ -182,6 +182,7 @@
 | [`notes/TELEGRAM_BOT.md`](notes/TELEGRAM_BOT.md) | 活跃 | **服务端 Telegram Bot 接入**：规则引擎单一共享（`bot_core`）、平台差异三处收敛、entities 渲染、代理与隐私模式约束 |
 | [`notes/FPS_UNLOCK.md`](notes/FPS_UNLOCK.md) | 活跃 | **强制全局 120 FPS**：引擎三档硬编码（30/60/120）、移动端 UI 只给 30/60、ICall thunk 的 proxy 写法、切存档污染风险与「改入参不写字段」的取舍 |
 | [`notes/PADDOCK_UI_NOTES.md`](notes/PADDOCK_UI_NOTES.md) | 活跃 | **围场 UI 实现笔记**：导航栈重复 push 致 `pop()` 失效、`optString` 把 JSON null 变 `"null"` 的假网络错误、头像页成功即退出 |
+| [`notes/BUILD_PERFORMANCE.md`](notes/BUILD_PERFORMANCE.md) | 活跃 | **构建性能优化**：`buildConfigField` 时间戳摧毁增量链（52s→1s）、R8 的 50~73s 是单线程全程序分析物理下限、dev/staging 变体分层、`build/` 误删 31GB 的风险与修复 |
 
 ### 设计契约（`design/`）
 

@@ -68,6 +68,24 @@ Build the module APK:
 ./gradlew :app:assembleDebug
 ```
 
+**日常装机验证用 `dev`（快 5 倍）**：
+```bash
+./gradlew :app:assembleDev
+```
+
+⚠️ **构建变体分层（2026-11-17 定案）**——三者不是冗余，各司其职：
+
+| 变体 | 重建成 | 机制 | 用途 |
+|---|---|---|---|
+| `debug` | 1 s（增量） | 正常 debug | 日常代码迭代 |
+| **`dev`** | **15 s** | 纯 D8，**不跑 R8** | **日常装机验证**（包名带 `.dev`，与正式包共存） |
+| **`staging`** | **50 s** | R8 只 shrink（`-dontoptimize -dontobfuscate`） | **验证 keep 规则是否误删反射类** |
+| `release` | 73 s | 完整 R8 | 正式发版 |
+
+**`dev` 测不出 keep 规则问题**（不 shrink，所有类都在）——怀疑 R8 裁掉了某个反射用的类时，必须用 `staging` 复现。
+
+⚠️ **`build/` 在本项目是逆向工作区，不是 Gradle 输出**（2026-11-17 修复）：里面躺着 72 项 / 31GB 不可恢复材料（`build/v8.0.6-official/` 11GB、各版本 APK、反编译输出）。Gradle 的 `buildDir` 已改到 `build-gradle/`（根 `build.gradle.kts` 的 `allprojects{}` 块）。**改这条之前先读该块注释**——迁回去会让 `./gradlew clean` 删光 31GB，而 `.gitignore` 排除了它，git 救不回来。
+
 Build release:
 ```bash
 ./gradlew :app:assembleRelease
@@ -96,6 +114,19 @@ Clean build outputs:
 ```bash
 ./gradlew clean
 ```
+只删 `build-gradle/`。**`build/`（逆向材料 31GB）不受影响**——2026-11-17 起 `buildDir` 已迁走，该结论经标记文件 + 真跑 clean 实测验证。
+
+### ⚠️ 构建耗时排查：不要重复踩这些坑
+
+**根因已修复**：`buildConfigField` 里用 `System.currentTimeMillis()` 会让 `generateXxxBuildConfig` 每次重跑 → `BuildConfig.java` 内容变化 → 它在 Kotlin 源集内且被 `EnvInfo.kt` 引用 → **Kotlin 全量重编 + 5 个下游任务连锁重跑**。改用 `git log -1 --format=%ct` 后零改动增量 **52s → 1s**。详见 [`docs/notes/BUILD_PERFORMANCE.md`](docs/notes/BUILD_PERFORMANCE.md)。
+
+**已被实测证伪、不要再试的 R8 加速手段**（原始数据见上述文档 §4.1）：`enableR8.fullMode=false`、`-Xmx7g` 加大堆、`-XX:+UseTransparentHugePages`、`android.r8.gradual.support=true`、`android.r8.threadPoolSize`。采样实证 **R8 运行时 115 个线程里仅 1 个 RUNNABLE、CPU 260~350%**——全程序调用图分析天然串行，这是物理下限。
+
+**测量方法论红线**：
+- **`--profile` 只能用来找「哪个任务慢」，不能用来做 A/B 计时**（它自带开销）
+- **冷 daemon 与热 daemon 的数字差 5~20 倍**，报结论前必须标明温度。本项目曾因把冷态 `compileDebugKotlin=2m13s` 当成稳态，错误归因"Kotlin 编译慢"
+- `--info` 里那条 `Task 'X' is not up-to-date because:` 是**唯一能一句话定案增量失效原因**的日志，比耗时表更直接
+- `actionable tasks: N executed` 里含 `NO-SOURCE` 假阳性（如 `mergeDebugNativeDebugMetadata`），CMake 两个任务恒执行（AGP 硬编码 `upToDateWhen=false`），`packageDebug` 不可缓存——这三项永远在 executed 里，不是优化目标
 
 ## Version Naming Convention
 
