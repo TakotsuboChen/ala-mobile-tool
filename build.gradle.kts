@@ -5,7 +5,7 @@ plugins {
 }
 
 /**
- * ⚠️ rootProject 的 buildDir 从默认的 `build/` 改为 `build-gradle/`（2026-11-17）
+ * ⚠️ **rootProject 的** buildDir 从默认的 `build/` 改为 `build-gradle/`（2026-11-17）
  *
  * ## 为什么（这是数据安全修复，不是提速）
  *
@@ -14,18 +14,22 @@ plugins {
  * 探针结果等。而 `build/` 同时又是 Gradle 的默认 `buildDir`。
  *
  * 后果：**`./gradlew clean` 的语义就是 `delete(buildDir)`**，会无差别删光这
- * 31GB。而 `clean` 是日常命令，且 `build/` 在 `.gitignore` 里（第 16/17 行），
- * **删了无法从 git 恢复**。
+ * 31GB。而 `clean` 是日常命令，且 `build/` 在 `.gitignore` 里，**删了无法从
+ * git 恢复**。
  *
- * 修复方式选择「改 Gradle 指向」而非「搬 31GB 数据」：
- *   - 逆向材料原地不动，零搬迁风险
- *   - 只需在 `.gitignore` 补一行 `build-gradle/`
- *   - 两个目录名从此语义清晰：`build/` = 逆向工作区，`build-gradle/` = 构建输出
+ * ## ⚠️ 只改 rootProject，**必须用 `rootProject {}` 而不是 `allprojects {}`**
  *
- * ⚠️ 若将来要再动这个配置，先确认 `build/` 下没有新产生的 Gradle 产物
- * （`app/` 子项目的 buildDir 不受影响，仍是 `app/build/`）。
+ * 2026-11-17 首次实现用了 `allprojects { ... }`，把 `:app` 的 buildDir 也一并
+ * 改到了 `build-gradle/app`——本地因为残留着旧的 `app/build/outputs/apk/release/
+ * app-release.apk` 而没暴露问题，**CI 立即失败**：
+ *
+ *     mv: cannot stat 'app/build/outputs/apk/release/app-release.apk': No such file or directory
+ *
+ * 本项目的 `build/` 危险只存在于**根目录**（逆向材料在 `build/v*`），
+ * `app/build/` 是纯 Gradle 产物，**不需要也不应该改**——改了会破坏 CI 与所有
+ * 文档里记录的产物路径。
  */
-allprojects {
-    layout.buildDirectory.set(file("${rootProject.projectDir}/build-gradle/${project.name}"))
-}
+// 根项目自身（根 build script 的隐式 receiver 就是 rootProject）
+layout.buildDirectory.set(file("$projectDir/build-gradle"))
+
 
