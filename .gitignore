@@ -13,8 +13,13 @@ AlaMobile_8.0.0_Takotsubo*
 
 # Gradle
 .gradle/
+# ⚠️ `build/` 在本项目里是**逆向工作区**（31GB 材料：各版本 APK、反编译输出、
+# 探针结果），不是 Gradle 输出。Gradle 的 buildDir 已于 2026-11-17 改到
+# `build-gradle/`（见根 build.gradle.kts 注释）——否则 `./gradlew clean` 会
+# 删光那 31GB 且 git 无法恢复。
 build/
 */build/
+build-gradle/
 captures/
 .kotlin/
 
