@@ -22,6 +22,21 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
+      # Gradle 缓存（2026-11-17 新增）。此前本工作流**没有任何缓存**：
+      # 每次 CI 都从零下载 Gradle 发行版 + 全部依赖 + 已完成 artifact transform，
+      # 单是依赖解析与 transform 就要几十秒到分钟级。
+      #
+      # 用官方 `gradle/actions/setup-gradle@v6`（`gradle/gradle-build-action` 的
+      # 继任者，已废弃）而非手写 actions/cache：
+      #   • key 由它自己按 OS + job + Gradle 版本 + wrapper checksum 推导，
+      #     比手写 hashFiles('**/*.gradle*') 更准（后者漏 gradle.properties、
+      #     libs.versions.toml 之外的输入）
+      #   • 缓存 Gradle User Home 的 caches/、wrapper/dists/、notifications/
+      #   • 自动做 wrapper jar 校验（v4 起）
+      # 放在 SDK/NDK 准备之前：那些步骤不依赖 Gradle，但缓存越早恢复越好。
+      - name: Set up Gradle (with build cache)
+        uses: gradle/actions/setup-gradle@v6
+
       # Google SDK 仓库未发布 platforms;android-37，但 GitHub runner 预装了
       # android-37.0（ApiLevel=37，真 API 37 platform，Platform 17）。AGP 要求
       # 目录名 android-37 + package.xml/source.properties 路径标识一致，所以
