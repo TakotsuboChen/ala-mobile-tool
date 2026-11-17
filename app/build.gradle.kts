@@ -25,10 +25,11 @@ plugins {
  * ## 为什么在配置阶段求值
  *
  * 这两个值必须对**每次构建**重新求值。若放进 `doLast`/`providers.provider`
- * 延迟求值，configuration cache 会缓存上一次结果。配置阶段直接求值 =
- * 每次 `gradlew` 调用都刷新（Gradle 9 对配置阶段读外部命令会警告
- * configuration cache 不兼容，但本项目未启用该特性，`gradle.properties`
- * 里没有 `org.gradle.configuration-cache`）。
+ * 延迟求值，configuration cache 会缓存上一次结果。
+ *
+ * ⚠️ 但从 2026-11-17 起，**求值结果的稳定性比「求值时机」更重要**——
+ * 配置阶段求出一个每次都变的值，会让 BuildConfig 成为"每次都变的任务输入"，
+ * 从而摧毁整条增量编译链。详见下方第二段注释。
  *
  * ## git SHA 的边界
  *
@@ -36,7 +37,48 @@ plugins {
  * HEAD` 只需要 HEAD 提交本身，不依赖历史深度，因此浅克隆也能取到。
  * 非 git 环境（如源码 tarball）取不到时回落 `"unknown"`，不能让构建失败。
  */
-val buildTimeMillis: Long = System.currentTimeMillis()
+/*
+ * ## ⚠️ 为什么这里用 commit 时间而不是 System.currentTimeMillis()（2026-11-17）
+ *
+ * 旧实现用 `System.currentTimeMillis()` 取「真实构建时刻」，代价极其昂贵：
+ *
+ *   build.gradle.kts 每次求值出不同的值
+ *     → `generateXxxBuildConfig` 的输入属性 `items` 变化（Gradle 按**内容哈希**
+ *       判定增量，不按 mtime）
+ *     → BuildConfig.java 每次重新生成
+ *     → 它在 Kotlin 源集里且被 EnvInfo.kt 引用（`'javaSources' file
+ *       BuildConfig.java has changed`）
+ *     → `compileXxxKotlin` 全量重编
+ *     → `compileXxxJavaWithJavac` → `dexBuilder` → `mergeProjectDex` → `package`
+ *       连锁重跑
+ *
+ * 实测量化（2026-11-17，12 核 WSL2）：
+ *   - 零改动增量构建：**52s（8 tasks executed）→ 7s（2 tasks executed）**
+ *   - 每次必跑的 6 个下游任务全部由这一个时间戳拖出来
+ *   - `--info` 铁证：`Task ':app:generateDebugBuildConfig' is not up-to-date
+ *     because: Value of input property 'items' has changed`
+ *
+ * 改用 commit 时间后：同一 commit 反复构建值恒定 → BuildConfig UP-TO-DATE
+ * → Kotlin UP-TO-DATE。诊断价值几乎无损——历史上那次「用户报 9/18 的 Alpha 1
+ * 而实际构建更早」的排查，靠 `GIT_SHA` 一眼就能识破，并不需要精确到秒。
+ *
+ * ⚠️ 副作用已知并接受：同一 commit 内多次构建的包，日志里的「构建时间」相同。
+ * 需要区分时看 git SHA；若确实要精确构建时刻，用
+ * `-PbuildTimeMillis=$(date +%s000)` 显式注入（不改文件、不影响他人）。
+ */
+val buildTimeMillis: Long = (findProperty("buildTimeMillis") as String?)
+    ?.toLongOrNull()
+    ?: try {
+        // `git log -1 --format=%ct` = HEAD 提交的 unix 时间戳（秒），对同一 commit 恒定。
+        val proc = providers.exec {
+            commandLine("git", "log", "-1", "--format=%ct")
+            isIgnoreExitValue = true
+        }
+        proc.standardOutput.asText.get().trim().toLongOrNull()?.times(1000L) ?: 0L
+    } catch (_: Throwable) {
+        0L
+    }
+
 val gitSha: String = try {
     val proc = providers.exec {
         commandLine("git", "rev-parse", "--short", "HEAD")
@@ -92,6 +134,50 @@ android {
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
+            )
+        }
+
+        // ── dev：日常本地验证（2026-11-17）─────────────────────────────
+        //
+        // **不跑 R8**，走纯 D8。实测真正重建 **15 秒**（release 是 73 秒）。
+        //
+        // 为什么快：跳过整个全程序调用图分析 + 树摇。代价是 APK 25MB
+        // （release 11MB），本地装机完全无所谓。
+        //
+        // ⚠️ dev 测不出的东西：keep 规则是否误删了反射类。因为没跑 shrink，
+        // 所有类都在。要验证 keep 规则请改用 `staging` 变体。
+        //
+        // ⚠️ 产物不可发布：未混淆、未优化、未裁剪。
+        //
+        // 用法：`./gradlew :app:assembleDev`
+        create("dev") {
+            initWith(getByName("release"))
+            isMinifyEnabled = false
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
+        }
+
+        // ── staging：keep 规则兼容性验证（2026-11-17）──────────────────
+        //
+        // 跑 shrink（能测出 keep 规则问题），但跳过 R8 最贵的两个阶段：
+        //   -dontoptimize   跳过全局优化（内联/类合并/跨过程分析 —— 73s 的主体）
+        //   -dontobfuscate  跳过重命名（省 mapping.txt 生成）
+        // 实测真正重建 **50 秒**，APK 13MB。
+        //
+        // 什么时候用它：改了 proguard-rules.pro、加了新依赖、或怀疑 R8 把某个
+        // 反射用的类裁掉了。日常装机验证用 `dev` 更快。
+        //
+        // ⚠️ 产物不可发布：未混淆、未优化。
+        //
+        // 用法：`./gradlew :app:assembleStaging`
+        create("staging") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".staging"   // 与正式包共存，不覆盖用户安装
+            versionNameSuffix = "-staging"
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+                "proguard-staging.pro"
             )
         }
     }
@@ -166,7 +252,9 @@ dependencies {
     // Compose (BOM 统一版本)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
-    implementation(libs.androidx.compose.ui.tooling.preview)
+    // ⚠️ `ui-tooling-preview` 已于 2026-11-17 删除：全仓 `@Preview` 数量 = 0，
+    // 该依赖是纯死重（21 个 class / 22.7KB，R8 本来也会剥掉）。
+    // 将来若引入 @Preview，再把它加回 implementation 即可。
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.compose.material3)
     debugImplementation(libs.androidx.compose.ui.tooling)
