@@ -1,104 +1,79 @@
 # HANDOFF — 读全文再开始干活
 
-生成时间: 2026-11-17T15:24:00+08:00 · Git HEAD: `4e9dc91`
+生成时间: 2026-11-18T12:40:00+08:00 · Git HEAD: `68c42a9`
 信任规则: [V] = 交接时已用命令验证；[?] = 仅记忆未复核，当线索对待；[X] = 已证伪，别用。
 
 ## 0. 复核（下一会话先做）
-- 锚点: `main` @ `4e9dc91`（2026-11-17 15:20，已 push，CI 全绿）
-- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `4e9dc91`——HEAD 必是本次 handoff 提交，
-  其 parent 才是文档记录的 SHA；权威以 `git log --oneline -8` 实际输出为准
+- 锚点: `main` @ `68c42a9`（ala-mobile-tool 仓库；本次 handoff 提交的 parent）
+- 漂移检查: `git rev-parse HEAD~1` 是否仍 = `68c42a9`——HEAD 必是本次 handoff 提交，其 parent 才是文档记录的 SHA
+- 姊妹仓 `../ala-mobile-paddock` 本次也有提交：`c9d59cf`（已 push，`main...origin/main` 同步）[V]
 - 待重探的 [?]: 见 §5
-- 先读: [`docs/notes/BUILD_PERFORMANCE.md`](docs/notes/BUILD_PERFORMANCE.md)（本轮全部原始数据）
+- 先读: 本次新增研究见 **`../ala-mobile-paddock/docs/BUILD_PERFORMANCE.md`**（491+ 行，服务端构建性能全部结论）
 
 ## 1. 当前目标
-把模块编译速度压到极致。**已完成并封板**：debug 零改动增量 52s → **1s**，
-release 零改动增量 73s → **3s**，CI 6m58s → **4m25s**。
+模块侧（本仓）已封板：debug 零改动增量 52s→**1s**，release 73s→**3s**，CI 6m58s→**4m25s**。
+本轮工作全部在**姊妹仓 paddock（Rust 服务端）**：把 `docker build` 从 3m42s 降到 **2m00s**（cache mount），
+并证明**剩余 2 分钟已无优化空间**（86% 在 fat LTO，物理下限）。
 
 ## 2. 已验证状态 — 工作实际停在哪
 
-- **BuildConfig 时间戳污染已根除** [V] `36580dd`：`System.currentTimeMillis()` →
-  `git log -1 --format=%ct`。实测量化（连续两次一致）：debug 零改动增量
-  **52s（8 tasks executed）→ 1s（2 executed）**；release 73s → 3s。
-  `--info` 铁证：`Value of input property 'items' has changed`。
-- **dev / staging 变体已落地** [V] `36580dd`：`dev`（`isMinifyEnabled=false`，纯 D8）
-  真正重建 **15s**；`staging`（`-dontoptimize -dontobfuscate`，保留 shrink）**50s**。
-- **buildDir 已迁到 `build-gradle/`** [V] `89a7042` + `4e9dc91`：`build/` 下 72 项 /
-  31GB 逆向材料现在安全。**验证方式不是推理**：放标记文件 → 真跑 `./gradlew clean`
-  → 标记幸存、31GB 完好、`app/build` 正常被清。
-- **CI wrapper 校验失败已修** [V] `a85c614`：原 `gradle-wrapper.jar` 的 sha256
-  `0fa1d4ba…` 不在 Gradle 官方 checksum 库，用 `./gradlew wrapper` 重新生成后
-  = `497c8c2a…`，与 `services.gradle.org` 逐字节一致。
-- **CI 全绿** [V] run `44037512983` success，4m25s（对比无缓存基线 6m58s）。
-- 工作区: **干净**，`main...origin/main` 无未提交改动。
+### 本仓（ala-mobile-tool）— 与上一轮交接一致，未改动 [V]
+- 工作区干净，`main...origin/main` 同步，HEAD `68c42a9` [V] `git status --short --branch`
+- BuildConfig 时间戳污染已根除（`36580dd`）：debug 增量 52s→1s，release 73s→3s [V]
+- `buildDir` 已迁 `build-gradle/`，`build/` 下 31GB 逆向材料安全（标记文件 + 真跑 clean 实测）[V]
+- CI 全绿：run `44037512983` success，4m25s [V]
 
-### 测试/build 输出（本次交接前的真实输出）
+### 姊妹仓（ala-mobile-paddock）— 本轮全部工作 [V]
+- **Dockerfile**：`RUN --mount=type=cache,target=/build/target,id=paddock-target` + registry cache mount + 产物 cp 到 `/build/out`。`docker build --check` → **no warnings found** [V]
+- **效果**：改一行 3m42s → **2m00s**（−45%），产物字节级不变 [V]
+- **文档**：`docs/BUILD_PERFORMANCE.md`（491+ 行）已提交并 push [V]
+- **提交**：`30938c4`（Dockerfile）→ `2a56537`（文档）→ `c9d59cf`（thin LTO 定案）[V] `git log --oneline -3`
+
+### 本轮实测的关键数字 [V]
 ```
-./gradlew :app:assembleDebug  → BUILD SUCCESSFUL in 1s, 40 tasks: 2 executed, 38 up-to-date
-./gradlew :app:assembleRelease → BUILD SUCCESSFUL in 3s, R8 FROM-CACHE
-./gradlew :app:lint → BUILD SUCCESSFUL, 68 warnings / 0 新增 error（2 errors 被 baseline 过滤）
-gh run watch 44037512983 → success（lint ✓ / Build release APK ✓ / Rename APK ✓ / Upload ✓）
+宿主 gnu fat LTO（干净窗口 load 1.5~2.1）：58.2 / 61.3 / 66.6s
+容器 musl fat LTO（-Z time-passes）：~103s，其中 LTO 段 84%
+容器 musl thin LTO（-Z time-passes）：~129s，LLVM_thinlto 73.9s > LLVM_fatlto 60.3s
+docker build 改一行：113~143s（load 1.98~2.35）
+docker build 全量（冷 cache）：223s
 ```
 
 ## 3. 决策与理由
-
-- **构建时间改用 commit 时间而非删掉** [V]——`GIT_SHA` 已能定位构建，精确到秒无额外诊断价值；
-  代价是同一 commit 内多次构建的「构建时间」相同。需精确时刻用 `-PbuildTimeMillis` 注入。
-- **保留两个非发布变体而非一个** [V]——`dev` 因不跑 shrink **测不出 keep 规则误删反射类**，
-  `staging` 才能。两者互补，不是冗余。
-- **改 Gradle 指向而非搬 31GB 数据** [V]——搬运有风险且耗时，改 buildDir 零风险。
-- **只改 rootProject 的 buildDir** [V]——`app/build/` 是纯 Gradle 产物，不需要改；
-  改了会破坏 CI 与所有文档记录的产物路径。
+- **用 cache mount 而非 cargo-chef / sccache** [V]——三者的缓存前提（多仓/CI/多分支）本项目全无；实测 sccache 反慢 8%（2m02→2m12）。否决方案：cargo-chef，叠加 stage 与 recipe 失效点。
+- **维持 `[profile.release]` 原样（z + fat + cgu1 + strip）** [V]——四参数逐一实测：`opt-level` z 最快（同窗口 3×3：z 69.2s vs s 73.3s）；`cgu=16` 单独改是**负收益**（codegen 5.2s→10.4s）；`lto=thin` 体积 +41% 且容器内更慢；`strip` 无空间。
+- **否决换 glibc 基础镜像** [V]——容器内 `LLVM_thinlto 73.9s` 比 `LLVM_fatlto 60.3s` 还慢 23%，说明是 thin LTO 在 musl target 下执行更久，不是分配器/调度问题；换 glibc rustc 编译 musl target 产出仍是 musl 二进制，救不了。
+- **用户纠正①「可是你之前每次编译都要几分钟」** [V]——我先前测的是本地 `cargo build`（2.5s），用户真正在等的是 `docker build`（3m42s）。**必须区分优化对象**。
+- **用户纠正②「什么意思，提升不了吗？」** [V]——我说「已到物理下限」范围太宽。准确边界是：**fat LTO 那 86% 无解**，不是整个构建无解（cache mount 就砍掉了 45%）。
 
 ## 4. 失败的尝试 — 不要再试
-
-- [X] **`allprojects { layout.buildDirectory.set(...) }`** —— 把 `:app` 也改了，
-  本地因残留旧 APK 没暴露，**CI 立即失败**：`mv: cannot stat
-  'app/build/outputs/apk/release/app-release.apk'`。注释里那句「app/ 子项目不受影响」
-  是凭直觉写的，未验证且错误。**必须用根 build script 的隐式 receiver**（`rootProject {}` 不是有效 DSL，实测脚本编译失败）。
-- [X] **R8 五种加速手段**（全部实测无效，原始数据见 `BUILD_PERFORMANCE.md` §4.1）：
-  `enableR8.fullMode=false`（81 vs 81）、`-Xmx7g`（80 vs 81，RSS 稳定 3GB 未触顶）、
-  `-XX:+UseTransparentHugePages`（73 vs 73，各 3 次）、`android.r8.gradual.support=true`
-  （53 vs 50）、`android.r8.threadPoolSize`（默认已是 12 线程）。**采样实证：R8 运行时
-  115 个线程里只有 1 个 RUNNABLE、CPU 260~350%** —— 全程序分析天然串行，物理下限。
-- [X] **换掉 `material-icons-extended`** —— 11,105 个 class / 36MB，但**零 `@Composable` 注解**，
-  Kotlin 按需加载，R8 A/B 实测仅 +0.3~1.1s。换掉需自绘 **34 个图标**。性价比不成立。
-- [X] **拆模块加速** —— `parallel` 只在模块间并行；拆模块把文件粒度换成模块粒度，
-  社区实测 3 模块改 library 反而慢 40s。
-- [X] **WSL2 里设 `scaling_governor`** —— `/sys/devices/system/cpu/cpu0/cpufreq/` **不存在**，
-  WSL2 是 Hyper-V 虚拟机，cpufreq 属宿主 Windows。
-- [X] **「Gradle UP-TO-DATE 谎报」** —— 实测 Gradle 按**内容哈希**判定（`touch` 不触发重跑），
-  它没谎报；是 `buildConfigField` 污染了输入。CLAUDE.md 那条旧记载已改。
-- [X] **第三方 AI 的三条错误说法**（已逐条实测证伪）：`proguard-android.txt` 已移除（实际存在
-  `-9.3.1`）／`isMinifyEnabled` 已废弃（**未标 `@Deprecated`**）／`multiDexKeepFile` 能修
-  16 个 dex（治错了病，minSdk 26 原生 multidex）。
-- [X] 继承死路见 `.handoffs/20261117152346-handoff.md` §4（头像 OSS 九条，**一条未删**）。
+- **换链接器（lld / mold / wild）** [V]——`run_linker` 仅 0.406s(宿主)/0.74s(容器)，占 0.5%。mold 最快也只省 0.54s，且 `RUSTFLAGS` 会让 301 依赖全量重编。**上限 0.7 秒**。
+- **`codegen-units` 1→16** [V]——实测 codegen **5.2s→10.4s（负收益）**；`cgu=1` 也从不是 fat LTO 的语义要求（官方文档无此说法，串行根因是合并成单 module 送一个 backend job）。
+- **`opt-level` z→s** [V]——曾出现「s 快 20%」，是 load 12+ 窗口的假象；同窗口 3×3 对照 **z 快 6%**。
+- **`lto="thin"`（Docker 路径）** [V]——同窗口 A/B：fat 113/125s vs thin 119/118s（打平）；容器内 time-passes 显示 thinlto pass 本身慢 23%。镜像 +3.2MB。
+- **Cranelift** [V]——`lto=true` 在源码里是 `sess.dcx().fatal()`，一行编不过；且 nightly-only、`opt-level="z"` 语义被丢弃、`panic=abort` 默认开。
+- **sccache / kache / Hurry** [V]——`bin` crate 结构上不缓存（crate-type 判据）；Hurry 还硬阻塞在只支持 Rust ≤1.92。
+- **Nix / Bazel / Buck2** [V]——卖点是多仓/CI/多分支产物共享，本项目一个都没有；Buck2 官方明确「还没有 release 模式机制」。
+- **parallel frontend** [V]——只加速前端 3.8s，`LLVM_fatlto` 一秒不动；未进任何 stable。
+- **升 toolchain 1.100** [V]——build-dir layout v2 只对多 features/worktree 共享有用，本项目全不适用；代价是一次性全量重编 + crater 回归 rust-lang/rust#164098。
+- **并发跑多个 agent 构建** [V]——同一配置两轮差 1.48 倍（61.6s@load4.78 vs 91.5s@load9.76）；本轮多次数据失真最高 1.5 倍，全部作废重测。
+- **`opts`/`opt3` 的全量对比** [V]——`s` 全量 177s 最慢，`3` 168s 且体积 +37.5%；方向反了。
 
 ## 5. 已知坑
-
-- ⚠️ **并发 Gradle daemon 会搞挂 WSL2** [V]——本会话实测：4~5 个 daemon × 2.84GB RSS
-  撞穿 10GB 上限，WSL2 失去响应，用户被迫重启。见 memory `concurrent-gradle-daemons-oom-wsl`。
-- ⚠️ **冷热态构建数字差 13 倍** [V]——`compileDebugKotlin` 冷 2m13s / 热 10.2s。
-  报结论必须标 daemon 温度。见 memory `cold-vs-warm-build-numbers`。
-- ⚠️ **CI 的 `gradle/actions/setup-gradle@v6` 只在 CI 环境验证过** [?]——本地无法复现；
-  已实跑通过一次，但后续若换 runner 镜像需重新确认。
-- ⚠️ **`staging` / `dev` 变体的长期维护成本未验证** [?]——每次改 `buildTypes` 要同步三处。
-  若觉得碍事可撤掉，`release` 与 `debug` 不受影响。
-- ⚠️ **`cacheKey = avatarUrl`** [?]（继承）——改 URL 形态会让全量头像缓存失效，实测重下 145 张。
-- ⚠️ **`AVATAR_SIDE = 256` 双处** [?]（继承）——`avatar_migrate.rs:116` 与 `AvatarCompress.kt:67`，
-  无编译期约束。本会话未复核。
-- ⚠️ **61 个 `avatar_version = 1` 异常值** [?]（继承）——不影响功能。
-- ⚠️ **前缀继承项** [?]：VPS 时钟慢 3 分钟 / 魅族 20 IP 会变（`.142`↔`.123`）/ `best_laps`
-  是物化快照须重算 / 覆盖重发后同版本用户收不到更新提示。
+- ⚠️ **BuildKit 默认 GC 会在 48h / 13GiB 时静默清掉 cache mount** [V]——本机 `docker buildx inspect --bootstrap` 实测 rule#0 的 Filters 含 `type==exec.cachemount`。**不需要跑任何 prune**。日常替代：`docker buildx prune --filter "type!=exec.cachemount"`。
+- ⚠️ **`--mount=type=cache` 默认 id 就是 target 路径** [V]——实测 `id "//build/target"`。已改为显式 `id=paddock-target`，避免将来被别的 Dockerfile 静默共用。
+- ⚠️ **容器 musl 路径的 linker 是 GNU ld 2.45.1，不是 rust-lld** [V]——宿主 gnu 路径才用 rust-lld。且镜像自带的 rust-lld **编译时没开 zlib**，链接本项目直接报 `ELFCOMPRESS_ZLIB` 错误。Alpine 仓库里最高只有 lld22（22.1.3，比捆绑的还旧）。
+- ⚠️ **本机构建耗时噪声底 ±5~9%** [V]——同样 load（2.11 vs 2.08）下测出 61.3s vs 66.6s。**小于 10% 的差异测不出来**，报数字必须带 load average。
+- ⚠️ **`/tmp` 是 tmpfs** [V]——构建 benchmark 的 target dir 必须放 `/home`（`/dev/sdd` 真盘），否则吃 10GB 内存上限。
+- ⚠️ 继承项（本仓，仍未复核）[?]：`cacheKey = avatarUrl` 改 URL 形态会让全量头像缓存失效；`AVATAR_SIDE = 256` 双处（`avatar_migrate.rs:116` 与 `AvatarCompress.kt:67`）；61 个 `avatar_version = 1` 异常值；VPS 时钟慢 3 分钟 / 魅族 20 IP 会变（`.142`↔`.123`）/ `best_laps` 是物化快照须重算。
 
 ## 6. 下一步（有序）
-1. **（待你决定）模块发版**：本会话的构建优化属工程内部改动，用户无感知；
-   先前两个头像 bug 修复仍待发版决策（版本号是你的决策域，当前 `1.0.5 Alpha 1` / `105110`）。
-2. **（待你决定）`dev` / `staging` 变体是否保留**——不用可撤，减少维护面。
-3. **（待你决定）初始化汇总里列的插件/文档外移项**——本会话未动。
-4. 继承待办见 `.handoffs/20261117152346-handoff.md` §6（120FPS 刷新率层 / LogExporter 段缺失
-   静默 / TG 播报提示 / 服务端发版 / 应用调教回写 / 历史研究成果回收）——**均未动**。
+1. **（待你决定）paddock 服务端发版**：本轮构建优化属工程内部改动，用户无感知，不需要单独发版；但它已推送到 `main`，下次发版自然带上。
+2. **（待你决定）模块发版**：先前两个头像 bug 修复仍待发版决策（版本号是你的决策域，当前 `1.0.5 Alpha 1` / `105110`）。
+3. **（待你决定）`dev` / `staging` 变体是否保留**——不用可撤，减少维护面。
+4. 继承待办见 `.handoffs/20261117152346-handoff.md` §6（120FPS 刷新率层 / LogExporter 段缺失静默 / TG 播报提示 / 服务端发版 / 应用调教回写 / 历史研究成果回收）——**均未动**。
 
 ## 7. 留给用户的开放问题
-- 发不发版？版本号定多少？
+- 发不发版？版本号定多少？（模块侧；paddock 侧无需单独发版）
 - `dev` / `staging` 变体要留着吗？
 - 20GB 级逆向产物要不要另做备份（`build/` 现在安全但磁盘单点）？
+- paddock 构建已到物理下限（fat LTO 86%），是否接受现状？唯一未试的方向是「放弃 fat LTO 换启动速度」，但那会牺牲运行性能，不推荐。
